@@ -74,12 +74,12 @@ class AlertStore:
         os.replace(tmp_path, self.path)  # atomic on same filesystem
 
     def _renumber_user(self, user_id: int) -> None:
-        """Ensure IDs are always 0, 1, 2, ... matching current position in the list (top-down).
+        """Ensure IDs are always 1, 2, 3, ... matching current position in the list from top (1-based for humans).
         Must be called under lock after any add/remove that changes the list length/order.
         """
         if user_id in self._data:
             for idx, alert in enumerate(self._data[user_id]):
-                alert["id"] = idx
+                alert["id"] = idx + 1
 
     def load(self) -> Dict[int, List[dict]]:
         self._ensure_loaded()
