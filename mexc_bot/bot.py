@@ -79,7 +79,7 @@ def create_bot(
 ) -> telebot.TeleBot:
     """Create and configure the Telegram bot with all handlers."""
 
-    bot = telebot.TeleBot(settings.telegram_bot_token, parse_mode=None)
+    bot = telebot.TeleBot(settings.telegram_bot_token, parse_mode="Markdown")
 
     def _reply(message, text: str):
         try:
@@ -97,13 +97,14 @@ def create_bot(
             "/a eth 2.4k sol 145   → multiple in one go\n"
             "/a PEPE 0.000012\n\n"
             "Other fast commands:\n"
-            "/l or /list     — your alerts\n"
-            "/p BTC          — current price (BTCUSDT)\n"
-            "/t 3            — toggle alert #3\n"
-            "/r 3            — remove #3\n"
-            "/s or /status   — stats\n\n"
-            "One-shot only: fires once when price is within tolerance of your target, then deletes itself.\n"
-            "No directions — just 'hit my number'."
+            "/l or /list             — your alerts\n"
+            "/p BTC                  — current price\n"
+            "/t 3 5 8                — toggle multiple IDs\n"
+            "/r 3 5 8 or /r BTCUSDT  — remove by ID(s) or symbol\n"
+            "/clearall confirm       — delete *everything*\n"
+            "/disableall             — turn all off (keep list)\n"
+            "/s or /status           — stats\n\n"
+            "Alerts are one-shot. When price is close enough, it fires once then deletes itself."
         )
         _reply(message, text)
 
@@ -146,7 +147,8 @@ def create_bot(
             _reply(message, "No alerts. Use /a BTC 65000 (super quick)")
             return
 
-        lines = ["Your Alerts (one-shot):"]
+        enabled = sum(1 for a in alerts if a.get("enabled"))
+        lines = [f"Your Alerts — {len(alerts)} total ({enabled} enabled)"]
         for a in alerts:
             status = "🟢" if a.get("enabled") else "🔴"
             lines.append(f"#{a['id']} {a['symbol']} @ ${a['price']} {status}")
@@ -158,19 +160,24 @@ def create_bot(
         user_id = message.from_user.id
         args = message.text.split()[1:]
         if not args:
-            _reply(message, "Usage: /t 3   (toggle alert #3)")
-            return
-        try:
-            aid = int(args[0])
-        except ValueError:
-            _reply(message, "ID must be a number, e.g. /t 3")
+            _reply(message, "Usage: /t 3 5 12   (toggle multiple alerts)")
             return
 
-        new_state = store.toggle_alert(user_id, aid)
-        if new_state is None:
-            _reply(message, f"#{aid} not found")
-        else:
-            _reply(message, f"#{aid} {'🟢 ON' if new_state else '🔴 OFF'}")
+        results = []
+        for arg in args:
+            try:
+                aid = int(arg)
+            except ValueError:
+                results.append(f"{arg} (not a number)")
+                continue
+
+            new_state = store.toggle_alert(user_id, aid)
+            if new_state is None:
+                results.append(f"#{aid} (not found)")
+            else:
+                results.append(f"#{aid} {'🟢 ON' if new_state else '🔴 OFF'}")
+
+        _reply(message, "Toggled: " + " | ".join(results))
 
     # ====================== REMOVE (short) ======================
     @bot.message_handler(commands=["removealert", "r", "remove", "del", "delete"])
@@ -178,18 +185,63 @@ def create_bot(
         user_id = message.from_user.id
         args = message.text.split()[1:]
         if not args:
-            _reply(message, "Usage: /r 3")
-            return
-        try:
-            aid = int(args[0])
-        except ValueError:
-            _reply(message, "ID must be number")
+            _reply(message, "Usage: /r 3 5 12   or   /r BTCUSDT")
             return
 
-        if store.remove_alert(user_id, aid):
-            _reply(message, f"🗑️ Removed #{aid}")
+        removed_total = 0
+        results = []
+
+        for arg in args:
+            # Try as alert ID
+            try:
+                aid = int(arg)
+                if store.remove_alert(user_id, aid):
+                    removed_total += 1
+                    results.append(f"#{aid}")
+                else:
+                    results.append(f"#{aid} (not found)")
+                continue
+            except ValueError:
+                pass
+
+            # Treat as symbol (case-insensitive, normalizes)
+            sym = _normalize_symbol(arg)
+            count = store.remove_alerts_by_symbol(user_id, sym)
+            if count > 0:
+                removed_total += count
+                results.append(f"{sym} ({count})")
+            else:
+                results.append(f"{sym} (none)")
+
+        if removed_total > 0:
+            _reply(message, "🗑️ Removed: " + " | ".join(results))
         else:
-            _reply(message, f"#{aid} not found")
+            _reply(message, "Nothing removed. " + " | ".join(results))
+
+    # ====================== CLEAR ALL (with safety) ======================
+    @bot.message_handler(commands=["clearall", "removeall", "clear"])
+    def cmd_clearall(message):
+        user_id = message.from_user.id
+        args = [a.lower() for a in message.text.split()[1:]]
+        if not args or "confirm" not in args:
+            count = store.count_for_user(user_id)
+            _reply(message, f"You have {count} alerts.\n\nTo *permanently delete all of them*, reply with:\n`/clearall confirm`")
+            return
+
+        alerts = store.get_user_alerts(user_id)
+        ids = [a["id"] for a in alerts]
+        removed = store.remove_alerts_by_ids(user_id, ids)
+        _reply(message, f"🗑️ *Cleared all {removed} alerts.*")
+
+    # ====================== DISABLE ALL ======================
+    @bot.message_handler(commands=["disableall"])
+    def cmd_disableall(message):
+        user_id = message.from_user.id
+        changed = store.disable_all(user_id)
+        if changed > 0:
+            _reply(message, f"Disabled {changed} alerts. They are still in your list (use /l).")
+        else:
+            _reply(message, "No enabled alerts to disable.")
 
     # ====================== STATUS (enhanced with health) ======================
     @bot.message_handler(commands=["status", "s"])

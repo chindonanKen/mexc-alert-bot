@@ -141,3 +141,51 @@ class AlertStore:
         self._ensure_loaded()
         with self._lock:
             return list(self._data.keys())
+
+    def remove_alerts_by_ids(self, user_id: int, alert_ids: List[int]) -> int:
+        """Remove multiple alerts by ID. Returns number actually removed."""
+        self._ensure_loaded()
+        if not alert_ids:
+            return 0
+        with self._lock:
+            if user_id not in self._data:
+                return 0
+            id_set = set(alert_ids)
+            before = len(self._data[user_id])
+            self._data[user_id] = [a for a in self._data[user_id] if a["id"] not in id_set]
+            removed = before - len(self._data[user_id])
+            if removed > 0:
+                self._atomic_save_locked()
+                logger.info(f"Removed {removed} alerts for user {user_id} (ids: {alert_ids})")
+            return removed
+
+    def remove_alerts_by_symbol(self, user_id: int, symbol: str) -> int:
+        """Remove all alerts for a given symbol. Returns number removed."""
+        self._ensure_loaded()
+        sym = symbol.upper()
+        with self._lock:
+            if user_id not in self._data:
+                return 0
+            before = len(self._data[user_id])
+            self._data[user_id] = [a for a in self._data[user_id] if a["symbol"] != sym]
+            removed = before - len(self._data[user_id])
+            if removed > 0:
+                self._atomic_save_locked()
+                logger.info(f"Removed {removed} alerts for user {user_id} symbol={sym}")
+            return removed
+
+    def disable_all(self, user_id: int) -> int:
+        """Disable all alerts for the user. Returns number that were changed."""
+        self._ensure_loaded()
+        with self._lock:
+            if user_id not in self._data:
+                return 0
+            changed = 0
+            for a in self._data[user_id]:
+                if a.get("enabled"):
+                    a["enabled"] = False
+                    changed += 1
+            if changed > 0:
+                self._atomic_save_locked()
+                logger.info(f"Disabled all ({changed}) alerts for user {user_id}")
+            return changed

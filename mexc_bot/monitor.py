@@ -87,14 +87,10 @@ class PriceMonitor:
                 diff_ratio = abs(current - target) / target if target != 0 else float("inf")
 
                 if diff_ratio <= tolerance:
-                    msg = (
-                        "🚨 ALERT TRIGGERED!\n\n"
-                        f"{symbol} hit ${target}\n"
-                        f"Current: ${current:.8f}\n"
-                        f"Diff: {diff_ratio * 100:.4f}% (tol {tolerance*100:.3f}%)"
-                    )
+                    # Keep it extremely minimal and scannable — just symbol + price, loud and clear
+                    msg = f"🚨 *{symbol}*\n`${current:.8f}`"
                     try:
-                        self.notifier(user_id, msg)
+                        self.notifier(user_id, msg, parse_mode="Markdown")
                         logger.info(f"Alert #{a['id']} FIRED user={user_id} {symbol} target={target} current={current}")
                         fired += 1
                     except Exception as e:

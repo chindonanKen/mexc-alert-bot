@@ -31,9 +31,9 @@ def main() -> None:
     tg_bot = create_bot(settings, store, client=client, monitor=None)
 
     # Now we can safely define the notifier (tg_bot exists)
-    def send_telegram_notification(user_id: int, text: str) -> None:
+    def send_telegram_notification(user_id: int, text: str, parse_mode: str | None = None) -> None:
         try:
-            tg_bot.send_message(user_id, text)
+            tg_bot.send_message(user_id, text, parse_mode=parse_mode)
         except Exception as e:
             logger.error(f"Failed to send Telegram message to {user_id}: {e}")
 
