@@ -10,7 +10,7 @@ import time
 from typing import Callable, Dict
 
 from .config import Settings
-from .exchange import MexcClient
+from .exchange import PriceProvider
 from .storage import AlertStore
 
 logger = logging.getLogger(__name__)
@@ -20,22 +20,25 @@ class PriceMonitor:
     """
     Efficient background monitor for one-shot price alerts.
 
+    It receives a PriceProvider (anything that can give current prices).
+    This decouples the alarm logic from the data source (REST, WebSocket, etc.).
+
     Design goals (per user request):
     - Set alert → it fires ONCE when price is hit (within tolerance band) → delete itself.
     - No direction logic for the basic system.
-    - Clean, fast, timely: batch API calls + tight loop + good resilience.
+    - Clean, fast, timely: cheap price updates + tight loop + good resilience.
     """
 
     def __init__(
         self,
         settings: Settings,
         store: AlertStore,
-        client: MexcClient,
+        price_provider: PriceProvider,
         notifier: Callable[[int, str], None],  # user_id, message
     ):
         self.settings = settings
         self.store = store
-        self.client = client
+        self.price_provider = price_provider
         self.notifier = notifier
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -57,7 +60,7 @@ class PriceMonitor:
         import time as _t
         start = _t.perf_counter()
 
-        prices: Dict[str, float] = self.client.get_all_prices()
+        prices: Dict[str, float] = self.price_provider.get_all_prices()
         if not prices:
             logger.warning("Price batch fetch returned no data this cycle — skipping checks")
             return

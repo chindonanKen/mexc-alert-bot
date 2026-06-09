@@ -11,7 +11,7 @@ from typing import List, Tuple
 import telebot
 
 from .config import Settings
-from .exchange import MexcClient
+from .exchange import PriceProvider
 from .monitor import PriceMonitor
 from .storage import AlertStore
 
@@ -74,7 +74,7 @@ def _parse_alert_pairs(args: List[str]) -> List[Tuple[str, float]]:
 def create_bot(
     settings: Settings,
     store: AlertStore,
-    client: MexcClient | None = None,
+    price_provider: PriceProvider | None = None,
     monitor: PriceMonitor | None = None,
 ) -> telebot.TeleBot:
     """Create and configure the Telegram bot with all handlers."""
@@ -277,7 +277,7 @@ def create_bot(
     # ====================== QUICK PRICE CHECK ======================
     @bot.message_handler(commands=["price", "p", "cur", "current"])
     def cmd_price(message):
-        if client is None:
+        if price_provider is None:
             _reply(message, "Price lookup not available right now.")
             return
 
@@ -287,7 +287,7 @@ def create_bot(
             return
 
         symbol = _normalize_symbol(args[0])
-        price = client.get_price(symbol)
+        price = price_provider.get_price(symbol)
         if price is None:
             _reply(message, f"Couldn't get price for {symbol}")
         else:

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .bot import create_bot
 from .config import load_settings
-from .exchange import MexcClient
+from .exchange import MexcClient, PriceProvider
 from .monitor import PriceMonitor
 from .storage import AlertStore
 
@@ -25,10 +25,10 @@ def main() -> None:
     logger.info(f"Using alerts file: {settings.alerts_file_path}")
     store = AlertStore(settings.alerts_file_path)
 
-    client = MexcClient(base_url=settings.mexc_api_base)
+    price_provider: PriceProvider = MexcClient(base_url=settings.mexc_api_base)
 
-    # Create bot first (with client for /price). We'll attach monitor after for health info in /status.
-    tg_bot = create_bot(settings, store, client=client, monitor=None)
+    # Create bot first (with price_provider for /price). We'll attach monitor after for health info in /status.
+    tg_bot = create_bot(settings, store, price_provider=price_provider, monitor=None)
 
     # Now we can safely define the notifier (tg_bot exists)
     def send_telegram_notification(user_id: int, text: str, parse_mode: str | None = None) -> None:
@@ -40,7 +40,7 @@ def main() -> None:
     monitor = PriceMonitor(
         settings=settings,
         store=store,
-        client=client,
+        price_provider=price_provider,
         notifier=send_telegram_notification,
     )
 
@@ -56,7 +56,7 @@ def main() -> None:
         logger.info("Shutdown signal received. Stopping monitor...")
         monitor.stop()
         try:
-            client.close()
+            price_provider.close()
         except Exception:
             pass
         logger.info("Goodbye.")

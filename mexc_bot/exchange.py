@@ -1,22 +1,50 @@
-"""Exchange price data adapters. MEXC public API (spot ticker).
+"""Exchange price data adapters.
 
-Key improvement: batch fetching of all prices in a single call for speed and reliability.
+Defines a small PriceProvider protocol so the monitoring and command layers
+do not depend on a specific price source (REST batch, WebSocket, futures,
+multi-exchange, etc.). This keeps the alarm logic and future expansion clean.
+
+Current implementation: MexcClient (spot, using efficient batch /ticker/price).
 """
 
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Protocol
 
 import requests
 
 logger = logging.getLogger(__name__)
 
 
-class MexcClient:
-    """Lightweight client for MEXC public ticker API.
+class PriceProvider(Protocol):
+    """Minimal interface for anything that can supply current prices.
 
-    Uses the batch /ticker/price (no symbol) endpoint which returns
-    prices for hundreds of symbols in one request. This is much faster
-    and more reliable than per-symbol calls when you have multiple alerts.
+    Implementations can be:
+    - REST batch client (current default)
+    - WebSocket push client (future, for lower CPU/latency)
+    - Futures / multi-exchange providers
+    - Test doubles
+
+    Only these three methods are required by the rest of the system.
+    """
+
+    def get_all_prices(self) -> Dict[str, float]:
+        """Return a dict of symbol -> latest price for as many symbols as possible."""
+        ...
+
+    def get_price(self, symbol: str) -> Optional[float]:
+        """Fetch a single symbol (used by /price command and fallbacks)."""
+        ...
+
+    def close(self) -> None:
+        """Release any resources (connections, etc.)."""
+        ...
+
+
+class MexcClient:
+    """MEXC spot implementation of PriceProvider.
+
+    Uses the efficient batch /ticker/price (no symbol) endpoint.
+    This is the current default and keeps CPU low even with many alerts.
     """
 
     def __init__(self, base_url: str = "https://api.mexc.com/api/v3", timeout: int = 8):
