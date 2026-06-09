@@ -24,8 +24,8 @@ class PriceMonitor:
     This decouples the alarm logic from the data source (REST, WebSocket, etc.).
 
     Design goals (per user request):
-    - Set alert → it fires ONCE when price is hit (crosses the target or lands within tolerance band) → delete itself.
-    - No direction logic for the basic system.
+    - Set alert → it fires ONCE when the price crosses the target level (either direction since last check) or lands within the tolerance band → delete itself.
+    - No direction logic in commands.
     - Clean, fast, timely: cheap price updates + tight loop + good resilience.
     """
 

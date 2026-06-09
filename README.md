@@ -8,7 +8,7 @@ Originally a single-file script running 24/7 on a Digital Ocean VPS. This is the
 
 - Set one-shot price alerts via Telegram (`/addalert SYMBOL PRICE`)
 - Supports any symbol MEXC lists (e.g. `BTCUSDT`, `SOLUSDT`, `ENAUSDT`)
-- Percentage-based tolerance (default 0.05%) — works for both low and high priced assets
+- Triggers on price crossing your target level (either direction since last check) or landing in the small tolerance band (default 0.05%). The crossing logic is the primary reliable mechanism for "price reached or passed".
 - Enable/disable individual alerts
 - List and remove alerts
 - Background price polling (configurable interval)
@@ -106,7 +106,7 @@ Stored under the Telegram `user_id` (integer key in the top-level JSON object).
 
 **Design notes:**
 - One-shot alerts (removed on fire) — kept from original behavior.
-- Tolerance is relative (`|current-target| / target <= tolerance`).
+- Crossing detection (`(prev - target) * (current - target) <= 0`) is the main way it detects when price has reached/passed your level in either direction. The tolerance band is a secondary exact-hit fallback.
 - No per-alert "direction" yet (above or below). Can be added easily.
 
 ### Extensibility Points (Planned / Easy to Add)
