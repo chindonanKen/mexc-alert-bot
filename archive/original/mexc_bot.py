@@ -10,7 +10,7 @@ import pytz
 import requests
 import telebot
 
-BOT_TOKEN = "8684563282:AAEFkf5cUWQiBKuf-HU8lQV1sPFvIJLxnmg"
+BOT_TOKEN = "REDACTED_OLD_TOKEN__ROTATE_IN_BOTFATHER_IF_EVER_USED"  # Old token was exposed in early versions - rotate if necessary
 TIMEZONE = pytz.timezone('Asia/Singapore')
 ALERTS_FILE = "price_alerts.json"
 MEXC_API = "https://api.mexc.com/api/v3/ticker/price"
