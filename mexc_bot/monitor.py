@@ -24,7 +24,7 @@ class PriceMonitor:
     This decouples the alarm logic from the data source (REST, WebSocket, etc.).
 
     Design goals (per user request):
-    - Set alert → it fires ONCE when price is hit (within tolerance band) → delete itself.
+    - Set alert → it fires ONCE when price is hit (crosses the target or lands within tolerance band) → delete itself.
     - No direction logic for the basic system.
     - Clean, fast, timely: cheap price updates + tight loop + good resilience.
     """
@@ -44,6 +44,7 @@ class PriceMonitor:
         self._thread: threading.Thread | None = None
         self._last_poll_ms: int = 0
         self._last_success: float = 0.0  # monotonic time of last good batch
+        self._last_prices: dict[tuple[int, int], float] = {}  # (user_id, visual_alert_id) -> last seen price for crossing detection
 
     def get_health(self) -> Dict[str, float | int | bool]:
         """Lightweight health info for /status."""
@@ -89,23 +90,40 @@ class PriceMonitor:
                 checked += 1
                 tolerance = self.settings.alert_tolerance_percent
                 diff_ratio = abs(current - target) / target if target != 0 else float("inf")
+                within_band = diff_ratio <= tolerance
 
-                if diff_ratio <= tolerance:
+                # Crossing detection: fire if price crossed the target since last poll.
+                # This makes "reached/travelled up to the price" much more reliable
+                # than only the tiny tolerance band (which is easy to jump over).
+                crossed = False
+                key = (user_id, a["id"])
+                if key in self._last_prices:
+                    prev = self._last_prices[key]
+                    if (prev - target) * (current - target) <= 0:  # sign change or touched the level
+                        crossed = True
+
+                if within_band or crossed:
                     # Keep it extremely minimal and scannable — just symbol + price, loud and clear
                     msg = f"🚨 *{symbol}*\n`${current:.8f}`"
                     try:
                         self.notifier(user_id, msg, parse_mode="Markdown")
-                        logger.info(f"Alert #{a['id']} FIRED user={user_id} {symbol} target={target} current={current}")
+                        trigger_reason = "band" if within_band else "crossed"
+                        logger.info(f"Alert #{a['id']} FIRED user={user_id} {symbol} target={target} current={current} (reason: {trigger_reason})")
                         fired += 1
                         fired_ids.append(a["id"])
                     except Exception as e:
                         logger.error(f"Failed sending alert #{a['id']}: {e}")
                         # Do not remove if we couldn't notify — will retry next cycle
+                        self._last_prices[key] = current  # still update last seen
                         continue
+
+                self._last_prices[key] = current  # update for next cycle's crossing detection
 
             # Remove all that fired for this user in one go (after snapshot, avoids renumber shift issues)
             if fired_ids:
                 self.store.remove_alerts_by_ids(user_id, fired_ids)
+                for fid in fired_ids:
+                    self._last_prices.pop((user_id, fid), None)
 
         elapsed_ms = int((_t.perf_counter() - start) * 1000)
         self._last_poll_ms = elapsed_ms
