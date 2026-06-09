@@ -136,20 +136,19 @@ def create_bot(
                 logger.error(f"Failed adding alert for {symbol}: {e}")
                 errors.append(symbol)
 
-        # Send success message(s) - clear and concise, symbol + price stand out
+        # Extremely simple and honest feedback
         if successes:
             if len(successes) == 1:
                 aid, sym, pr = successes[0]
-                _reply(message, f"✅ *{sym}* @ `${pr}`   (#{aid})")
+                _reply(message, f"✅ Created: {sym} @ ${pr} (#{aid})")
             else:
-                lines = ["✅ Added:"]
+                lines = ["✅ Created:"]
                 for aid, sym, pr in successes:
-                    lines.append(f"#{aid} *{sym}* @ `${pr}`")
+                    lines.append(f"  {sym} @ ${pr} (#{aid})")
                 _reply(message, "\n".join(lines))
 
-        # Separate clear error message (no misleading ✅)
         if errors:
-            _reply(message, "❌ Could not add: " + ", ".join(errors))
+            _reply(message, "❌ Failed to create alert for: " + ", ".join(errors))
 
     # ====================== LIST (short) ======================
     @bot.message_handler(commands=["listalerts", "l", "list", "alerts"])
