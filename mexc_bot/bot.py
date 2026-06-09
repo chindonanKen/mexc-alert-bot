@@ -188,35 +188,31 @@ def create_bot(
             _reply(message, "Usage: /r 3 5 12   or   /r BTCUSDT")
             return
 
-        removed_total = 0
-        results = []
+        # Snapshot current state so we can map symbols to their *current* ids
+        # without shift issues when mixing IDs and symbols or multiple removes.
+        current_alerts = store.get_user_alerts(user_id)
+        id_to_symbol = {a["id"]: a["symbol"] for a in current_alerts}
 
+        to_remove_ids: set[int] = set()
         for arg in args:
-            # Try as alert ID
             try:
-                aid = int(arg)
-                if store.remove_alert(user_id, aid):
-                    removed_total += 1
-                    results.append(f"#{aid}")
-                else:
-                    results.append(f"#{aid} (not found)")
+                to_remove_ids.add(int(arg))
                 continue
             except ValueError:
                 pass
 
-            # Treat as symbol (case-insensitive, normalizes)
+            # Symbol: add all current ids that match this symbol
             sym = _normalize_symbol(arg)
-            count = store.remove_alerts_by_symbol(user_id, sym)
-            if count > 0:
-                removed_total += count
-                results.append(f"{sym} ({count})")
-            else:
-                results.append(f"{sym} (none)")
+            for aid, ss in id_to_symbol.items():
+                if ss == sym:
+                    to_remove_ids.add(aid)
 
-        if removed_total > 0:
-            _reply(message, "🗑️ Removed: " + " | ".join(results))
-        else:
-            _reply(message, "Nothing removed. " + " | ".join(results))
+        if not to_remove_ids:
+            _reply(message, "Nothing to remove.")
+            return
+
+        removed = store.remove_alerts_by_ids(user_id, list(to_remove_ids))
+        _reply(message, f"🗑️ Removed {removed} alert(s). (based on positions/symbols at time of command)")
 
     # ====================== CLEAR ALL (with safety) ======================
     @bot.message_handler(commands=["clearall", "removeall", "clear"])

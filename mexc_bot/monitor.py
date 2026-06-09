@@ -70,6 +70,7 @@ class PriceMonitor:
 
         for user_id in user_ids:
             alerts = self.store.get_user_alerts(user_id)
+            fired_ids: list[int] = []
             for a in alerts:
                 if not a.get("enabled"):
                     continue
@@ -93,13 +94,15 @@ class PriceMonitor:
                         self.notifier(user_id, msg, parse_mode="Markdown")
                         logger.info(f"Alert #{a['id']} FIRED user={user_id} {symbol} target={target} current={current}")
                         fired += 1
+                        fired_ids.append(a["id"])
                     except Exception as e:
                         logger.error(f"Failed sending alert #{a['id']}: {e}")
                         # Do not remove if we couldn't notify — will retry next cycle
                         continue
 
-                    # One-shot: remove only after successful notification
-                    self.store.remove_alert(user_id, a["id"])
+            # Remove all that fired for this user in one go (after snapshot, avoids renumber shift issues)
+            if fired_ids:
+                self.store.remove_alerts_by_ids(user_id, fired_ids)
 
         elapsed_ms = int((_t.perf_counter() - start) * 1000)
         self._last_poll_ms = elapsed_ms

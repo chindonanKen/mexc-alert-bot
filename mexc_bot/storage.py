@@ -50,6 +50,9 @@ class AlertStore:
                 raw = json.load(f)
             # Keys are stored as strings in JSON; convert back to int
             self._data = {int(k): v for k, v in raw.items()}
+            # Renumber on load so IDs always match current positions (0-based from top)
+            for uid in list(self._data.keys()):
+                self._renumber_user(uid)
             logger.info(f"Loaded alerts for {len(self._data)} user(s) from {self.path}")
         except Exception as e:
             logger.error(f"Failed to load alerts file: {e}. Starting empty.")
@@ -69,6 +72,14 @@ class AlertStore:
             json.dump(serializable, tmp, indent=2)
             tmp_path = tmp.name
         os.replace(tmp_path, self.path)  # atomic on same filesystem
+
+    def _renumber_user(self, user_id: int) -> None:
+        """Ensure IDs are always 0, 1, 2, ... matching current position in the list (top-down).
+        Must be called under lock after any add/remove that changes the list length/order.
+        """
+        if user_id in self._data:
+            for idx, alert in enumerate(self._data[user_id]):
+                alert["id"] = idx
 
     def load(self) -> Dict[int, List[dict]]:
         self._ensure_loaded()
@@ -93,19 +104,19 @@ class AlertStore:
                 self._data[user_id] = []
 
             user_alerts = self._data[user_id]
-            # Compute next id (max + 1, or 0)
-            next_id = max((a["id"] for a in user_alerts), default=-1) + 1
 
             alert = {
-                "id": next_id,
+                "id": -1,  # placeholder, will be set by renumber
                 "symbol": symbol.upper(),
                 "price": float(price),
                 "enabled": True,
             }
             user_alerts.append(alert)
+            self._renumber_user(user_id)
+            new_id = user_alerts[-1]["id"]  # now the last position
             self._atomic_save_locked()
-            logger.info(f"Added alert #{next_id} for user {user_id}: {symbol} @ {price}")
-            return next_id
+            logger.info(f"Added alert #{new_id} for user {user_id}: {symbol} @ {price}")
+            return new_id
 
     def remove_alert(self, user_id: int, alert_id: int) -> bool:
         self._ensure_loaded()
@@ -115,6 +126,7 @@ class AlertStore:
             before = len(self._data[user_id])
             self._data[user_id] = [a for a in self._data[user_id] if a["id"] != alert_id]
             if len(self._data[user_id]) < before:
+                self._renumber_user(user_id)
                 self._atomic_save_locked()
                 logger.info(f"Removed alert #{alert_id} for user {user_id}")
                 return True
@@ -155,6 +167,7 @@ class AlertStore:
             self._data[user_id] = [a for a in self._data[user_id] if a["id"] not in id_set]
             removed = before - len(self._data[user_id])
             if removed > 0:
+                self._renumber_user(user_id)
                 self._atomic_save_locked()
                 logger.info(f"Removed {removed} alerts for user {user_id} (ids: {alert_ids})")
             return removed
@@ -170,6 +183,7 @@ class AlertStore:
             self._data[user_id] = [a for a in self._data[user_id] if a["symbol"] != sym]
             removed = before - len(self._data[user_id])
             if removed > 0:
+                self._renumber_user(user_id)
                 self._atomic_save_locked()
                 logger.info(f"Removed {removed} alerts for user {user_id} symbol={sym}")
             return removed
