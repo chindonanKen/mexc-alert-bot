@@ -140,7 +140,7 @@ def create_bot(
         if successes:
             if len(successes) == 1:
                 aid, sym, pr = successes[0]
-                _reply(message, f"✅ Created (test-build-1): {sym} @ ${pr} (#{aid})")
+                _reply(message, f"✅ Created: {sym} @ ${pr} (#{aid})")
             else:
                 lines = ["✅ Created:"]
                 for aid, sym, pr in successes:

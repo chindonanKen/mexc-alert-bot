@@ -25,13 +25,6 @@ def main() -> None:
     logger.info(f"Using alerts file: {settings.alerts_file_path}")
     store = AlertStore(settings.alerts_file_path)
 
-    # Helpful for debugging persistence across updates/restarts
-    try:
-        total_alerts = sum(store.count_for_user(uid) for uid in store.get_all_user_ids())
-        logger.info(f"AlertStore initialized. Total alerts currently in DB: {total_alerts}")
-    except Exception as e:
-        logger.warning(f"Could not count alerts at startup: {e}")
-
     client = MexcClient(base_url=settings.mexc_api_base)
 
     # Create bot first (with client for /price). We'll attach monitor after for health info in /status.
