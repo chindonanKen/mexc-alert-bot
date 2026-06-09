@@ -104,6 +104,8 @@ def create_bot(
             "/clearall confirm       — delete *everything*\n"
             "/disableall             — turn all off (keep list)\n"
             "/s or /status           — stats\n\n"
+            "Alert numbers (#) are *always* the current position from the top of /l (1-based, no gaps).\n"
+            "If you remove something above, the numbers below shift down automatically.\n"
             "Alerts are one-shot. When price is close enough, it fires once then deletes itself."
         )
         _reply(message, text)
