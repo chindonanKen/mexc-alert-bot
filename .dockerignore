@@ -2,7 +2,8 @@
 .git
 .gitignore
 .env
-.env.*
+.env.local
+!.env.example
 *.md
 data/
 !data/.gitkeep
