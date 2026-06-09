@@ -37,12 +37,30 @@ class AlertStore:
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(
-                self.path,
-                check_same_thread=False,  # we serialize with our own lock
-                isolation_level=None,     # we control transactions manually
-            )
-            self._conn.row_factory = sqlite3.Row
+            try:
+                self._conn = sqlite3.connect(
+                    self.path,
+                    check_same_thread=False,  # we serialize with our own lock
+                    isolation_level=None,     # we control transactions manually
+                )
+                self._conn.row_factory = sqlite3.Row
+            except sqlite3.OperationalError as e:
+                # This is almost always a permission problem when running in Docker
+                # because the volume is owned by root on the host but the container
+                # runs as non-root (appuser).
+                msg = (
+                    f"Failed to open SQLite database at {self.path}\n"
+                    f"Original error: {e}\n\n"
+                    "This is usually a file permission issue inside Docker.\n"
+                    "On your VPS host, run:\n"
+                    "    cd ~/mexc-alert-bot\n"
+                    "    mkdir -p data\n"
+                    "    chown -R 1000:1000 data     # or the uid of appuser inside the container\n"
+                    "    chmod 755 data\n"
+                    "Then: docker compose up -d --build\n"
+                )
+                logger.error(msg)
+                raise RuntimeError(msg) from e
         return self._conn
 
     def _init_db(self):
