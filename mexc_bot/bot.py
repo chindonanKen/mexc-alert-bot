@@ -126,19 +126,30 @@ def create_bot(
             _reply(message, "Couldn't parse. Try: /a BTC 65000   or   /a eth 2.4k")
             return
 
-        created = []
+        successes = []
+        errors = []
         for symbol, price in pairs:
             try:
                 aid = store.add_alert(user_id, symbol, price)
-                created.append(f"#{aid} {symbol} @ ${price}")
+                successes.append((aid, symbol, price))
             except Exception as e:
                 logger.error(f"Failed adding alert for {symbol}: {e}")
-                created.append(f"ERROR {symbol}")
+                errors.append(symbol)
 
-        if len(created) == 1:
-            _reply(message, f"✅ {created[0]}")
-        else:
-            _reply(message, "✅ Added:\n" + "\n".join(created))
+        # Send success message(s) - clear and concise, symbol + price stand out
+        if successes:
+            if len(successes) == 1:
+                aid, sym, pr = successes[0]
+                _reply(message, f"✅ *{sym}* @ `${pr}`   (#{aid})")
+            else:
+                lines = ["✅ Added:"]
+                for aid, sym, pr in successes:
+                    lines.append(f"#{aid} *{sym}* @ `${pr}`")
+                _reply(message, "\n".join(lines))
+
+        # Separate clear error message (no misleading ✅)
+        if errors:
+            _reply(message, "❌ Could not add: " + ", ".join(errors))
 
     # ====================== LIST (short) ======================
     @bot.message_handler(commands=["listalerts", "l", "list", "alerts"])
