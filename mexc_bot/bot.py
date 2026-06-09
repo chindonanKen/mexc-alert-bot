@@ -106,7 +106,7 @@ def create_bot(
             "/s or /status           — stats\n\n"
             "Alert numbers (#) are *always* the current position from the top of /l (1-based, no gaps).\n"
             "If you remove something above, the numbers below shift down automatically.\n"
-            "Alerts are one-shot. When price is close enough, it fires once then deletes itself."
+            "Alerts are one-shot: fires once when the price crosses your target (either direction since last check) or lands in the tolerance band, then removes itself."
         )
         _reply(message, text)
 
