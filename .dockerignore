@@ -1,0 +1,20 @@
+# Docker build context exclusions
+.git
+.gitignore
+.env
+.env.*
+*.md
+data/
+!data/.gitkeep
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.log
+.venv/
+venv/
+*.swp
+.DS_Store
+price_alerts.json
+mexc_bot.py

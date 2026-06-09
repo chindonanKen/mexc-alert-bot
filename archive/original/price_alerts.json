@@ -1,0 +1,46 @@
+{
+  "8630949601": [
+    {
+      "id": 0,
+      "symbol": "BUSDT",
+      "price": 0.5,
+      "enabled": true
+    },
+    {
+      "id": 3,
+      "symbol": "ENA",
+      "price": 0.175,
+      "enabled": true
+    },
+    {
+      "id": 4,
+      "symbol": "ENAUSDT",
+      "price": 0.175,
+      "enabled": true
+    },
+    {
+      "id": 4,
+      "symbol": "CHIPUSDT",
+      "price": 0.465,
+      "enabled": true
+    },
+    {
+      "id": 5,
+      "symbol": "SKYAIUSDT",
+      "price": 0.9844,
+      "enabled": true
+    },
+    {
+      "id": 6,
+      "symbol": "ORCA",
+      "price": 1.266,
+      "enabled": true
+    },
+    {
+      "id": 7,
+      "symbol": "FHEUSDT",
+      "price": 0.03155,
+      "enabled": true
+    }
+  ]
+}

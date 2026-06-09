@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  mexc-bot:
+    build: .
+    container_name: mexc-alert-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Persist alerts across container restarts/updates
+      - ./data:/app/data
+    # Optional: expose nothing (pure outbound + Telegram long-poll)
+    # If you later add a small HTTP health server, uncomment:
+    # ports:
+    #   - "8080:8080"
+    healthcheck:
+      # Simple process check; improve later with an HTTP endpoint if desired
+      test: ["CMD", "python", "-c", "import os,sys; sys.exit(0 if os.path.exists('/app/data/alerts.json') else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
