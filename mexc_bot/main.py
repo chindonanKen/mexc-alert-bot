@@ -27,9 +27,10 @@ def main() -> None:
 
     client = MexcClient(base_url=settings.mexc_api_base)
 
-    # Create Telegram bot first so we can pass send_message as notifier
-    tg_bot = create_bot(settings, store)
+    # Create bot first (with client for /price). We'll attach monitor after for health info in /status.
+    tg_bot = create_bot(settings, store, client=client, monitor=None)
 
+    # Now we can safely define the notifier (tg_bot exists)
     def send_telegram_notification(user_id: int, text: str) -> None:
         try:
             tg_bot.send_message(user_id, text)
@@ -42,6 +43,9 @@ def main() -> None:
         client=client,
         notifier=send_telegram_notification,
     )
+
+    # Attach for /status health (the status handler checks for it)
+    tg_bot._monitor_ref = monitor  # type: ignore[attr-defined]
 
     # Start price monitor in background
     monitor.start()

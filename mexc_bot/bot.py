@@ -1,17 +1,82 @@
-"""Telegram bot interface and command handlers."""
+"""Telegram bot interface and command handlers.
+
+Focus: dead-simple and fast alert creation.
+Short aliases everywhere. Smart parsing so you can type quickly.
+"""
 
 import logging
-from typing import Optional
+import re
+from typing import List, Tuple
 
 import telebot
 
 from .config import Settings
+from .exchange import MexcClient
+from .monitor import PriceMonitor
 from .storage import AlertStore
 
 logger = logging.getLogger(__name__)
 
+# Common quote suffixes we auto-append for lazy typing (BTC → BTCUSDT)
+COMMON_QUOTES = ("USDT", "USDC", "BTC", "ETH", "BUSD", "FDUSD")
 
-def create_bot(settings: Settings, store: AlertStore) -> telebot.TeleBot:
+# Price suffix parsing: 65000, 65k, 2.45k, 1.2m, 0.00045 etc.
+PRICE_RE = re.compile(r"^([0-9]*\.?[0-9]+)\s*([kKmM])?$")
+
+
+def _parse_price(value: str) -> float | None:
+    """Support 65000, 65k, 2.4k, 1.2m etc."""
+    v = value.strip().lower().replace(",", "")
+    m = PRICE_RE.match(v)
+    if not m:
+        return None
+    num = float(m.group(1))
+    suffix = m.group(2)
+    if suffix == "k":
+        num *= 1000
+    elif suffix == "m":
+        num *= 1_000_000
+    return num
+
+
+def _normalize_symbol(raw: str) -> str:
+    """Uppercase + smart USDT suffix if it looks like a bare base asset."""
+    s = raw.strip().upper().replace("-", "").replace("/", "").replace(" ", "")
+    if not s:
+        return s
+    # Already has a quote suffix?
+    for q in COMMON_QUOTES:
+        if s.endswith(q) and len(s) > len(q):
+            return s
+    # Looks like bare base (letters only, no numbers at end usually) → append USDT
+    if s.isalpha() or (s[:-1].isalpha() and s[-1].isdigit()):  # e.g. PEPE2
+        return s + "USDT"
+    return s
+
+
+def _parse_alert_pairs(args: List[str]) -> List[Tuple[str, float]]:
+    """Turn ['BTC', '65000', 'eth', '2.4k'] into [('BTCUSDT', 65000.0), ('ETHUSDT', 2400.0)]"""
+    pairs: List[Tuple[str, float]] = []
+    i = 0
+    while i < len(args):
+        if i + 1 >= len(args):
+            break
+        sym_raw = args[i]
+        price_raw = args[i + 1]
+        symbol = _normalize_symbol(sym_raw)
+        price = _parse_price(price_raw)
+        if price is not None and symbol:
+            pairs.append((symbol, price))
+        i += 2
+    return pairs
+
+
+def create_bot(
+    settings: Settings,
+    store: AlertStore,
+    client: MexcClient | None = None,
+    monitor: PriceMonitor | None = None,
+) -> telebot.TeleBot:
     """Create and configure the Telegram bot with all handlers."""
 
     bot = telebot.TeleBot(settings.telegram_bot_token, parse_mode=None)
@@ -22,104 +87,155 @@ def create_bot(settings: Settings, store: AlertStore) -> telebot.TeleBot:
         except Exception as e:
             logger.warning(f"Failed to reply to user {message.from_user.id}: {e}")
 
+    # ====================== HELP / START ======================
     @bot.message_handler(commands=["start", "help"])
     def cmd_start(message):
         text = (
-            "MEXC Alert Bot\n\n"
-            "Commands:\n"
-            "/addalert SYMBOL PRICE   — e.g. /addalert BTCUSDT 65000\n"
-            "/listalerts              — show your alerts\n"
-            "/togglealert ID          — enable/disable an alert\n"
-            "/removealert ID          — delete an alert\n"
-            "/status                  — quick stats\n\n"
-            "Alerts are one-shot: they fire once when price is within tolerance and are then removed."
+            "MEXC Alert Bot — fast & simple\n\n"
+            "Quick add (recommended):\n"
+            "/a BTC 65000          → BTCUSDT @ 65000\n"
+            "/a eth 2.4k sol 145   → multiple in one go\n"
+            "/a PEPE 0.000012\n\n"
+            "Other fast commands:\n"
+            "/l or /list     — your alerts\n"
+            "/p BTC          — current price (BTCUSDT)\n"
+            "/t 3            — toggle alert #3\n"
+            "/r 3            — remove #3\n"
+            "/s or /status   — stats\n\n"
+            "One-shot only: fires once when price is within tolerance of your target, then deletes itself.\n"
+            "No directions — just 'hit my number'."
         )
         _reply(message, text)
 
-    @bot.message_handler(commands=["addalert"])
+    # ====================== FAST ADD ======================
+    @bot.message_handler(commands=["addalert", "a", "add", "alert"])
     def cmd_addalert(message):
         user_id = message.from_user.id
         args = message.text.split()[1:]
-        if len(args) != 2:
-            _reply(message, "Usage: /addalert SYMBOL PRICE\nExample: /addalert ETHUSDT 2450.5")
-            return
-        symbol = args[0].upper()
-        try:
-            price = float(args[1])
-        except ValueError:
-            _reply(message, "Price must be a number.")
+
+        if not args:
+            _reply(message, "Quick usage:\n/a BTC 65000\n/a eth 2450 sol 140\n/a PEPE 0.00001")
             return
 
-        alert_id = store.add_alert(user_id, symbol, price)
-        _reply(message, f"✅ Alert #{alert_id} created: {symbol} @ ${price}")
+        pairs = _parse_alert_pairs(args)
 
-    @bot.message_handler(commands=["listalerts"])
+        if not pairs:
+            _reply(message, "Couldn't parse. Try: /a BTC 65000   or   /a eth 2.4k")
+            return
+
+        created = []
+        for symbol, price in pairs:
+            try:
+                aid = store.add_alert(user_id, symbol, price)
+                created.append(f"#{aid} {symbol} @ ${price}")
+            except Exception as e:
+                logger.error(f"Failed adding alert for {symbol}: {e}")
+                created.append(f"ERROR {symbol}")
+
+        if len(created) == 1:
+            _reply(message, f"✅ {created[0]}")
+        else:
+            _reply(message, "✅ Added:\n" + "\n".join(created))
+
+    # ====================== LIST (short) ======================
+    @bot.message_handler(commands=["listalerts", "l", "list", "alerts"])
     def cmd_listalerts(message):
         user_id = message.from_user.id
         alerts = store.get_user_alerts(user_id)
         if not alerts:
-            _reply(message, "No alerts set. Use /addalert SYMBOL PRICE")
+            _reply(message, "No alerts. Use /a BTC 65000 (super quick)")
             return
 
-        lines = ["Your Alerts:"]
+        lines = ["Your Alerts (one-shot):"]
         for a in alerts:
-            status = "🟢 ON" if a.get("enabled") else "🔴 OFF"
-            lines.append(f"#{a['id']}  {a['symbol']} @ ${a['price']}  [{status}]")
+            status = "🟢" if a.get("enabled") else "🔴"
+            lines.append(f"#{a['id']} {a['symbol']} @ ${a['price']} {status}")
         _reply(message, "\n".join(lines))
 
-    @bot.message_handler(commands=["togglealert"])
+    # ====================== TOGGLE (short) ======================
+    @bot.message_handler(commands=["togglealert", "t", "toggle"])
     def cmd_togglealert(message):
         user_id = message.from_user.id
         args = message.text.split()[1:]
         if not args:
-            _reply(message, "Usage: /togglealert ID")
+            _reply(message, "Usage: /t 3   (toggle alert #3)")
             return
         try:
             aid = int(args[0])
         except ValueError:
-            _reply(message, "Alert ID must be an integer.")
+            _reply(message, "ID must be a number, e.g. /t 3")
             return
 
         new_state = store.toggle_alert(user_id, aid)
         if new_state is None:
-            _reply(message, f"Alert #{aid} not found.")
+            _reply(message, f"#{aid} not found")
         else:
-            state_str = "ENABLED 🟢" if new_state else "DISABLED 🔴"
-            _reply(message, f"Alert #{aid} is now {state_str}")
+            _reply(message, f"#{aid} {'🟢 ON' if new_state else '🔴 OFF'}")
 
-    @bot.message_handler(commands=["removealert"])
+    # ====================== REMOVE (short) ======================
+    @bot.message_handler(commands=["removealert", "r", "remove", "del", "delete"])
     def cmd_removealert(message):
         user_id = message.from_user.id
         args = message.text.split()[1:]
         if not args:
-            _reply(message, "Usage: /removealert ID")
+            _reply(message, "Usage: /r 3")
             return
         try:
             aid = int(args[0])
         except ValueError:
-            _reply(message, "Alert ID must be an integer.")
+            _reply(message, "ID must be number")
             return
 
         if store.remove_alert(user_id, aid):
-            _reply(message, f"🗑️ Removed alert #{aid}")
+            _reply(message, f"🗑️ Removed #{aid}")
         else:
-            _reply(message, f"Alert #{aid} not found.")
+            _reply(message, f"#{aid} not found")
 
-    @bot.message_handler(commands=["status"])
+    # ====================== STATUS (enhanced with health) ======================
+    @bot.message_handler(commands=["status", "s"])
     def cmd_status(message):
         user_id = message.from_user.id
         count = store.count_for_user(user_id)
         total_users = len(store.get_all_user_ids())
+
+        health_line = ""
+        mon = monitor or getattr(bot, "_monitor_ref", None)
+        if mon is not None:
+            try:
+                h = mon.get_health()
+                health_line = f"\nLast poll: {h.get('last_poll_ms', '?')}ms | since success: {h.get('seconds_since_last_success', 0):.0f}s"
+            except Exception:
+                pass
+
         _reply(
             message,
-            f"Alerts for you: {count}\n"
-            f"Bot is running.\n"
-            f"Total users with alerts: {total_users}"
+            f"You have {count} alert(s)\n"
+            f"Bot running. Total users: {total_users}{health_line}\n"
+            f"Tolerance: {settings.alert_tolerance_percent*100:.3f}%"
         )
 
-    # Catch-all for unknown commands (optional nicety)
+    # ====================== QUICK PRICE CHECK ======================
+    @bot.message_handler(commands=["price", "p", "cur", "current"])
+    def cmd_price(message):
+        if client is None:
+            _reply(message, "Price lookup not available right now.")
+            return
+
+        args = message.text.split()[1:]
+        if not args:
+            _reply(message, "Usage: /p BTC   or /p ETHUSDT")
+            return
+
+        symbol = _normalize_symbol(args[0])
+        price = client.get_price(symbol)
+        if price is None:
+            _reply(message, f"Couldn't get price for {symbol}")
+        else:
+            _reply(message, f"{symbol}: ${price:.8f}")
+
+    # Catch-all unknown
     @bot.message_handler(func=lambda m: m.text and m.text.startswith("/"))
     def cmd_unknown(message):
-        _reply(message, "Unknown command. Try /start or /help.")
+        _reply(message, "Unknown. Try /help or just /a BTC 65000 (fastest)")
 
     return bot
