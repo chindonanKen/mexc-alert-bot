@@ -104,7 +104,7 @@ class PriceMonitor:
 
                 if within_band or crossed:
                     # Keep it extremely minimal and scannable — just symbol + price, loud and clear
-                    msg = f"🚨 *{symbol}*\n`${current:.8f}`"
+                    msg = f"🚨 *{symbol}*\nTarget: ${target}\n`${current:.8f}`"
                     try:
                         self.notifier(user_id, msg, parse_mode="Markdown")
                         trigger_reason = "band" if within_band else "crossed"
