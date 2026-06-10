@@ -93,7 +93,7 @@ def create_bot(
         text = (
             "MEXC Alert Bot — fast & simple\n\n"
             "Quick add (recommended):\n"
-            "/a BTC 65000          → BTCUSDT @ 65000 (replaces any previous for BTCUSDT)\n"
+            "/a BTC 65000          → BTCUSDT @ 65000\n"
             "/a eth 2.4k sol 145   → multiple in one go\n"
             "/a PEPE 0.000012\n\n"
             "Other fast commands:\n"
@@ -130,9 +130,6 @@ def create_bot(
         errors = []
         for symbol, price in pairs:
             try:
-                # Replace any existing alert(s) for the same symbol with the new one
-                # This prevents duplicate/conflicting targets for the same coin, which has caused confusion in the past.
-                store.remove_alerts_by_symbol(user_id, symbol)
                 aid = store.add_alert(user_id, symbol, price)
                 successes.append((aid, symbol, price))
             except Exception as e:
