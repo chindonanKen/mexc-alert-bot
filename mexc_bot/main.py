@@ -1,6 +1,7 @@
 """Application entrypoint. Wires everything together and starts the bot + monitor."""
 
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
@@ -11,11 +12,15 @@ from .exchange import MexcClient, PriceProvider
 from .monitor import PriceMonitor
 from .storage import AlertStore
 
+_log_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+_log_level = getattr(logging, _log_level_name, logging.INFO)
 logging.basicConfig(
-    level=logging.INFO,
+    level=_log_level,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+if _log_level <= logging.DEBUG:
+    logger.info("Logging level set to DEBUG (or lower) via LOG_LEVEL; per-alert decisions (prev/current/target/band/crossed) will be logged in monitor _check_once for easy diagnosis of fires.")
 
 
 def main() -> None:

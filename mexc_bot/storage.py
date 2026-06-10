@@ -1,4 +1,4 @@
-"""Alert storage layer. Currently JSON file backed with basic concurrency safety."""
+"""Alert storage layer. SQLite-backed (with migration from legacy JSON) + in-memory caches for visuals/ranks + RLock for thread safety across bot commands + monitor thread."""
 
 import json
 import logging
@@ -289,6 +289,47 @@ class AlertStore:
             logger.info(f"Removed {len(to_delete)} alerts for user {user_id} (visual ids: {visual_ids})")
             self._invalidate_caches(user_id)
             return len(to_delete)
+
+    def remove_alerts_by_stable_ids(self, user_id: int, stable_ids: List[int]) -> int:
+        """Remove by internal DB PKs (stable_ids). Used by monitor for fired alerts to target exact rows
+        from decision-time snapshot, immune to visual rank shifts from concurrent bot removes or prior fires.
+        """
+        if not stable_ids:
+            return 0
+        with self._lock:
+            conn = self._get_conn()
+            with conn:
+                placeholders = ",".join("?" * len(stable_ids))
+                cur = conn.execute(
+                    f"DELETE FROM alerts WHERE user_id = ? AND id IN ({placeholders})",
+                    [user_id] + stable_ids
+                )
+            removed = cur.rowcount
+            if removed > 0:
+                logger.info(f"Removed {removed} alerts for user {user_id} (by stable_ids: {stable_ids})")
+                self._invalidate_caches(user_id)
+            return removed
+
+    def remove_alerts_by_stable_ids(self, user_id: int, stable_ids: List[int]) -> int:
+        """Remove by internal DB PKs (stable_ids). Used by monitor for fired alerts to target exact rows
+        from decision-time snapshot, immune to visual rank shifts from concurrent bot removes or prior fires.
+        """
+        if not stable_ids:
+            return 0
+        with self._lock:
+            to_delete = [int(sid) for sid in stable_ids]
+            conn = self._get_conn()
+            with conn:
+                placeholders = ",".join("?" * len(to_delete))
+                cur = conn.execute(
+                    f"DELETE FROM alerts WHERE user_id = ? AND id IN ({placeholders})",
+                    [user_id] + to_delete
+                )
+            removed = cur.rowcount
+            if removed > 0:
+                logger.info(f"Removed {removed} alerts for user {user_id} (stable ids: {stable_ids})")
+                self._invalidate_caches(user_id)
+            return removed
 
     def remove_alerts_by_symbol(self, user_id: int, symbol: str) -> int:
         with self._lock:

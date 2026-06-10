@@ -104,7 +104,8 @@ def create_bot(
             "/r 3 5 8 or /r BTCUSDT  — remove by ID(s) or symbol\n"
             "/clearall confirm       — delete *everything*\n"
             "/disableall             — turn all off (keep list)\n"
-            "/s or /status           — stats\n\n"
+            "/s or /status           — stats\n"
+            "/d or /diag or /debug   — debug state (visuals vs DB stables, tracked last_prices for crossing)\n\n"
             "Alert numbers (#) are *always* the current position from the top of /l (1-based, no gaps).\n"
             "If you remove something above, the numbers below shift down automatically.\n"
             "Alerts are one-shot: fires once when the price crosses your target (either direction since last check) or lands in the tolerance band, then removes itself."
@@ -264,7 +265,10 @@ def create_bot(
         if mon is not None:
             try:
                 h = mon.get_health()
-                health_line = f"\nLast poll: {h.get('last_poll_ms', '?')}ms | since success: {h.get('seconds_since_last_success', 0):.0f}s"
+                health_line = (
+                    f"\nLast poll: {h.get('last_poll_ms', '?')}ms | since success: {h.get('seconds_since_last_success', 0):.0f}s"
+                    f" | tracked_last_prices: {h.get('tracked_last_prices', '?')}"
+                )
             except Exception:
                 pass
 
@@ -274,6 +278,28 @@ def create_bot(
             f"Bot running. Total users: {total_users}{health_line}\n"
             f"Tolerance: {settings.alert_tolerance_percent*100:.3f}%"
         )
+
+    # ====================== DIAG / DEBUG (for state, ranks vs stables, last_prices history) ======================
+    # Helps diagnose fires, shifts, crossing decisions. Set LOG_LEVEL=DEBUG for per-alert logs in monitor.
+    @bot.message_handler(commands=["diag", "debug", "d"])
+    def cmd_diag(message):
+        user_id = message.from_user.id
+        alerts = store.get_user_alerts(user_id)
+        mon = monitor or getattr(bot, "_monitor_ref", None)
+        debug = {}
+        if mon is not None:
+            try:
+                debug = mon.get_user_debug_info(user_id)
+            except Exception as e:
+                debug = {"error": str(e)}
+        lines = [f"Diag for you (user={user_id}):"]
+        lines.append(f"Current alerts in store: {len(alerts)}")
+        for a in alerts:
+            lines.append(f"  visual#{a['id']} stable={a.get('stable_id','?')} {a['symbol']}@{a['price']} en={a.get('enabled')}")
+        if debug:
+            lines.append(f"tracked last_prices (by stable): {debug.get('last_prices_by_stable', {})}")
+            lines.append(f"note: {debug.get('note', '')}")
+        _reply(message, "\n".join(lines))
 
     # ====================== QUICK PRICE CHECK ======================
     @bot.message_handler(commands=["price", "p", "cur", "current"])
