@@ -222,6 +222,29 @@ def test_mover_does_not_touch_alerts_table():
         print("PASS: mover store mutations leave target alerts intact")
 
 
+def test_mover_watchlist_remove_and_add():
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "alerts.db"
+        mstore = MoverStore(path)
+        u = 11
+        mstore.set_watchlist(
+            u,
+            [
+                {"symbol": "BTC_USDT", "market": "futures"},
+                {"symbol": "ETH_USDT", "market": "futures"},
+                {"symbol": "SOL_USDT", "market": "futures"},
+            ],
+        )
+        n = mstore.remove_from_watchlist(u, ["ETH_USDT", "ETHUSDT"])
+        assert n >= 1
+        left = {i["symbol"] for i in mstore.get_watchlist(u)}
+        assert left == {"BTC_USDT", "SOL_USDT"}
+        mstore.add_watchlist(u, "DOGE_USDT", "futures")
+        left2 = {i["symbol"] for i in mstore.get_watchlist(u)}
+        assert "DOGE_USDT" in left2
+        print("PASS: mover watchlist remove + add")
+
+
 if __name__ == "__main__":
     test_symbol_normalization()
     test_existing_spot_alerts_default_market()
@@ -230,4 +253,5 @@ if __name__ == "__main__":
     test_mover_history_downside_pct()
     test_mover_scanner_downside_only_and_cooldown()
     test_mover_does_not_touch_alerts_table()
+    test_mover_watchlist_remove_and_add()
     print("All V3 tests passed.")

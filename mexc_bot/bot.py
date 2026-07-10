@@ -127,8 +127,10 @@ def create_bot(
                     "/movers on | off",
                     "/movers set 5 15        → 5% down in 15 minutes",
                     "/movers list",
-                    "/mw BTC ETH SOL         → futures watchlist",
-                    "/mw clear",
+                    "/mw BTC ETH SOL         → replace futures watchlist",
+                    "/mw add BTC ETH         → add to watchlist",
+                    "/mw remove BTC          → remove symbol(s)",
+                    "/mw clear               → empty watchlist",
                 ]
             )
         lines.extend(
@@ -536,15 +538,93 @@ def create_bot(
             user_id = message.from_user.id
             args = message.text.split()[1:]
             if not args:
-                _reply(message, "Usage: /mw BTC ETH SOL\n/mw clear\n(default market: futures)")
+                _reply(
+                    message,
+                    "Watchlist usage:\n"
+                    "/mw BTC ETH SOL     — replace list (futures)\n"
+                    "/mw add BTC ETH     — add without wiping others\n"
+                    "/mw remove BTC ETH  — remove symbol(s)\n"
+                    "/mw r BTC           — same as remove\n"
+                    "/mw clear           — empty list\n"
+                    "/movers list        — show list",
+                )
                 return
-            if args[0].lower() in ("clear", "reset", "none"):
+
+            sub = args[0].lower()
+
+            if sub in ("clear", "reset", "none"):
                 n = mover_store.clear_watchlist(user_id)
                 _reply(message, f"Watchlist cleared ({n} removed).")
                 return
 
+            if sub in ("remove", "rm", "r", "del", "delete", "-"):
+                rest = args[1:]
+                if not rest:
+                    _reply(message, "Usage: /mw remove BTC ETH\nOr: /mw r SOL")
+                    return
+                # Optional market: /mw remove f BTC  or  /mw remove s BTC
+                market_filter = None
+                if rest[0].lower() in ("f", "fut", "futures", "perp"):
+                    market_filter = "futures"
+                    rest = rest[1:]
+                elif rest[0].lower() in ("s", "spot"):
+                    market_filter = "spot"
+                    rest = rest[1:]
+                if not rest:
+                    _reply(message, "Provide symbol(s) to remove. Example: /mw remove BTC")
+                    return
+                # Normalize each token both ways so BTC and BTC_USDT both match
+                to_remove: list[str] = []
+                for raw in rest:
+                    to_remove.append(normalize_futures_symbol(raw))
+                    to_remove.append(normalize_spot_symbol(raw))
+                    to_remove.append(raw.strip().upper())
+                # unique preserve order
+                seen = set()
+                uniq = []
+                for s in to_remove:
+                    if s and s not in seen:
+                        seen.add(s)
+                        uniq.append(s)
+                n = mover_store.remove_from_watchlist(user_id, uniq, market=market_filter)
+                wl = mover_store.get_watchlist(user_id)
+                left = ", ".join(i["symbol"] for i in wl) if wl else "(empty)"
+                _reply(message, f"Removed {n} watchlist row(s).\nLeft: {left}")
+                return
+
+            if sub in ("add", "+", "append"):
+                rest = args[1:]
+                market = "futures"
+                if rest and rest[0].lower() in ("f", "fut", "futures", "perp"):
+                    market = "futures"
+                    rest = rest[1:]
+                elif rest and rest[0].lower() in ("s", "spot"):
+                    market = "spot"
+                    rest = rest[1:]
+                if not rest:
+                    _reply(message, "Usage: /mw add BTC ETH")
+                    return
+                added = []
+                for raw in rest:
+                    sym = (
+                        normalize_futures_symbol(raw)
+                        if market == "futures"
+                        else normalize_spot_symbol(raw)
+                    )
+                    if sym:
+                        mover_store.add_watchlist(user_id, sym, market=market)
+                        added.append(sym)
+                wl = mover_store.get_watchlist(user_id)
+                left = ", ".join(i["symbol"] for i in wl) if wl else "(empty)"
+                _reply(
+                    message,
+                    f"Added {len(added)} [{_market_tag(market)}]: {', '.join(added)}\n"
+                    f"Full list: {left}",
+                )
+                return
+
+            # Default: replace entire list
             market = "futures"
-            # Optional first token: f|s|futures|spot
             if args[0].lower() in ("f", "fut", "futures", "perp"):
                 market = "futures"
                 args = args[1:]
@@ -566,7 +646,7 @@ def create_bot(
                     items.append({"symbol": sym, "market": market})
             n = mover_store.set_watchlist(user_id, items)
             shown = ", ".join(f"{i['symbol']}" for i in items)
-            _reply(message, f"Watchlist set ({n}) [{_market_tag(market)}]: {shown}")
+            _reply(message, f"Watchlist replaced ({n}) [{_market_tag(market)}]: {shown}")
 
     # Catch-all unknown
     @bot.message_handler(func=lambda m: m.text and m.text.startswith("/"))

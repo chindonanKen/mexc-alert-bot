@@ -171,6 +171,33 @@ class MoverStore:
                 (user_id, symbol.upper(), market.lower()),
             )
 
+    def remove_from_watchlist(
+        self,
+        user_id: int,
+        symbols: List[str],
+        market: Optional[str] = None,
+    ) -> int:
+        """Remove one or more symbols. If market is None, remove that symbol on any market."""
+        if not symbols:
+            return 0
+        with self._lock:
+            conn = self._get_conn()
+            removed = 0
+            for raw in symbols:
+                sym = str(raw).upper()
+                if market:
+                    cur = conn.execute(
+                        "DELETE FROM mover_watchlist WHERE user_id = ? AND symbol = ? AND market = ?",
+                        (user_id, sym, market.lower()),
+                    )
+                else:
+                    cur = conn.execute(
+                        "DELETE FROM mover_watchlist WHERE user_id = ? AND symbol = ?",
+                        (user_id, sym),
+                    )
+                removed += cur.rowcount
+            return removed
+
     def clear_watchlist(self, user_id: int) -> int:
         with self._lock:
             conn = self._get_conn()
