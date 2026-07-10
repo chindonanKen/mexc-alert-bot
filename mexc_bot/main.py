@@ -1,14 +1,17 @@
-"""Application entrypoint. Wires everything together and starts the bot + monitor."""
+"""Application entrypoint. Wires everything together and starts the bot + monitor.
+
+V3 features (futures target alerts, downside movers) are opt-in via env flags
+defaulting to OFF so production V1 behavior is preserved until you enable them.
+"""
 
 import logging
 import os
 import signal
 import sys
-from pathlib import Path
 
 from .bot import create_bot
 from .config import load_settings
-from .exchange import MexcClient, PriceProvider
+from .exchange import MexcClient, MexcFuturesClient, PriceProvider
 from .monitor import PriceMonitor
 from .storage import AlertStore
 
@@ -20,22 +23,57 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 if _log_level <= logging.DEBUG:
-    logger.info("Logging level set to DEBUG (or lower) via LOG_LEVEL; per-alert decisions (prev/current/target/band/crossed) will be logged in monitor _check_once for easy diagnosis of fires.")
+    logger.info(
+        "Logging level set to DEBUG (or lower) via LOG_LEVEL; per-alert decisions "
+        "(prev/current/target/band/crossed) will be logged in monitor _check_once "
+        "for easy diagnosis of fires."
+    )
 
 
 def main() -> None:
     logger.info("Loading settings...")
     settings = load_settings()
+    logger.info(
+        "Feature flags: futures_alerts=%s mover_scanner=%s",
+        settings.feature_futures_alerts,
+        settings.feature_mover_scanner,
+    )
 
     logger.info(f"Using alerts file: {settings.alerts_file_path}")
     store = AlertStore(settings.alerts_file_path)
 
     price_provider: PriceProvider = MexcClient(base_url=settings.mexc_api_base)
 
-    # Create bot first (with price_provider for /price). We'll attach monitor after for health info in /status.
-    tg_bot = create_bot(settings, store, price_provider=price_provider, monitor=None)
+    futures_provider: PriceProvider | None = None
+    if settings.feature_futures_alerts or settings.feature_mover_scanner:
+        # Movers may need futures even when futures target-alerts are off.
+        need_futures = (
+            settings.feature_futures_alerts
+            or settings.mover_markets in ("futures", "both")
+        )
+        if need_futures:
+            futures_provider = MexcFuturesClient(base_url=settings.mexc_futures_api_base)
+            logger.info("Futures price client ready (%s)", settings.mexc_futures_api_base)
 
-    # Now we can safely define the notifier (tg_bot exists)
+    mover_store = None
+    mover_scanner = None
+    if settings.feature_mover_scanner:
+        from .movers import MoverScanner, MoverStore
+
+        mover_store = MoverStore(settings.alerts_file_path)
+        logger.info("Mover store ready (tables in same DB file, separate from alerts)")
+
+    # Create bot first (with price_provider for /price). Attach monitor after.
+    tg_bot = create_bot(
+        settings,
+        store,
+        price_provider=price_provider,
+        monitor=None,
+        futures_provider=futures_provider if settings.feature_futures_alerts else None,
+        mover_store=mover_store,
+        mover_scanner=None,
+    )
+
     def send_telegram_notification(user_id: int, text: str, parse_mode: str | None = None) -> None:
         try:
             tg_bot.send_message(user_id, text, parse_mode=parse_mode)
@@ -47,23 +85,44 @@ def main() -> None:
         store=store,
         price_provider=price_provider,
         notifier=send_telegram_notification,
+        futures_provider=futures_provider if settings.feature_futures_alerts else None,
     )
 
-    # Attach for /status health (the status handler checks for it)
     tg_bot._monitor_ref = monitor  # type: ignore[attr-defined]
 
-    # Start price monitor in background
+    if settings.feature_mover_scanner and mover_store is not None:
+        from .movers import MoverScanner
+
+        mover_scanner = MoverScanner(
+            settings=settings,
+            mover_store=mover_store,
+            notifier=send_telegram_notification,
+            spot_provider=price_provider if settings.mover_markets in ("spot", "both") else None,
+            futures_provider=futures_provider if settings.mover_markets in ("futures", "both") else None,
+        )
+        tg_bot._mover_scanner_ref = mover_scanner  # type: ignore[attr-defined]
+
+    # Start background workers
     monitor.start()
     logger.info("Price monitor thread started")
+    if mover_scanner is not None:
+        mover_scanner.start()
+        logger.info("Mover scanner thread started")
 
-    # Graceful shutdown handling
     def _shutdown(signum=None, frame=None):
-        logger.info("Shutdown signal received. Stopping monitor...")
+        logger.info("Shutdown signal received. Stopping workers...")
         monitor.stop()
+        if mover_scanner is not None:
+            mover_scanner.stop()
         try:
             price_provider.close()
         except Exception:
             pass
+        if futures_provider is not None:
+            try:
+                futures_provider.close()
+            except Exception:
+                pass
         logger.info("Goodbye.")
         sys.exit(0)
 
@@ -71,13 +130,14 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _shutdown)
 
     logger.info("Starting Telegram bot polling...")
-    # This blocks forever (pyTelegramBotAPI polling)
     try:
         tg_bot.polling(non_stop=True, skip_pending=True)
     except KeyboardInterrupt:
         _shutdown()
     finally:
         monitor.stop()
+        if mover_scanner is not None:
+            mover_scanner.stop()
 
 
 if __name__ == "__main__":

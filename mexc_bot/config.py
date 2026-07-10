@@ -7,6 +7,13 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass(frozen=True)
 class Settings:
     """Application settings loaded from environment variables."""
@@ -18,7 +25,20 @@ class Settings:
     mexc_api_base: str
     alerts_file: Path
 
-    # Derived
+    # V3 feature flags (default OFF — production V1 path unchanged until explicitly enabled)
+    feature_futures_alerts: bool
+    feature_mover_scanner: bool
+
+    # Futures price API (public contract market data)
+    mexc_futures_api_base: str
+
+    # Downside mover scanner defaults (per-user settings can override threshold/lookback)
+    mover_lookback_seconds: int
+    mover_threshold_percent: float
+    mover_poll_seconds: int
+    mover_cooldown_seconds: int
+    mover_markets: str  # "futures" | "spot" | "both"
+
     @property
     def alerts_file_path(self) -> Path:
         return self.alerts_file
@@ -41,6 +61,14 @@ def load_settings() -> Settings:
     mexc_base = os.getenv("MEXC_API_BASE", "https://api.mexc.com/api/v3").rstrip("/")
     alerts_path = Path(os.getenv("ALERTS_FILE", "data/alerts.json"))
 
+    futures_base = os.getenv(
+        "MEXC_FUTURES_API_BASE", "https://contract.mexc.com/api/v1"
+    ).rstrip("/")
+
+    mover_markets = os.getenv("MOVER_MARKETS", "futures").strip().lower()
+    if mover_markets not in ("futures", "spot", "both"):
+        mover_markets = "futures"
+
     # Ensure parent dir exists
     alerts_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -51,4 +79,12 @@ def load_settings() -> Settings:
         price_poll_interval_seconds=poll_interval,
         mexc_api_base=mexc_base,
         alerts_file=alerts_path,
+        feature_futures_alerts=_env_bool("FEATURE_FUTURES_ALERTS", False),
+        feature_mover_scanner=_env_bool("FEATURE_MOVER_SCANNER", False),
+        mexc_futures_api_base=futures_base,
+        mover_lookback_seconds=int(os.getenv("MOVER_LOOKBACK_SECONDS", "900")),
+        mover_threshold_percent=float(os.getenv("MOVER_THRESHOLD_PERCENT", "5")),
+        mover_poll_seconds=int(os.getenv("MOVER_POLL_SECONDS", "15")),
+        mover_cooldown_seconds=int(os.getenv("MOVER_COOLDOWN_SECONDS", "1800")),
+        mover_markets=mover_markets,
     )

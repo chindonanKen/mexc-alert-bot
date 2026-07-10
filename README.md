@@ -13,8 +13,25 @@ Originally a single-file script running 24/7 on a Digital Ocean VPS. This is the
 - List and remove alerts
 - Background price polling (configurable interval)
 - Alerts are removed automatically after they trigger
-- JSON file persistence (easy to backup/inspect)
-- Dockerized for reliable deployment and zero-downtime updates
+- SQLite persistence (with JSON migration) + Dockerized deploy
+
+### V3 (opt-in, default OFF)
+
+Feature flags keep production V1 behavior until you enable them:
+
+| Flag | Feature |
+|------|---------|
+| `FEATURE_FUTURES_ALERTS=true` | Futures one-shot targets via `/af BTC 65000` (MEXC contract book) |
+| `FEATURE_MOVER_SCANNER=true` | Downside % movers (`/movers`, `/mw`) over 10–15 min, watchlist + cooldown |
+
+**Do not enable on production until staging is verified.** See [docs/V3_TESTING_AND_PROMOTION.md](docs/V3_TESTING_AND_PROMOTION.md).
+
+Staging service (separate data volume):
+
+```bash
+cp .env.staging.example .env.staging   # second BotFather token
+docker compose --profile staging up -d --build mexc-bot-staging
+```
 
 ## Quick Start (Local)
 

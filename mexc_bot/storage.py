@@ -96,6 +96,23 @@ class AlertStore:
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user ON alerts (user_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_user_symbol ON alerts (user_id, symbol)")
+        # V3 additive migration: market column ('spot' | 'futures'). Existing rows → spot.
+        self._ensure_market_column(conn)
+
+    def _ensure_market_column(self, conn: sqlite3.Connection) -> None:
+        """Add market column if missing. Safe on every startup; no data rewrite."""
+        cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(alerts)").fetchall()
+        }
+        if "market" not in cols:
+            conn.execute(
+                "ALTER TABLE alerts ADD COLUMN market TEXT NOT NULL DEFAULT 'spot'"
+            )
+            logger.info("Added alerts.market column (default 'spot') — existing alerts unchanged")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_market ON alerts (user_id, market)"
+        )
 
     def _invalidate_caches(self, user_id: Optional[int] = None) -> None:
         """Invalidate in-memory caches after mutations so next reads are fresh."""
@@ -145,19 +162,23 @@ class AlertStore:
         """Return alerts for user with 'id' set to current 1-based visual position."""
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT id as stable_id, symbol, price, enabled FROM alerts "
+            "SELECT id as stable_id, symbol, price, enabled, market FROM alerts "
             "WHERE user_id = ? ORDER BY id ASC",
             (user_id,)
         ).fetchall()
 
         result = []
         for rank, row in enumerate(rows, 1):  # 1-based visual id
+            market = (row["market"] or "spot").lower()
+            if market not in ("spot", "futures"):
+                market = "spot"
             result.append({
                 "id": rank,                    # what the user sees and types in /r /t
                 "stable_id": row["stable_id"], # internal DB key
                 "symbol": row["symbol"],
                 "price": float(row["price"]),
                 "enabled": bool(row["enabled"]),
+                "market": market,
             })
         return result
 
@@ -194,15 +215,28 @@ class AlertStore:
             self._visual_cache[user_id] = visuals
             return [a.copy() for a in visuals]
 
-    def add_alert(self, user_id: int, symbol: str, price: float) -> int:
-        """Add a new alert. Returns the *visual* id (current rank in the user's list)."""
+    def add_alert(
+        self,
+        user_id: int,
+        symbol: str,
+        price: float,
+        market: str = "spot",
+    ) -> int:
+        """Add a new alert. Returns the *visual* id (current rank in the user's list).
+
+        market: 'spot' (default, V1 behavior) or 'futures'. Existing callers omit market → spot.
+        """
+        mkt = (market or "spot").strip().lower()
+        if mkt not in ("spot", "futures"):
+            mkt = "spot"
         with self._lock:
             conn = self._get_conn()
             try:
                 with conn:
                     cur = conn.execute(
-                        "INSERT INTO alerts (user_id, symbol, price, enabled) VALUES (?, ?, ?, 1)",
-                        (user_id, symbol.upper(), float(price))
+                        "INSERT INTO alerts (user_id, symbol, price, enabled, market) "
+                        "VALUES (?, ?, ?, 1, ?)",
+                        (user_id, symbol.upper(), float(price), mkt),
                     )
                     stable_id = cur.lastrowid
 
@@ -213,7 +247,10 @@ class AlertStore:
                     (user_id, stable_id)
                 ).fetchone()[0]
 
-                logger.info(f"Added alert (visual #{rank}) for user {user_id}: {symbol} @ {price}")
+                logger.info(
+                    f"Added alert (visual #{rank}) for user {user_id}: "
+                    f"{symbol} @ {price} market={mkt}"
+                )
                 self._invalidate_caches(user_id)
                 return rank
             except Exception as e:
@@ -297,26 +334,6 @@ class AlertStore:
         if not stable_ids:
             return 0
         with self._lock:
-            conn = self._get_conn()
-            with conn:
-                placeholders = ",".join("?" * len(stable_ids))
-                cur = conn.execute(
-                    f"DELETE FROM alerts WHERE user_id = ? AND id IN ({placeholders})",
-                    [user_id] + stable_ids
-                )
-            removed = cur.rowcount
-            if removed > 0:
-                logger.info(f"Removed {removed} alerts for user {user_id} (by stable_ids: {stable_ids})")
-                self._invalidate_caches(user_id)
-            return removed
-
-    def remove_alerts_by_stable_ids(self, user_id: int, stable_ids: List[int]) -> int:
-        """Remove by internal DB PKs (stable_ids). Used by monitor for fired alerts to target exact rows
-        from decision-time snapshot, immune to visual rank shifts from concurrent bot removes or prior fires.
-        """
-        if not stable_ids:
-            return 0
-        with self._lock:
             to_delete = [int(sid) for sid in stable_ids]
             conn = self._get_conn()
             with conn:
@@ -330,6 +347,15 @@ class AlertStore:
                 logger.info(f"Removed {removed} alerts for user {user_id} (stable ids: {stable_ids})")
                 self._invalidate_caches(user_id)
             return removed
+
+    def has_any_futures_alerts(self) -> bool:
+        """True if any enabled futures target-alerts exist (used to skip futures fetch when unused)."""
+        with self._lock:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT 1 FROM alerts WHERE market = 'futures' AND enabled = 1 LIMIT 1"
+            ).fetchone()
+            return row is not None
 
     def remove_alerts_by_symbol(self, user_id: int, symbol: str) -> int:
         with self._lock:
