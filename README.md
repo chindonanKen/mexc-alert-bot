@@ -2,6 +2,8 @@
 
 Telegram bot that watches MEXC exchange prices and sends you instant alerts when a crypto hits your target price.
 
+**For agents & contributors:** see **[AGENTS.md](AGENTS.md)** — architecture, flags, commands, safety rules, and how not to break live alerts.
+
 Originally a single-file script running 24/7 on a Digital Ocean VPS. This is the restructured, production-ready version with proper architecture, configuration, and deployment tooling.
 
 ## Current Features
