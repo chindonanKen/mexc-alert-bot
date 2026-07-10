@@ -78,11 +78,14 @@ def create_bot(
 ) -> telebot.TeleBot:
     """Create and configure the Telegram bot with all handlers."""
 
-    bot = telebot.TeleBot(settings.telegram_bot_token, parse_mode="Markdown")
+    # No default parse_mode. Telegram Markdown treats "_" as italic, which breaks
+    # futures symbols like BTC_USDT and long help text (400 can't parse entities).
+    # Command replies = plain text. Alert fires use HTML in monitor/movers.
+    bot = telebot.TeleBot(settings.telegram_bot_token, parse_mode=None)
 
     def _reply(message, text: str):
         try:
-            bot.reply_to(message, text)
+            bot.reply_to(message, text, parse_mode=None)
         except Exception as e:
             logger.warning(f"Failed to reply to user {message.from_user.id}: {e}")
 
@@ -101,7 +104,7 @@ def create_bot(
             "/p BTC                  — current spot price",
             "/t 3 5 8                — toggle multiple IDs",
             "/r 3 5 8 or /r BTCUSDT  — remove by ID(s) or symbol",
-            "/clearall confirm       — delete *everything*",
+            "/clearall confirm       — delete everything",
             "/disableall             — turn all off (keep list)",
             "/s or /status           — stats",
             "/d or /diag or /debug   — debug state",
@@ -111,7 +114,7 @@ def create_bot(
                 [
                     "",
                     "Futures (V3):",
-                    "/af BTC 65000           → futures BTC_USDT @ 65000",
+                    "/af BTC 65000           → futures BTC-USDT perp @ 65000",
                     "/af eth 2.4k sol 145    → multiple futures",
                     "/p f BTC                → current futures price",
                 ]
@@ -131,7 +134,7 @@ def create_bot(
         lines.extend(
             [
                 "",
-                "Alert numbers (#) are *always* the current position from the top of /l (1-based, no gaps).",
+                "Alert numbers (#) are always the current position from the top of /l (1-based, no gaps).",
                 "If you remove something above, the numbers below shift down automatically.",
                 "Target alerts are one-shot: fire once on cross/band, then remove themselves.",
             ]
@@ -299,13 +302,18 @@ def create_bot(
         args = [a.lower() for a in message.text.split()[1:]]
         if not args or "confirm" not in args:
             count = store.count_for_user(user_id)
-            _reply(message, f"You have {count} alerts.\n\nTo *permanently delete all of them*, reply with:\n`/clearall confirm`")
+            _reply(
+                message,
+                f"You have {count} alerts.\n\n"
+                f"To permanently delete all of them, reply with:\n"
+                f"/clearall confirm",
+            )
             return
 
         alerts = store.get_user_alerts(user_id)
         ids = [a["id"] for a in alerts]
         removed = store.remove_alerts_by_ids(user_id, ids)
-        _reply(message, f"🗑️ *Cleared all {removed} alerts.*")
+        _reply(message, f"🗑️ Cleared all {removed} alerts.")
 
     # ====================== DISABLE ALL ======================
     @bot.message_handler(commands=["disableall"])

@@ -170,13 +170,16 @@ class MoverScanner:
                 pct = change * 100.0
                 minutes = int(lookback // 60)
                 tag = "F" if market == "futures" else "S"
+                # HTML — safe with underscores in futures symbols (BTC_USDT)
+                import html as _html
+                sym_e = _html.escape(symbol)
                 msg = (
-                    f"📉 *MOVER* [{tag}]\n"
-                    f"*{symbol}*  {pct:.1f}% in {minutes}m\n"
-                    f"Was `${then_price:.8g}` → now `${price_now:.8g}`"
+                    f"📉 <b>MOVER</b> [{tag}]\n"
+                    f"<b>{sym_e}</b>  {pct:.1f}% in {minutes}m\n"
+                    f"Was <code>{then_price:.8g}</code> → now <code>{price_now:.8g}</code>"
                 )
                 try:
-                    self.notifier(user_id, msg, parse_mode="Markdown")
+                    self.notifier(user_id, msg, parse_mode="HTML")
                     self._set_cooldown(user_id, market, symbol)
                     self._fires_total += 1
                     fired += 1

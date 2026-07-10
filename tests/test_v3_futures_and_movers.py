@@ -105,6 +105,7 @@ def test_futures_alert_isolated_price_book():
         assert len(fired) == 1, f"expected 1 futures fire, got {fired}"
         assert "BTC_USDT" in fired[0][1]
         assert "[F]" in fired[0][1]
+        assert "<b>" in fired[0][1]  # HTML parse mode (safe for underscores)
 
         remaining = store.get_user_alerts(u)
         assert len(remaining) == 1

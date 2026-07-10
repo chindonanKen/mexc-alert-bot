@@ -169,10 +169,17 @@ class PriceMonitor:
                 )
 
                 if within_band or crossed:
+                    # HTML — safe with futures symbols that contain underscores (BTC_USDT)
+                    import html as _html
                     tag = "F" if market == "futures" else "S"
-                    msg = f"🚨 *{symbol}* [{tag}]\nTarget: ${target}\n`${current:.8f}`"
+                    sym_e = _html.escape(symbol)
+                    msg = (
+                        f"🚨 <b>{sym_e}</b> [{tag}]\n"
+                        f"Target: ${_html.escape(str(target))}\n"
+                        f"<code>{current:.8f}</code>"
+                    )
                     try:
-                        self.notifier(user_id, msg, parse_mode="Markdown")
+                        self.notifier(user_id, msg, parse_mode="HTML")
                         trigger_reason = "band" if within_band else "crossed"
                         logger.info(
                             f"Alert #{a['id']} (stable={a['stable_id']}) FIRED user={user_id} "
