@@ -69,15 +69,33 @@ class MoverScanner:
         }
 
     def _markets_to_scan(self) -> Set[str]:
-        m = (self.settings.mover_markets or "futures").lower()
-        if m == "both":
-            return {"spot", "futures"}
+        """Markets needed by enabled users' watchlists (spot and/or futures can mix).
+
+        Falls back to MOVER_MARKETS config when nobody is enabled / lists are empty.
+        """
+        needed: Set[str] = set()
+        try:
+            for uid in self.mover_store.get_enabled_users():
+                for it in self.mover_store.get_watchlist(uid):
+                    m = str(it.get("market") or "futures").lower()
+                    if m in ("spot", "futures"):
+                        needed.add(m)
+        except Exception as e:
+            logger.warning(f"Could not read watchlist markets: {e}")
+
+        if needed:
+            return needed
+
+        # Idle fallback from env (for warm-up / empty state)
+        m = (self.settings.mover_markets or "both").lower()
         if m == "spot":
             return {"spot"}
-        return {"futures"}
+        if m == "futures":
+            return {"futures"}
+        return {"spot", "futures"}
 
     def _fetch_prices(self) -> Dict[str, Dict[str, float]]:
-        """Return {market: {symbol: price}} for configured markets."""
+        """Return {market: {symbol: price}} for markets actually on watchlists."""
         out: Dict[str, Dict[str, float]] = {}
         markets = self._markets_to_scan()
         if "spot" in markets and self.spot_provider is not None:
@@ -86,12 +104,16 @@ class MoverScanner:
             except Exception as e:
                 logger.warning(f"Mover spot fetch failed: {e}")
                 out["spot"] = {}
+        elif "spot" in markets and self.spot_provider is None:
+            logger.warning("Watchlist has spot symbols but spot_provider is not attached")
         if "futures" in markets and self.futures_provider is not None:
             try:
                 out["futures"] = self.futures_provider.get_all_prices() or {}
             except Exception as e:
                 logger.warning(f"Mover futures fetch failed: {e}")
                 out["futures"] = {}
+        elif "futures" in markets and self.futures_provider is None:
+            logger.warning("Watchlist has futures symbols but futures_provider is not attached")
         return out
 
     def _record_all(self, prices_by_market: Dict[str, Dict[str, float]], now: float) -> None:

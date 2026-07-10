@@ -65,9 +65,11 @@ def load_settings() -> Settings:
         "MEXC_FUTURES_API_BASE", "https://contract.mexc.com/api/v1"
     ).rstrip("/")
 
-    mover_markets = os.getenv("MOVER_MARKETS", "futures").strip().lower()
+    # Default "both" so mixed spot+futures watchlists work out of the box.
+    # Scanner still only *fetches* markets that appear on enabled users' lists.
+    mover_markets = os.getenv("MOVER_MARKETS", "both").strip().lower()
     if mover_markets not in ("futures", "spot", "both"):
-        mover_markets = "futures"
+        mover_markets = "both"
 
     # Ensure parent dir exists
     alerts_path.parent.mkdir(parents=True, exist_ok=True)

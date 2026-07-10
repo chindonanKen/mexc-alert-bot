@@ -46,14 +46,10 @@ def main() -> None:
 
     futures_provider: PriceProvider | None = None
     if settings.feature_futures_alerts or settings.feature_mover_scanner:
-        # Movers may need futures even when futures target-alerts are off.
-        need_futures = (
-            settings.feature_futures_alerts
-            or settings.mover_markets in ("futures", "both")
-        )
-        if need_futures:
-            futures_provider = MexcFuturesClient(base_url=settings.mexc_futures_api_base)
-            logger.info("Futures price client ready (%s)", settings.mexc_futures_api_base)
+        # Always attach futures client when either V3 feature is on so mixed
+        # mover watchlists (spot + futures) and /p f /af work without env surprises.
+        futures_provider = MexcFuturesClient(base_url=settings.mexc_futures_api_base)
+        logger.info("Futures price client ready (%s)", settings.mexc_futures_api_base)
 
     mover_store = None
     mover_scanner = None
@@ -97,8 +93,9 @@ def main() -> None:
             settings=settings,
             mover_store=mover_store,
             notifier=send_telegram_notification,
-            spot_provider=price_provider if settings.mover_markets in ("spot", "both") else None,
-            futures_provider=futures_provider if settings.mover_markets in ("futures", "both") else None,
+            # Always attach both books — scanner only fetches markets present on watchlists.
+            spot_provider=price_provider,
+            futures_provider=futures_provider,
         )
         tg_bot._mover_scanner_ref = mover_scanner  # type: ignore[attr-defined]
 
