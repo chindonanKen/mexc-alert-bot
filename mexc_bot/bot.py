@@ -13,7 +13,12 @@ from typing import List, Optional, Tuple
 import telebot
 
 from .config import Settings
-from .exchange import PriceProvider, normalize_futures_symbol, normalize_spot_symbol
+from .exchange import (
+    PriceProvider,
+    normalize_futures_symbol,
+    normalize_spot_symbol,
+    resolve_futures_symbol,
+)
 from .monitor import PriceMonitor
 from .storage import AlertStore
 
@@ -43,24 +48,65 @@ def _normalize_symbol(raw: str) -> str:
     return normalize_spot_symbol(raw)
 
 
-def _parse_alert_pairs(args: List[str], market: str = "spot") -> List[Tuple[str, float]]:
-    """Turn ['BTC', '65000', 'eth', '2.4k'] into symbol/price pairs for the given market."""
+def _resolve_futures(raw: str, futures_provider: PriceProvider | None) -> str | None:
+    """Resolve user input to a live futures contract when possible."""
+    if futures_provider is not None and hasattr(futures_provider, "resolve_symbol"):
+        try:
+            resolved = futures_provider.resolve_symbol(raw)  # type: ignore[attr-defined]
+            if resolved:
+                return str(resolved).upper()
+        except Exception as e:
+            logger.warning(f"futures resolve_symbol failed for {raw!r}: {e}")
+    # Offline fallback (no live book): crypto-style BASE_USDT only
+    return normalize_futures_symbol(raw) or None
+
+
+def _parse_alert_pairs(
+    args: List[str],
+    market: str = "spot",
+    futures_provider: PriceProvider | None = None,
+) -> Tuple[List[Tuple[str, float]], List[str]]:
+    """Turn args into symbol/price pairs.
+
+    Returns (success_pairs, failed_symbol_raws).
+    Futures symbols are resolved against the live contract list when possible.
+    """
     pairs: List[Tuple[str, float]] = []
+    failed: List[str] = []
     i = 0
     while i < len(args):
         if i + 1 >= len(args):
             break
         sym_raw = args[i]
         price_raw = args[i + 1]
+        price = _parse_price(price_raw)
+        if price is None:
+            failed.append(sym_raw)
+            i += 2
+            continue
         if market == "futures":
-            symbol = normalize_futures_symbol(sym_raw)
+            symbol = _resolve_futures(sym_raw, futures_provider)
+            if not symbol:
+                failed.append(sym_raw)
+                i += 2
+                continue
+            # If we have a live provider, require the symbol to actually price
+            if futures_provider is not None and hasattr(futures_provider, "resolve_symbol"):
+                # re-check: normalize-only fallback may invent FOO_USDT that does not exist
+                live = futures_provider.resolve_symbol(sym_raw)  # type: ignore[attr-defined]
+                if not live:
+                    failed.append(sym_raw)
+                    i += 2
+                    continue
+                symbol = str(live).upper()
         else:
             symbol = normalize_spot_symbol(sym_raw)
-        price = _parse_price(price_raw)
-        if price is not None and symbol:
+        if symbol:
             pairs.append((symbol, price))
+        else:
+            failed.append(sym_raw)
         i += 2
-    return pairs
+    return pairs, failed
 
 
 def _market_tag(market: str) -> str:
@@ -114,9 +160,10 @@ def create_bot(
                 [
                     "",
                     "Futures (V3):",
-                    "/af BTC 65000           → futures BTC-USDT perp @ 65000",
+                    "/af BTC 65000           → crypto perp",
+                    "/af TSLA 250            → stock perp (auto-resolves TSLASTOCK…)",
                     "/af eth 2.4k sol 145    → multiple futures",
-                    "/p f BTC                → current futures price",
+                    "/p f BTC  |  /p f TSLA  → futures price (short names OK)",
                 ]
             )
         if settings.feature_mover_scanner:
@@ -153,7 +200,7 @@ def create_bot(
             _reply(message, "Quick usage:\n/a BTC 65000\n/a eth 2450 sol 140\n/a PEPE 0.00001")
             return
 
-        pairs = _parse_alert_pairs(args, market="spot")
+        pairs, _failed = _parse_alert_pairs(args, market="spot")
 
         if not pairs:
             _reply(message, "Couldn't parse. Try: /a BTC 65000   or   /a eth 2.4k")
@@ -190,14 +237,31 @@ def create_bot(
             user_id = message.from_user.id
             args = message.text.split()[1:]
             if not args:
-                _reply(message, "Futures usage:\n/af BTC 65000\n/af eth 2.4k sol 145")
+                _reply(
+                    message,
+                    "Futures usage:\n"
+                    "/af BTC 65000\n"
+                    "/af TSLA 250\n"
+                    "/af zhipu 200 samsung 180\n"
+                    "(Short names auto-resolve to the real MEXC contract)",
+                )
                 return
-            pairs = _parse_alert_pairs(args, market="futures")
+            pairs, failed = _parse_alert_pairs(
+                args, market="futures", futures_provider=futures_provider
+            )
+            if not pairs and failed:
+                _reply(
+                    message,
+                    "Couldn't resolve: "
+                    + ", ".join(failed)
+                    + "\nTip: try /p f SYMBOL to see if it lists on MEXC futures.",
+                )
+                return
             if not pairs:
-                _reply(message, "Couldn't parse. Try: /af BTC 65000")
+                _reply(message, "Couldn't parse. Try: /af BTC 65000  or  /af TSLA 250")
                 return
             successes = []
-            errors = []
+            errors = list(failed)
             for symbol, price in pairs:
                 try:
                     aid = store.add_alert(user_id, symbol, price, market="futures")
@@ -215,7 +279,7 @@ def create_bot(
                         lines.append(f"  {sym} @ ${pr} (#{aid}) [F]")
                     _reply(message, "\n".join(lines))
             if errors:
-                _reply(message, "❌ Failed: " + ", ".join(errors))
+                _reply(message, "❌ Could not add/resolve: " + ", ".join(errors))
 
     # ====================== LIST (short) ======================
     @bot.message_handler(commands=["listalerts", "l", "list", "alerts"])
@@ -418,12 +482,23 @@ def create_bot(
             if not settings.feature_futures_alerts or futures_provider is None:
                 _reply(message, "Futures price lookup is disabled (FEATURE_FUTURES_ALERTS=false).")
                 return
-            symbol = normalize_futures_symbol(args[0])
-            price = futures_provider.get_price(symbol)
+            raw = args[0]
+            symbol = _resolve_futures(raw, futures_provider)
+            price = futures_provider.get_price(raw)
             if price is None:
-                _reply(message, f"Couldn't get futures price for {symbol}")
+                tried = symbol or normalize_futures_symbol(raw)
+                _reply(
+                    message,
+                    f"Couldn't get futures price for {raw} (tried {tried}).\n"
+                    f"It may not be listed on MEXC futures, or the name is different.",
+                )
             else:
-                _reply(message, f"{symbol} [F]: ${price:.8f}")
+                # Show resolved contract id so user learns the real name
+                resolved = symbol or normalize_futures_symbol(raw)
+                if resolved and resolved.upper() != raw.strip().upper():
+                    _reply(message, f"{resolved} [F]: ${price:.8f}\n(from /p f {raw})")
+                else:
+                    _reply(message, f"{resolved} [F]: ${price:.8f}")
             return
 
         if price_provider is None:
@@ -573,12 +648,19 @@ def create_bot(
                 if not rest:
                     _reply(message, "Provide symbol(s) to remove. Example: /mw remove BTC")
                     return
-                # Normalize each token both ways so BTC and BTC_USDT both match
+                # Match user typing (TSLA) against stored contract ids (TSLASTOCK_USDT)
                 to_remove: list[str] = []
                 for raw in rest:
+                    to_remove.append(raw.strip().upper())
                     to_remove.append(normalize_futures_symbol(raw))
                     to_remove.append(normalize_spot_symbol(raw))
-                    to_remove.append(raw.strip().upper())
+                    resolved = _resolve_futures(raw, futures_provider)
+                    if resolved:
+                        to_remove.append(resolved)
+                    if futures_provider is not None and hasattr(futures_provider, "resolve_symbol"):
+                        live = futures_provider.resolve_symbol(raw)  # type: ignore[attr-defined]
+                        if live:
+                            to_remove.append(str(live).upper())
                 # unique preserve order
                 seen = set()
                 uniq = []
@@ -602,25 +684,35 @@ def create_bot(
                     market = "spot"
                     rest = rest[1:]
                 if not rest:
-                    _reply(message, "Usage: /mw add BTC ETH")
+                    _reply(message, "Usage: /mw add BTC ETH TSLA")
                     return
                 added = []
+                failed = []
                 for raw in rest:
-                    sym = (
-                        normalize_futures_symbol(raw)
-                        if market == "futures"
-                        else normalize_spot_symbol(raw)
-                    )
+                    if market == "futures":
+                        sym = _resolve_futures(raw, futures_provider)
+                        if futures_provider is not None and hasattr(futures_provider, "resolve_symbol"):
+                            live = futures_provider.resolve_symbol(raw)  # type: ignore[attr-defined]
+                            if not live:
+                                failed.append(raw)
+                                continue
+                            sym = str(live).upper()
+                    else:
+                        sym = normalize_spot_symbol(raw)
                     if sym:
                         mover_store.add_watchlist(user_id, sym, market=market)
                         added.append(sym)
+                    else:
+                        failed.append(raw)
                 wl = mover_store.get_watchlist(user_id)
                 left = ", ".join(i["symbol"] for i in wl) if wl else "(empty)"
-                _reply(
-                    message,
-                    f"Added {len(added)} [{_market_tag(market)}]: {', '.join(added)}\n"
-                    f"Full list: {left}",
+                msg = (
+                    f"Added {len(added)} [{_market_tag(market)}]: {', '.join(added) if added else '(none)'}\n"
+                    f"Full list: {left}"
                 )
+                if failed:
+                    msg += f"\nCould not resolve: {', '.join(failed)}"
+                _reply(message, msg)
                 return
 
             # Default: replace entire list
@@ -633,20 +725,33 @@ def create_bot(
                 args = args[1:]
 
             if not args:
-                _reply(message, "Provide symbols. Example: /mw BTC ETH SOL")
+                _reply(message, "Provide symbols. Example: /mw BTC ETH SOL TSLA")
                 return
 
             items = []
+            failed = []
             for raw in args:
                 if market == "futures":
-                    sym = normalize_futures_symbol(raw)
+                    if futures_provider is not None and hasattr(futures_provider, "resolve_symbol"):
+                        live = futures_provider.resolve_symbol(raw)  # type: ignore[attr-defined]
+                        if not live:
+                            failed.append(raw)
+                            continue
+                        sym = str(live).upper()
+                    else:
+                        sym = normalize_futures_symbol(raw)
                 else:
                     sym = normalize_spot_symbol(raw)
                 if sym:
                     items.append({"symbol": sym, "market": market})
+                else:
+                    failed.append(raw)
             n = mover_store.set_watchlist(user_id, items)
-            shown = ", ".join(f"{i['symbol']}" for i in items)
-            _reply(message, f"Watchlist replaced ({n}) [{_market_tag(market)}]: {shown}")
+            shown = ", ".join(f"{i['symbol']}" for i in items) if items else "(none)"
+            msg = f"Watchlist replaced ({n}) [{_market_tag(market)}]: {shown}"
+            if failed:
+                msg += f"\nCould not resolve: {', '.join(failed)}"
+            _reply(message, msg)
 
     # Catch-all unknown
     @bot.message_handler(func=lambda m: m.text and m.text.startswith("/"))

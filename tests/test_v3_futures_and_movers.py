@@ -9,7 +9,12 @@ from typing import Dict
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mexc_bot.exchange import normalize_futures_symbol, normalize_spot_symbol
+from mexc_bot.exchange import (
+    normalize_futures_symbol,
+    normalize_spot_symbol,
+    resolve_futures_symbol,
+    futures_symbol_candidates,
+)
 from mexc_bot.monitor import PriceMonitor
 from mexc_bot.movers.history import PriceHistory
 from mexc_bot.movers.scanner import MoverScanner
@@ -55,6 +60,31 @@ def test_symbol_normalization():
     assert normalize_futures_symbol("BTCUSDT") == "BTC_USDT"
     assert normalize_futures_symbol("eth/usdt") == "ETH_USDT"
     print("PASS: symbol normalization")
+
+
+def test_resolve_stock_futures_against_known_list():
+    known = {
+        "BTC_USDT",
+        "ETH_USDT",
+        "KORU_USDT",
+        "ZHIPUSTOCK_USDT",
+        "SAMSUNGSTOCK_USDT",
+        "TSLASTOCK_USDT",
+        "BTCDOM_USDT",  # must NOT steal "BTC"
+    }
+    assert resolve_futures_symbol("btc", known) == "BTC_USDT"
+    assert resolve_futures_symbol("BTC", known) == "BTC_USDT"
+    assert resolve_futures_symbol("zhipu", known) == "ZHIPUSTOCK_USDT"
+    assert resolve_futures_symbol("ZHIPU", known) == "ZHIPUSTOCK_USDT"
+    assert resolve_futures_symbol("samsung", known) == "SAMSUNGSTOCK_USDT"
+    assert resolve_futures_symbol("TSLA", known) == "TSLASTOCK_USDT"
+    assert resolve_futures_symbol("tesla", known) == "TSLASTOCK_USDT"  # alias
+    assert resolve_futures_symbol("TSLASTOCK", known) == "TSLASTOCK_USDT"
+    assert resolve_futures_symbol("notarealtickerxyz", known) is None
+    # candidates include STOCK form
+    cands = futures_symbol_candidates("zhipu")
+    assert "ZHIPU_USDT" in cands and "ZHIPUSTOCK_USDT" in cands
+    print("PASS: resolve stock futures against known list")
 
 
 def test_existing_spot_alerts_default_market():
@@ -247,6 +277,7 @@ def test_mover_watchlist_remove_and_add():
 
 if __name__ == "__main__":
     test_symbol_normalization()
+    test_resolve_stock_futures_against_known_list()
     test_existing_spot_alerts_default_market()
     test_futures_alert_isolated_price_book()
     test_futures_skipped_without_provider()

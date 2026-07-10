@@ -122,48 +122,28 @@ class MexcFuturesClient:
       GET {base}/contract/ticker
       Optional query: symbol=BTC_USDT
 
-    Response shape (documented):
-      { "success": true, "code": 0, "data": { "symbol": "BTC_USDT", "lastPrice": ... } }
-      or data as a list of ticker objects when symbol is omitted.
+    Symbols use underscore form: BTC_USDT (crypto) or TSLASTOCK_USDT (stock perps).
 
-    Symbols use underscore form: BTC_USDT (not BTCUSDT).
+    resolve_symbol() maps friendly input (TSLA, zhipu, samsung) onto the live
+    contract list so users do not need to guess STOCK suffixes.
     """
 
     def __init__(
         self,
         base_url: str = "https://contract.mexc.com/api/v1",
         timeout: int = 10,
+        symbol_cache_ttl_seconds: float = 120.0,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.symbol_cache_ttl_seconds = symbol_cache_ttl_seconds
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "mexc-alert-bot/0.3"})
+        self._price_cache: Dict[str, float] = {}
+        self._price_cache_ts: float = 0.0
 
-    def get_price(self, symbol: str) -> Optional[float]:
-        url = f"{self.base_url}/contract/ticker"
-        sym = symbol.upper().replace("-", "_")
-        try:
-            resp = self.session.get(url, params={"symbol": sym}, timeout=self.timeout)
-            if resp.status_code != 200:
-                logger.warning(f"MEXC futures {resp.status_code} for single {sym}")
-                return None
-            payload = resp.json()
-            data = payload.get("data") if isinstance(payload, dict) else None
-            if isinstance(data, dict) and data.get("lastPrice") is not None:
-                return float(data["lastPrice"])
-            if isinstance(data, list) and data:
-                item = data[0]
-                if item.get("lastPrice") is not None:
-                    return float(item["lastPrice"])
-            logger.warning(f"Unexpected futures single-ticker shape for {sym}")
-        except requests.RequestException as e:
-            logger.warning(f"Request error (futures single) for {sym}: {e}")
-        except (KeyError, ValueError, TypeError) as e:
-            logger.warning(f"Parse error (futures single) for {sym}: {e}")
-        return None
-
-    def get_all_prices(self) -> Dict[str, float]:
-        """Fetch all contract last prices. Keys are uppercase with underscore (BTC_USDT)."""
+    def _fetch_batch(self) -> Dict[str, float]:
+        """Fetch all contract last prices. Keys are uppercase with underscore."""
         url = f"{self.base_url}/contract/ticker"
         try:
             resp = self.session.get(url, timeout=self.timeout)
@@ -175,7 +155,6 @@ class MexcFuturesClient:
                 logger.warning("Unexpected futures batch response (not object)")
                 return {}
             data = payload.get("data")
-            items = []
             if isinstance(data, list):
                 items = data
             elif isinstance(data, dict):
@@ -203,6 +182,81 @@ class MexcFuturesClient:
             logger.warning(f"Unexpected error in futures batch price fetch: {e}")
         return {}
 
+    def _ensure_price_cache(self, force: bool = False) -> Dict[str, float]:
+        import time as _time
+
+        now = _time.time()
+        if (
+            not force
+            and self._price_cache
+            and (now - self._price_cache_ts) < self.symbol_cache_ttl_seconds
+        ):
+            return self._price_cache
+        prices = self._fetch_batch()
+        if prices:
+            self._price_cache = prices
+            self._price_cache_ts = now
+        return self._price_cache
+
+    def resolve_symbol(self, raw: str) -> Optional[str]:
+        """Map user input (TSLA, ZHIPU, BTC_USDT, …) to a live contract symbol."""
+        known = set(self._ensure_price_cache().keys())
+        if not known:
+            # Offline / API blip: still try deterministic STOCK fallbacks
+            return resolve_futures_symbol(raw, known=None)
+        return resolve_futures_symbol(raw, known=known)
+
+    def get_price(self, symbol: str) -> Optional[float]:
+        """Resolve friendly name, then return last price (batch cache preferred)."""
+        resolved = self.resolve_symbol(symbol)
+        cache = self._ensure_price_cache()
+        if resolved and resolved in cache:
+            return cache[resolved]
+
+        # Try resolved + candidate list via single endpoint as fallback
+        tried: list[str] = []
+        for cand in futures_symbol_candidates(symbol):
+            if cand in tried:
+                continue
+            tried.append(cand)
+            if cand in cache:
+                return cache[cand]
+            px = self._fetch_single(cand)
+            if px is not None:
+                self._price_cache[cand] = px
+                return px
+        if resolved and resolved not in tried:
+            px = self._fetch_single(resolved)
+            if px is not None:
+                self._price_cache[resolved] = px
+                return px
+        return None
+
+    def _fetch_single(self, sym: str) -> Optional[float]:
+        url = f"{self.base_url}/contract/ticker"
+        try:
+            resp = self.session.get(url, params={"symbol": sym}, timeout=self.timeout)
+            if resp.status_code != 200:
+                logger.debug(f"MEXC futures {resp.status_code} for single {sym}")
+                return None
+            payload = resp.json()
+            data = payload.get("data") if isinstance(payload, dict) else None
+            if isinstance(data, dict) and data.get("lastPrice") is not None:
+                return float(data["lastPrice"])
+            if isinstance(data, list) and data:
+                item = data[0]
+                if item.get("lastPrice") is not None:
+                    return float(item["lastPrice"])
+        except requests.RequestException as e:
+            logger.warning(f"Request error (futures single) for {sym}: {e}")
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning(f"Parse error (futures single) for {sym}: {e}")
+        return None
+
+    def get_all_prices(self) -> Dict[str, float]:
+        """Fetch ALL current futures prices (refreshes resolve cache)."""
+        return dict(self._ensure_price_cache(force=True))
+
     def close(self):
         try:
             self.session.close()
@@ -224,11 +278,30 @@ def normalize_spot_symbol(raw: str) -> str:
     return s
 
 
+# Friendly aliases → MEXC-style base tickers (before STOCK / _USDT resolution)
+FUTURES_BASE_ALIASES: Dict[str, str] = {
+    "TESLA": "TSLA",
+    "GOOGLE": "GOOGL",
+    "ALPHABET": "GOOGL",
+    "FACEBOOK": "META",
+    "FB": "META",
+    "APPLE": "AAPL",
+    "MICROSOFT": "MSFT",
+    "AMAZON": "AMZN",
+    "NETFLIX": "NFLX",
+    "NVIDIA": "NVDA",
+    "NVDIA": "NVDA",  # common typo
+}
+
+
 def normalize_futures_symbol(raw: str) -> str:
     """Normalize to MEXC contract form BASE_QUOTE (e.g. BTC_USDT).
 
     Accepts: BTC, BTC_USDT, BTCUSDT, btc/usdt, BTC-USDT.
     Bare base → append _USDT.
+
+    Note: does NOT know about *STOCK* contracts. Prefer resolve_futures_symbol()
+    when a live contract list is available.
     """
     s = raw.strip().upper().replace("-", "_").replace("/", "_").replace(" ", "")
     if not s:
@@ -239,8 +312,143 @@ def normalize_futures_symbol(raw: str) -> str:
     for q in ("USDT", "USDC", "USD", "BTC", "ETH"):
         if s.endswith(q) and len(s) > len(q):
             base = s[: -len(q)]
+            base = FUTURES_BASE_ALIASES.get(base, base)
             return f"{base}_{q}"
     # Bare base
     if s.isalpha() or (len(s) > 1 and s[:-1].isalpha() and s[-1].isdigit()):
+        s = FUTURES_BASE_ALIASES.get(s, s)
         return f"{s}_USDT"
     return s
+
+
+def _futures_input_base(raw: str) -> str:
+    """Extract a base ticker from user input (TSLA, ZHIPUSTOCK, BTC_USDT, …)."""
+    s = raw.strip().upper().replace("-", "_").replace("/", "_").replace(" ", "")
+    if not s:
+        return s
+    # Alias whole token before stripping quote
+    if s in FUTURES_BASE_ALIASES:
+        return FUTURES_BASE_ALIASES[s]
+    if "_" in s:
+        parts = s.split("_")
+        if parts[-1] in ("USDT", "USDC", "USD"):
+            base = "_".join(parts[:-1])
+        else:
+            base = s
+    else:
+        base = s
+        for q in ("USDT", "USDC", "USD"):
+            if base.endswith(q) and len(base) > len(q):
+                base = base[: -len(q)]
+                break
+    base = FUTURES_BASE_ALIASES.get(base, base)
+    return base
+
+
+def futures_symbol_candidates(raw: str) -> list[str]:
+    """Ordered candidate contract ids for a user-typed futures symbol."""
+    base = _futures_input_base(raw)
+    if not base:
+        return []
+
+    cores: list[str] = []
+    # Prefer as-typed core first
+    cores.append(base)
+    if base.endswith("STOCK") and len(base) > 5:
+        cores.append(base[: -len("STOCK")])
+    else:
+        cores.append(base + "STOCK")
+
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(sym: str) -> None:
+        if sym and sym not in seen:
+            seen.add(sym)
+            out.append(sym)
+
+    # Exact normalized form first (crypto-style)
+    add(normalize_futures_symbol(raw))
+    for core in cores:
+        add(f"{core}_USDT")
+        if not core.endswith("STOCK"):
+            add(f"{core}STOCK_USDT")
+        else:
+            bare = core[: -len("STOCK")]
+            add(f"{bare}STOCK_USDT")
+            add(f"{bare}_USDT")
+    return out
+
+
+def resolve_futures_symbol(
+    raw: str,
+    known: Optional[set] = None,
+) -> Optional[str]:
+    """
+    Map friendly input to a real MEXC futures contract symbol.
+
+    When `known` is a set of live contract ids (from batch ticker):
+      TSLA  → TSLASTOCK_USDT (if that exists)
+      ZHIPU → ZHIPUSTOCK_USDT
+      BTC   → BTC_USDT
+      SAMSUNG → SAMSUNGSTOCK_USDT
+
+    When `known` is None: returns the first deterministic candidate (usually BASE_USDT).
+    """
+    if not raw or not str(raw).strip():
+        return None
+
+    candidates = futures_symbol_candidates(raw)
+    if not candidates:
+        return None
+
+    if not known:
+        return candidates[0]
+
+    known_u = {str(s).upper() for s in known}
+
+    for cand in candidates:
+        if cand in known_u:
+            return cand
+
+    base = _futures_input_base(raw)
+    if not base:
+        return None
+
+    # Ranked search against the live universe
+    ranked: list[tuple[int, str]] = []
+    for sym in known_u:
+        if not sym.endswith("_USDT"):
+            continue
+        body = sym[: -len("_USDT")]  # e.g. BTC, TSLASTOCK, ZHIPUSTOCK
+        if body == base:
+            ranked.append((0, sym))  # perfect crypto-style
+        elif body == f"{base}STOCK":
+            ranked.append((1, sym))  # stock perp
+        elif body.startswith(f"{base}STOCK"):
+            ranked.append((2, sym))
+        elif body.startswith(f"{base}_"):
+            ranked.append((4, sym))  # rare BASE_OTHER
+        elif len(base) >= 4 and body.startswith(base):
+            rest = body[len(base) :]
+            if rest == "STOCK":
+                ranked.append((1, sym))
+            elif rest.startswith("STOCK"):
+                ranked.append((2, sym))
+            # else: weak prefix (BTC→BTCDOM) — skip for short bases; allow long unique
+            elif len(base) >= 5 and rest.isalpha() and len(rest) <= 8:
+                ranked.append((6, sym))
+
+    if not ranked:
+        return None
+    ranked.sort(key=lambda t: (t[0], len(t[1])))
+    best_rank, best_sym = ranked[0]
+    # Accept strong matches always; weak only if unique
+    if best_rank <= 2:
+        return best_sym
+    strong = [s for r, s in ranked if r <= 2]
+    if strong:
+        return strong[0]
+    if best_rank <= 6 and len([r for r, _ in ranked if r == best_rank]) == 1:
+        return best_sym
+    return None
