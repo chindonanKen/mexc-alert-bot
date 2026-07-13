@@ -184,6 +184,36 @@ def test_mover_history_downside_pct():
     print("PASS: mover history % change")
 
 
+def test_mover_peak_drawdown_within_window():
+    """High → now within lookback (catches dumps endpoint-to-endpoint can miss)."""
+    h = PriceHistory(max_age_seconds=1200)
+    now = time.time()
+    # Left edge only -2%, but mid-window spike then dump -8% from high
+    h.record("spot", "PENGUINUSDT", 100.0, ts=now - 900)  # left edge
+    h.record("spot", "PENGUINUSDT", 102.0, ts=now - 600)  # mild drift
+    h.record("spot", "PENGUINUSDT", 110.0, ts=now - 120)  # peak
+    h.record("spot", "PENGUINUSDT", 101.2, ts=now)  # -8% from peak; ~+1.2% vs left edge
+
+    endpoint = h.pct_change_over("spot", "PENGUINUSDT", 900, now=now)
+    assert endpoint is not None
+    assert endpoint > -0.05, "endpoint alone would miss a 7% threshold dump"
+
+    dd = h.peak_drawdown("spot", "PENGUINUSDT", 900, now=now)
+    assert dd is not None
+    change, peak, price_now = dd
+    assert abs(peak - 110.0) < 1e-9
+    assert abs(price_now - 101.2) < 1e-9
+    assert abs(change - ((101.2 - 110.0) / 110.0)) < 1e-9
+    assert change <= -0.07, change  # fires a 7% threshold
+
+    # Cold start: no sample at/before window start → None
+    h3 = PriceHistory(max_age_seconds=1200)
+    h3.record("spot", "X", 100.0, ts=now - 30)
+    h3.record("spot", "X", 90.0, ts=now)
+    assert h3.peak_drawdown("spot", "X", 900, now=now) is None
+    print("PASS: peak drawdown within window")
+
+
 def test_mover_scanner_downside_only_and_cooldown():
     with tempfile.TemporaryDirectory() as td:
         path = Path(td) / "alerts.db"
@@ -221,6 +251,7 @@ def test_mover_scanner_downside_only_and_cooldown():
         assert len(notifications) == 1, notifications
         assert "MOVER" in notifications[0][1]
         assert "BTC_USDT" in notifications[0][1]
+        assert "within" in notifications[0][1] or "High" in notifications[0][1]
 
         # Second cycle immediately → cooldown blocks
         scanner._check_once()
@@ -234,6 +265,45 @@ def test_mover_scanner_downside_only_and_cooldown():
         scanner._check_once()
         assert len(notifications) == 1, "upside must not fire"
         print("PASS: mover scanner downside-only + cooldown")
+
+
+def test_mover_scanner_peak_not_endpoint():
+    """Dump from mid-window high fires even when endpoint change is small."""
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "alerts.db"
+        mstore = MoverStore(path)
+        u = 42
+        mstore.set_params(u, threshold_percent=7.0, lookback_seconds=900, default_enabled=True)
+        mstore.set_enabled(u, True, 7.0, 900)
+        mstore.set_watchlist(u, [{"symbol": "PENGUINUSDT", "market": "spot"}])
+
+        notifications = []
+
+        def notify(uid, msg, parse_mode=None):
+            notifications.append((uid, msg))
+
+        settings = _settings(
+            mover_lookback_seconds=900,
+            mover_threshold_percent=7.0,
+            mover_cooldown_seconds=3600,
+        )
+        spot = FakePriceProvider({"PENGUINUSDT": 101.2})
+        scanner = MoverScanner(
+            settings=settings,
+            mover_store=mstore,
+            notifier=notify,
+            spot_provider=spot,
+        )
+        now = time.time()
+        scanner.history.record("spot", "PENGUINUSDT", 100.0, ts=now - 900)
+        scanner.history.record("spot", "PENGUINUSDT", 110.0, ts=now - 120)
+        scanner.history.record("spot", "PENGUINUSDT", 101.2, ts=now)
+
+        scanner._check_once()
+        assert len(notifications) == 1, notifications
+        assert "PENGUINUSDT" in notifications[0][1]
+        assert "[S]" in notifications[0][1]
+        print("PASS: mover scanner peak drawdown (not endpoint-only)")
 
 
 def test_mover_does_not_touch_alerts_table():
@@ -282,7 +352,9 @@ if __name__ == "__main__":
     test_futures_alert_isolated_price_book()
     test_futures_skipped_without_provider()
     test_mover_history_downside_pct()
+    test_mover_peak_drawdown_within_window()
     test_mover_scanner_downside_only_and_cooldown()
+    test_mover_scanner_peak_not_endpoint()
     test_mover_does_not_touch_alerts_table()
     test_mover_watchlist_remove_and_add()
     print("All V3 tests passed.")

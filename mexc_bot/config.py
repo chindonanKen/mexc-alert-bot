@@ -86,7 +86,9 @@ def load_settings() -> Settings:
         mexc_futures_api_base=futures_base,
         mover_lookback_seconds=int(os.getenv("MOVER_LOOKBACK_SECONDS", "900")),
         mover_threshold_percent=float(os.getenv("MOVER_THRESHOLD_PERCENT", "5")),
-        mover_poll_seconds=int(os.getenv("MOVER_POLL_SECONDS", "15")),
+        # Default 5s: evaluate rolling high→now every few seconds (floor 2s in scanner).
+        # Old default 15s left more "gap" after a dump wick.
+        mover_poll_seconds=int(os.getenv("MOVER_POLL_SECONDS", "5")),
         mover_cooldown_seconds=int(os.getenv("MOVER_COOLDOWN_SECONDS", "1800")),
         mover_markets=mover_markets,
     )

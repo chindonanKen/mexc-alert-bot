@@ -2,10 +2,17 @@
 
 Completely separate from PriceMonitor: never deletes target-price alerts.
 Fires Telegram notifications with cooldowns (rules are not one-shot-deleted).
+
+Detection model (snappy, no candle close):
+  Every poll, for each watchlist symbol, compute rolling **high → now**
+  drawdown over the lookback window (default 15m). Fire as soon as that
+  drawdown reaches the user threshold — not at bar close, not only when
+  endpoint-to-endpoint (price_now vs price_15m_ago) crosses.
 """
 
 from __future__ import annotations
 
+import html as _html
 import logging
 import threading
 import time
@@ -18,6 +25,9 @@ from .storage import MoverStore
 
 logger = logging.getLogger(__name__)
 
+# Hard floor for poll interval (seconds). Env may set lower; we clamp here.
+_MIN_POLL_SECONDS = 2.0
+
 
 class MoverScanner:
     """
@@ -26,6 +36,7 @@ class MoverScanner:
     - Does NOT touch AlertStore / alerts table
     - Cooldown per (user_id, market, symbol) after fire
     - Watchlist-only (empty watchlist → no fires for that user)
+    - Rule: peak-in-window → current last price (rolling, every poll)
     """
 
     def __init__(
@@ -56,6 +67,7 @@ class MoverScanner:
         # (user_id, market, symbol) -> monotonic expire time
         self._cooldowns: Dict[Tuple[int, str, str], float] = {}
         self._fires_total: int = 0
+        self._missing_symbol_logs: int = 0
 
     def get_health(self) -> dict:
         now = time.monotonic()
@@ -66,6 +78,7 @@ class MoverScanner:
             "tracked_series": self.history.tracked_count(),
             "active_cooldowns": len(self._cooldowns),
             "fires_total": self._fires_total,
+            "poll_seconds": max(_MIN_POLL_SECONDS, float(self.settings.mover_poll_seconds)),
         }
 
     def _markets_to_scan(self) -> Set[str]:
@@ -136,6 +149,14 @@ class MoverScanner:
             time.monotonic() + float(self.settings.mover_cooldown_seconds)
         )
 
+    def _format_lookback(self, lookback: float) -> str:
+        if lookback < 60:
+            return f"{int(lookback)}s"
+        minutes = lookback / 60.0
+        if abs(minutes - round(minutes)) < 1e-6:
+            return f"{int(round(minutes))}m"
+        return f"{minutes:.1f}m"
+
     def _check_once(self) -> None:
         t0 = time.perf_counter()
         now = time.time()
@@ -170,35 +191,41 @@ class MoverScanner:
                 symbol = str(item["symbol"]).upper()
                 if market not in prices_by_market:
                     continue
-                if symbol not in prices_by_market[market]:
+                book = prices_by_market[market]
+                if symbol not in book:
+                    # Silent miss risk: wrong market or symbol not on MEXC book
+                    self._missing_symbol_logs += 1
+                    if self._missing_symbol_logs <= 20 or self._missing_symbol_logs % 50 == 0:
+                        logger.warning(
+                            "Mover: %s:%s on watchlist but not in live book "
+                            "(check spot vs futures / symbol id)",
+                            market,
+                            symbol,
+                        )
                     continue
 
-                change = self.history.pct_change_over(market, symbol, lookback, now=now)
-                if change is None:
-                    continue  # not enough history yet
+                # Rolling high → now within lookback (not candle close, not wait-for-window-end)
+                dd = self.history.peak_drawdown(market, symbol, lookback, now=now)
+                if dd is None:
+                    continue  # not enough history yet (need full lookback of samples)
 
-                # Downside only: change must be negative and magnitude >= threshold
+                change, peak_price, price_now = dd
+
+                # Downside only: drawdown from peak must be <= -threshold
                 if change > -threshold_frac:
                     continue
 
                 if self._on_cooldown(user_id, market, symbol):
                     continue
 
-                latest = self.history.latest(market, symbol)
-                then_price = self.history.price_at_or_before(market, symbol, now - lookback)
-                if latest is None or then_price is None:
-                    continue
-                price_now = latest[1]
                 pct = change * 100.0
-                minutes = int(lookback // 60)
+                window = self._format_lookback(lookback)
                 tag = "F" if market == "futures" else "S"
-                # HTML — safe with underscores in futures symbols (BTC_USDT)
-                import html as _html
                 sym_e = _html.escape(symbol)
                 msg = (
                     f"📉 <b>MOVER</b> [{tag}]\n"
-                    f"<b>{sym_e}</b>  {pct:.1f}% in {minutes}m\n"
-                    f"Was <code>{then_price:.8g}</code> → now <code>{price_now:.8g}</code>"
+                    f"<b>{sym_e}</b>  {pct:.1f}% within {window}\n"
+                    f"High <code>{peak_price:.8g}</code> → now <code>{price_now:.8g}</code>"
                 )
                 try:
                     self.notifier(user_id, msg, parse_mode="HTML")
@@ -207,7 +234,8 @@ class MoverScanner:
                     fired += 1
                     logger.info(
                         f"MOVER FIRED user={user_id} {market}:{symbol} "
-                        f"change={pct:.2f}% lookback={lookback}s"
+                        f"drawdown={pct:.2f}% peak={peak_price} now={price_now} "
+                        f"lookback={lookback}s"
                     )
                 except Exception as e:
                     logger.error(f"Mover notify failed user={user_id} {symbol}: {e}")
@@ -223,12 +251,14 @@ class MoverScanner:
             logger.info(f"Mover cycle: {fired} fires, {self._last_cycle_ms}ms")
 
     def run(self) -> None:
+        poll = max(_MIN_POLL_SECONDS, float(self.settings.mover_poll_seconds))
         logger.info(
-            "Mover scanner started (markets=%s lookback=%ss threshold=%s%% poll=%ss cooldown=%ss)",
+            "Mover scanner started (markets=%s lookback=%ss threshold=%s%% poll=%ss "
+            "cooldown=%ss mode=peak_drawdown)",
             self.settings.mover_markets,
             self.settings.mover_lookback_seconds,
             self.settings.mover_threshold_percent,
-            self.settings.mover_poll_seconds,
+            poll,
             self.settings.mover_cooldown_seconds,
         )
         while not self._stop_event.is_set():
@@ -237,7 +267,7 @@ class MoverScanner:
             except Exception as e:
                 logger.exception(f"Unexpected error in mover scanner: {e}")
             slept = 0.0
-            interval = max(5.0, float(self.settings.mover_poll_seconds))
+            interval = max(_MIN_POLL_SECONDS, float(self.settings.mover_poll_seconds))
             while slept < interval and not self._stop_event.is_set():
                 time.sleep(min(0.25, interval - slept))
                 slept += 0.25

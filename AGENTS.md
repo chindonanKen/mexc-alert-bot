@@ -71,9 +71,9 @@ bot.py  ────────────────────────
 |----------|---------|--------|
 | `FEATURE_FUTURES_ALERTS` | `false` | `/af`, `/p f`, futures book in `PriceMonitor` |
 | `FEATURE_MOVER_SCANNER` | `false` | `/movers`, `/mw`, `MoverScanner` thread |
-| `MOVER_LOOKBACK_SECONDS` | `900` | Default lookback (user can override via `/movers set`) |
-| `MOVER_THRESHOLD_PERCENT` | `5` | Default downside % |
-| `MOVER_POLL_SECONDS` | `15` | Scanner cadence |
+| `MOVER_LOOKBACK_SECONDS` | `900` | Default rolling window (user can override via `/movers set`) |
+| `MOVER_THRESHOLD_PERCENT` | `5` | Default downside % from **high within window** |
+| `MOVER_POLL_SECONDS` | `5` | Scanner cadence (code floor **2s**). Lower = snappier |
 | `MOVER_COOLDOWN_SECONDS` | `1800` | Per user+market+symbol re-alert silence |
 | `MOVER_MARKETS` | `both` | Idle fallback only; **live scans follow watchlist row markets** |
 | `PRICE_POLL_INTERVAL_SECONDS` | `1`–`2` | Target-alert monitor loop |
@@ -155,6 +155,26 @@ Fire condition: price **crossed** target since last sample **or** within toleran
 
 Movers fire message prefix: `MOVER` with `[F]` or `[S]`. Not one-shot — cooldown then can fire again.
 
+### Mover detection model (precision + snappy)
+
+**Rule:** every poll, for each watchlist row, compute **rolling high → now** drawdown over the lookback window (default 15 minutes). Fire **as soon as** drawdown ≤ −threshold. No candle close, no wait until “the 15 minutes are over.”
+
+| Concept | Meaning |
+|---------|--------|
+| Window | Last N seconds of in-memory samples (N = user lookback) |
+| Peak | Highest sample in that window (incl. left-edge price at/before `now−N`) |
+| Drawdown | `(price_now − peak) / peak` — e.g. −0.07 = −7% from high |
+| Latency after cross | ≈ `MOVER_POLL_SECONDS` (default 5s, floor 2s) |
+| Cold start | Needs ~one full lookback of samples per symbol before first eval |
+
+**Why endpoint-only failed in practice:** old logic used only `price_now` vs `price_15m_ago`. A mid-window spike then dump can be **−8% from high** but only **−1% vs 15m-ago**, so a 7% threshold never fired. Chart tools often measure multi-hour spans (e.g. “−49 bars / −12h”) — that is **not** a 15m window; the bot only cares about the rolling lookback.
+
+**Spot vs futures:** `PENGUINUSDT` on `/mw add s` uses the **spot** book only. Futures dump on `PENGUIN_USDT` will not fire a spot row (and vice versa). Check `/mw` grouping.
+
+**Message shape:** `MOVER [S/F] · SYM  −X.X% within 15m · High … → now …`
+
+Tune snappiness on droplet: `MOVER_POLL_SECONDS=3` (or `2`). Tune sensitivity: `/movers set 7 15` (7% within 15m).
+
 ---
 
 ## Important implementation details
@@ -175,6 +195,8 @@ Movers fire message prefix: `MOVER` with `[F]` or `[S]`. Not one-shot — cooldo
 ### Movers scanner markets
 
 Fetches **only markets present on enabled users’ watchlists**. Spot row → spot book; futures row → futures book. Never compare spot SIREN to futures SIREN.
+
+History uses `PriceHistory.peak_drawdown` (not candle OHLC). Futures resolve cache (~2 min) does **not** apply to mover cycles — `get_all_prices()` force-refreshes.
 
 ---
 

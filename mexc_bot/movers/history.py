@@ -62,6 +62,13 @@ class PriceHistory:
             return None
         return series[-1]
 
+    def oldest(self, market: str, symbol: str) -> Optional[Tuple[float, float]]:
+        key = self.make_key(market, symbol)
+        series = self._series.get(key)
+        if not series:
+            return None
+        return series[0]
+
     def pct_change_over(
         self,
         market: str,
@@ -70,8 +77,23 @@ class PriceHistory:
         now: Optional[float] = None,
     ) -> Optional[float]:
         """
-        (price_now - price_then) / price_then as a fraction (e.g. -0.05 = -5%).
+        Endpoint-to-endpoint: (price_now - price_then) / price_then.
         Returns None if history is insufficient.
+        """
+        result = self.endpoint_change(market, symbol, lookback_seconds, now=now)
+        if result is None:
+            return None
+        return result[0]
+
+    def endpoint_change(
+        self,
+        market: str,
+        symbol: str,
+        lookback_seconds: float,
+        now: Optional[float] = None,
+    ) -> Optional[Tuple[float, float, float]]:
+        """
+        (change_frac, price_then, price_now) for price at/before (now-lookback) → latest.
         """
         now = now if now is not None else time.time()
         latest = self.latest(market, symbol)
@@ -82,7 +104,60 @@ class PriceHistory:
         price_then = self.price_at_or_before(market, symbol, then_ts)
         if price_then is None or price_then <= 0:
             return None
-        return (price_now - price_then) / price_then
+        return ((price_now - price_then) / price_then, price_then, price_now)
+
+    def peak_drawdown(
+        self,
+        market: str,
+        symbol: str,
+        lookback_seconds: float,
+        now: Optional[float] = None,
+    ) -> Optional[Tuple[float, float, float]]:
+        """
+        Rolling high → now drawdown within the lookback window.
+
+        Reference peak = max(price of samples with ts in (now-lookback, now],
+                             and the sample at or before now-lookback as left edge).
+
+        Returns (change_frac, peak_price, price_now) where change_frac is <= 0
+        when price_now is at/below the peak (e.g. -0.07 = -7% from high).
+
+        This matches "dumped X% within the last N minutes" better than pure
+        endpoint-to-endpoint (which misses dumps after a mid-window spike, and
+        under-reports if the high was recent).
+
+        Requires history that reaches back to the lookback boundary (same as
+        endpoint_change) so cold start does not false-fire on a short series.
+        """
+        now = now if now is not None else time.time()
+        latest = self.latest(market, symbol)
+        if latest is None:
+            return None
+        _, price_now = latest
+
+        window_start = now - lookback_seconds
+        # Need a left-edge anchor so we know the full window is covered
+        left = self.price_at_or_before(market, symbol, window_start)
+        if left is None or left <= 0:
+            return None
+
+        peak = float(left)
+        key = self.make_key(market, symbol)
+        series = self._series.get(key)
+        if not series:
+            return None
+
+        for ts, price in series:
+            if ts < window_start:
+                continue
+            if ts > now:
+                break
+            if price > peak:
+                peak = float(price)
+
+        if peak <= 0:
+            return None
+        return ((price_now - peak) / peak, peak, price_now)
 
     def tracked_count(self) -> int:
         return len(self._series)
