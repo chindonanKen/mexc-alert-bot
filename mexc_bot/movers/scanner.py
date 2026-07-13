@@ -1,13 +1,16 @@
 """Background downside % mover scanner.
 
 Completely separate from PriceMonitor: never deletes target-price alerts.
-Fires Telegram notifications with cooldowns (rules are not one-shot-deleted).
 
 Detection model (snappy, no candle close):
-  Every poll, for each watchlist symbol, compute rolling **high → now**
-  drawdown over the lookback window (default 15m). Fire as soon as that
-  drawdown reaches the user threshold — not at bar close, not only when
-  endpoint-to-endpoint (price_now vs price_15m_ago) crosses.
+  1) First alert: rolling **high → now** drawdown over the lookback window
+     reaches the user threshold.
+  2) Cascade re-arm: after a fire, set anchor = fire price. Fire again when
+     price drops another full threshold **from that anchor** (not a long mute).
+  3) Recovery: if price bounces enough above the anchor, clear it and return
+     to peak-drawdown mode for the next wave.
+  4) MOVER_COOLDOWN_SECONDS is only a short **min-gap** anti-spam between fires
+     for the same (user, market, symbol) — not a 30-minute silence.
 """
 
 from __future__ import annotations
@@ -28,15 +31,17 @@ logger = logging.getLogger(__name__)
 # Hard floor for poll interval (seconds). Env may set lower; we clamp here.
 _MIN_POLL_SECONDS = 2.0
 
+Key = Tuple[int, str, str]  # user_id, market, symbol
+
 
 class MoverScanner:
     """
     Polls price feeds, builds lookback history, alerts on downside % only.
 
     - Does NOT touch AlertStore / alerts table
-    - Cooldown per (user_id, market, symbol) after fire
+    - Step-down re-arm from last fire price (cascade dumps keep alerting)
+    - Short min-gap only (settings.mover_cooldown_seconds)
     - Watchlist-only (empty watchlist → no fires for that user)
-    - Rule: peak-in-window → current last price (rolling, every poll)
     """
 
     def __init__(
@@ -64,8 +69,10 @@ class MoverScanner:
         self._thread: threading.Thread | None = None
         self._last_cycle_ms: int = 0
         self._last_success: float = 0.0
-        # (user_id, market, symbol) -> monotonic expire time
-        self._cooldowns: Dict[Tuple[int, str, str], float] = {}
+        # After fire: next alert needs another full threshold drop from this price
+        self._anchors: Dict[Key, float] = {}
+        # Min-gap: last fire monotonic time per key
+        self._last_fire_mono: Dict[Key, float] = {}
         self._fires_total: int = 0
         self._missing_symbol_logs: int = 0
 
@@ -76,9 +83,10 @@ class MoverScanner:
             "last_cycle_ms": self._last_cycle_ms,
             "seconds_since_last_success": (now - self._last_success) if self._last_success else 999,
             "tracked_series": self.history.tracked_count(),
-            "active_cooldowns": len(self._cooldowns),
+            "active_anchors": len(self._anchors),
             "fires_total": self._fires_total,
             "poll_seconds": max(_MIN_POLL_SECONDS, float(self.settings.mover_poll_seconds)),
+            "min_gap_seconds": float(self.settings.mover_cooldown_seconds),
         }
 
     def _markets_to_scan(self) -> Set[str]:
@@ -99,7 +107,6 @@ class MoverScanner:
         if needed:
             return needed
 
-        # Idle fallback from env (for warm-up / empty state)
         m = (self.settings.mover_markets or "both").lower()
         if m == "spot":
             return {"spot"}
@@ -134,20 +141,15 @@ class MoverScanner:
             for sym, px in prices.items():
                 self.history.record(market, sym, px, ts=now)
 
-    def _on_cooldown(self, user_id: int, market: str, symbol: str) -> bool:
-        key = (user_id, market, symbol)
-        exp = self._cooldowns.get(key)
-        if exp is None:
+    def _min_gap_blocks(self, key: Key) -> bool:
+        """True if we fired too recently for this key (anti-spam only)."""
+        last = self._last_fire_mono.get(key)
+        if last is None:
             return False
-        if time.monotonic() >= exp:
-            self._cooldowns.pop(key, None)
+        gap = max(0.0, float(self.settings.mover_cooldown_seconds))
+        if gap <= 0:
             return False
-        return True
-
-    def _set_cooldown(self, user_id: int, market: str, symbol: str) -> None:
-        self._cooldowns[(user_id, market, symbol)] = (
-            time.monotonic() + float(self.settings.mover_cooldown_seconds)
-        )
+        return (time.monotonic() - last) < gap
 
     def _format_lookback(self, lookback: float) -> str:
         if lookback < 60:
@@ -156,6 +158,14 @@ class MoverScanner:
         if abs(minutes - round(minutes)) < 1e-6:
             return f"{int(round(minutes))}m"
         return f"{minutes:.1f}m"
+
+    def _recovery_frac(self) -> float:
+        # Optional setting; default 3% bounce clears cascade anchor
+        raw = getattr(self.settings, "mover_recovery_percent", 3.0)
+        try:
+            return max(0.0, float(raw)) / 100.0
+        except (TypeError, ValueError):
+            return 0.03
 
     def _check_once(self) -> None:
         t0 = time.perf_counter()
@@ -170,6 +180,7 @@ class MoverScanner:
 
         enabled_users = self.mover_store.get_enabled_users()
         fired = 0
+        recovery_frac = self._recovery_frac()
 
         for user_id in enabled_users:
             settings = self.mover_store.get_settings(
@@ -193,7 +204,6 @@ class MoverScanner:
                     continue
                 book = prices_by_market[market]
                 if symbol not in book:
-                    # Silent miss risk: wrong market or symbol not on MEXC book
                     self._missing_symbol_logs += 1
                     if self._missing_symbol_logs <= 20 or self._missing_symbol_logs % 50 == 0:
                         logger.warning(
@@ -204,47 +214,84 @@ class MoverScanner:
                         )
                     continue
 
-                # Rolling high → now within lookback (not candle close, not wait-for-window-end)
-                dd = self.history.peak_drawdown(market, symbol, lookback, now=now)
-                if dd is None:
-                    continue  # not enough history yet (need full lookback of samples)
-
-                change, peak_price, price_now = dd
-
-                # Downside only: drawdown from peak must be <= -threshold
-                if change > -threshold_frac:
+                price_now = float(book[symbol])
+                if price_now <= 0:
                     continue
 
-                if self._on_cooldown(user_id, market, symbol):
+                key: Key = (user_id, market, symbol)
+                anchor = self._anchors.get(key)
+
+                # Dead-cat bounce: clear cascade state so next dump uses peak mode again.
+                # Skip fire evaluation this cycle — bounce can still look like −threshold
+                # vs an old window high (e.g. 100→90 fire, bounce to 93 clears, but
+                # 100→93 is still −7% peak drawdown).
+                if anchor is not None and recovery_frac > 0:
+                    if price_now >= anchor * (1.0 + recovery_frac):
+                        logger.debug(
+                            "Mover anchor cleared (recovery) %s:%s anchor=%s now=%s",
+                            market,
+                            symbol,
+                            anchor,
+                            price_now,
+                        )
+                        self._anchors.pop(key, None)
+                        continue
+
+                fire_mode: Optional[str] = None  # "peak" | "step"
+                pct: float = 0.0
+                ref_price: float = 0.0
+
+                if anchor is None:
+                    # First / re-armed wave: high within lookback → now
+                    dd = self.history.peak_drawdown(market, symbol, lookback, now=now)
+                    if dd is None:
+                        continue
+                    change, peak_price, hist_now = dd
+                    price_now = float(hist_now)
+                    if change > -threshold_frac:
+                        continue
+                    fire_mode = "peak"
+                    pct = change * 100.0
+                    ref_price = float(peak_price)
+                else:
+                    # Cascade: another full threshold step below last fire price
+                    step_change = (price_now - anchor) / anchor
+                    if step_change > -threshold_frac:
+                        continue
+                    fire_mode = "step"
+                    pct = step_change * 100.0
+                    ref_price = float(anchor)
+
+                if self._min_gap_blocks(key):
                     continue
 
-                pct = change * 100.0
                 window = self._format_lookback(lookback)
                 tag = "F" if market == "futures" else "S"
                 sym_e = _html.escape(symbol)
-                msg = (
-                    f"📉 <b>MOVER</b> [{tag}]\n"
-                    f"<b>{sym_e}</b>  {pct:.1f}% within {window}\n"
-                    f"High <code>{peak_price:.8g}</code> → now <code>{price_now:.8g}</code>"
-                )
+                if fire_mode == "peak":
+                    line2 = f"<b>{sym_e}</b>  {pct:.1f}% within {window}"
+                    line3 = (
+                        f"High <code>{ref_price:.8g}</code> → now <code>{price_now:.8g}</code>"
+                    )
+                else:
+                    line2 = f"<b>{sym_e}</b>  {pct:.1f}% step from last alert"
+                    line3 = (
+                        f"Last <code>{ref_price:.8g}</code> → now <code>{price_now:.8g}</code>"
+                    )
+                msg = f"📉 <b>MOVER</b> [{tag}]\n{line2}\n{line3}"
+
                 try:
                     self.notifier(user_id, msg, parse_mode="HTML")
-                    self._set_cooldown(user_id, market, symbol)
+                    self._anchors[key] = price_now
+                    self._last_fire_mono[key] = time.monotonic()
                     self._fires_total += 1
                     fired += 1
                     logger.info(
-                        f"MOVER FIRED user={user_id} {market}:{symbol} "
-                        f"drawdown={pct:.2f}% peak={peak_price} now={price_now} "
-                        f"lookback={lookback}s"
+                        f"MOVER FIRED user={user_id} {market}:{symbol} mode={fire_mode} "
+                        f"pct={pct:.2f}% ref={ref_price} now={price_now} lookback={lookback}s"
                     )
                 except Exception as e:
                     logger.error(f"Mover notify failed user={user_id} {symbol}: {e}")
-
-        # Prune expired cooldowns occasionally
-        mono = time.monotonic()
-        expired = [k for k, exp in self._cooldowns.items() if mono >= exp]
-        for k in expired:
-            self._cooldowns.pop(k, None)
 
         self._last_cycle_ms = int((time.perf_counter() - t0) * 1000)
         if fired:
@@ -254,12 +301,13 @@ class MoverScanner:
         poll = max(_MIN_POLL_SECONDS, float(self.settings.mover_poll_seconds))
         logger.info(
             "Mover scanner started (markets=%s lookback=%ss threshold=%s%% poll=%ss "
-            "cooldown=%ss mode=peak_drawdown)",
+            "min_gap=%ss recovery=%s%% mode=peak+step_rearm)",
             self.settings.mover_markets,
             self.settings.mover_lookback_seconds,
             self.settings.mover_threshold_percent,
             poll,
             self.settings.mover_cooldown_seconds,
+            getattr(self.settings, "mover_recovery_percent", 3.0),
         )
         while not self._stop_event.is_set():
             try:

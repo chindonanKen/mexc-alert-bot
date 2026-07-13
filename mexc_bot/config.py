@@ -36,7 +36,11 @@ class Settings:
     mover_lookback_seconds: int
     mover_threshold_percent: float
     mover_poll_seconds: int
+    # Min seconds between fires for same user+market+symbol (anti-spam only).
+    # Cascade re-arm uses last fire price; this is NOT a long mute window.
     mover_cooldown_seconds: int
+    # Bounce above last-fire anchor by this % clears cascade state → peak mode again
+    mover_recovery_percent: float
     mover_markets: str  # "futures" | "spot" | "both"
 
     @property
@@ -87,8 +91,9 @@ def load_settings() -> Settings:
         mover_lookback_seconds=int(os.getenv("MOVER_LOOKBACK_SECONDS", "900")),
         mover_threshold_percent=float(os.getenv("MOVER_THRESHOLD_PERCENT", "5")),
         # Default 5s: evaluate rolling high→now every few seconds (floor 2s in scanner).
-        # Old default 15s left more "gap" after a dump wick.
         mover_poll_seconds=int(os.getenv("MOVER_POLL_SECONDS", "5")),
-        mover_cooldown_seconds=int(os.getenv("MOVER_COOLDOWN_SECONDS", "1800")),
+        # Default 45s min-gap (was 1800s mute — that blocked cascade dumps).
+        mover_cooldown_seconds=int(os.getenv("MOVER_COOLDOWN_SECONDS", "45")),
+        mover_recovery_percent=float(os.getenv("MOVER_RECOVERY_PERCENT", "3")),
         mover_markets=mover_markets,
     )

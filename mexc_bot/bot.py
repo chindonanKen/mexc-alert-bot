@@ -500,7 +500,9 @@ def create_bot(
                 mh = mscan.get_health()
                 mover_line = (
                     f"\nMovers: cycle={mh.get('last_cycle_ms')}ms "
-                    f"series={mh.get('tracked_series')} fires={mh.get('fires_total')}"
+                    f"series={mh.get('tracked_series')} fires={mh.get('fires_total')} "
+                    f"anchors={mh.get('active_anchors', 0)} "
+                    f"min_gap={mh.get('min_gap_seconds', '?')}s"
                 )
             except Exception:
                 pass
@@ -676,7 +678,8 @@ def create_bot(
                     f"Movers: {'ON' if s['enabled'] else 'OFF'}",
                     f"Threshold: {s['threshold_percent']}% down",
                     f"Lookback: {s['lookback_seconds']//60}m ({s['lookback_seconds']}s)",
-                    f"Cooldown: {settings.mover_cooldown_seconds//60}m (global)",
+                    f"Re-arm: step-down from last fire (+{settings.mover_recovery_percent:g}% bounce clears)",
+                    f"Min gap between fires: {settings.mover_cooldown_seconds}s (not a long mute)",
                     f"Watchlist ({len(wl)}) — mixed spot/futures OK:",
                 ]
                 lines.extend(_format_watchlist(wl))

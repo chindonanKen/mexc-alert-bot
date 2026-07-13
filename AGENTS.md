@@ -45,7 +45,7 @@ bot.py  ────────────────────────
     │              └── MexcFuturesClient (futures /contract/ticker)  [if flag on]
     │
     └── MoverStore + MoverScanner (thread)   [if flag on]
-            │         downside % only, cooldown, never touches alerts
+            │         downside % only, step-down re-arm, never touches alerts
             ├── spot and/or futures prices from watchlist markets
             └── PriceHistory ring buffer
 ```
@@ -74,7 +74,8 @@ bot.py  ────────────────────────
 | `MOVER_LOOKBACK_SECONDS` | `900` | Default rolling window (user can override via `/movers set`) |
 | `MOVER_THRESHOLD_PERCENT` | `5` | Default downside % from **high within window** |
 | `MOVER_POLL_SECONDS` | `5` | Scanner cadence (code floor **2s**). Lower = snappier |
-| `MOVER_COOLDOWN_SECONDS` | `1800` | Per user+market+symbol re-alert silence |
+| `MOVER_COOLDOWN_SECONDS` | `45` | **Min-gap** between fires (anti-spam only — not a long mute) |
+| `MOVER_RECOVERY_PERCENT` | `3` | Bounce above last-fire price clears cascade anchor |
 | `MOVER_MARKETS` | `both` | Idle fallback only; **live scans follow watchlist row markets** |
 | `PRICE_POLL_INTERVAL_SECONDS` | `1`–`2` | Target-alert monitor loop |
 | `ALERT_TOLERANCE_PERCENT` | `0.0005` | Band fallback for target alerts |
@@ -109,7 +110,7 @@ Fire condition: price **crossed** target since last sample **or** within toleran
 
 - `mover_settings` — per-user enabled, threshold %, lookback seconds  
 - `mover_watchlist` — `(user_id, symbol, market)` — **spot and futures mix allowed**  
-- Cooldowns: **in-memory** (reset on container restart)
+- Cascade anchors + min-gap: **in-memory** (reset on container restart)
 
 ---
 
@@ -153,27 +154,36 @@ Fire condition: price **crossed** target since last sample **or** within toleran
 | `/mw clear` | Empty watchlist |
 | Bare `/mw BTC ETH` | **Replaces entire list** — avoid when mixed |
 
-Movers fire message prefix: `MOVER` with `[F]` or `[S]`. Not one-shot — cooldown then can fire again.
+Movers fire message prefix: `MOVER` with `[F]` or `[S]`. Not one-shot — **step-down re-arm** on further legs of a dump.
 
-### Mover detection model (precision + snappy)
+### Mover detection model (precision + cascade)
 
-**Rule:** every poll, for each watchlist row, compute **rolling high → now** drawdown over the lookback window (default 15 minutes). Fire **as soon as** drawdown ≤ −threshold. No candle close, no wait until “the 15 minutes are over.”
+**First fire:** every poll, **rolling high → now** drawdown over lookback (default 15m). Fire as soon as ≤ −threshold. No candle close wait.
+
+**Cascade (step-down):** on fire, set `anchor = price_now`. Next fire when  
+`price_now ≤ anchor × (1 − threshold)`  
+(e.g. another −7% from the last alert price). Then anchor moves to the new price.  
+A −7% then another −20% cascade can produce multiple alerts — **not** silenced for 30 minutes.
+
+**Min-gap:** `MOVER_COOLDOWN_SECONDS` (default **45s**) only blocks rapid double-sends. It is **not** a long mute. Production must not leave this at `1800` if cascade legs matter.
+
+**Recovery:** if price rises `MOVER_RECOVERY_PERCENT` (default **3%**) above the anchor, clear anchor and return to peak-within-window mode for a new wave.
 
 | Concept | Meaning |
 |---------|--------|
-| Window | Last N seconds of in-memory samples (N = user lookback) |
-| Peak | Highest sample in that window (incl. left-edge price at/before `now−N`) |
-| Drawdown | `(price_now − peak) / peak` — e.g. −0.07 = −7% from high |
-| Latency after cross | ≈ `MOVER_POLL_SECONDS` (default 5s, floor 2s) |
-| Cold start | Needs ~one full lookback of samples per symbol before first eval |
+| Window | Last N seconds of samples (N = user lookback) |
+| Peak fire | `(price_now − peak) / peak` ≤ −threshold |
+| Step fire | `(price_now − anchor) / anchor` ≤ −threshold |
+| Latency after cross | ≈ poll interval (default 5s, floor 2s) |
+| Cold start | Needs ~one full lookback of samples before first **peak** eval |
 
-**Why endpoint-only failed in practice:** old logic used only `price_now` vs `price_15m_ago`. A mid-window spike then dump can be **−8% from high** but only **−1% vs 15m-ago**, so a 7% threshold never fired. Chart tools often measure multi-hour spans (e.g. “−49 bars / −12h”) — that is **not** a 15m window; the bot only cares about the rolling lookback.
+**Spot vs futures:** separate books. Spot row never uses futures lastPrice.
 
-**Spot vs futures:** `PENGUINUSDT` on `/mw add s` uses the **spot** book only. Futures dump on `PENGUIN_USDT` will not fire a spot row (and vice versa). Check `/mw` grouping.
+**Message shapes:**
+- Peak: `… −X% within 15m · High … → now …`
+- Step: `… −X% step from last alert · Last … → now …`
 
-**Message shape:** `MOVER [S/F] · SYM  −X.X% within 15m · High … → now …`
-
-Tune snappiness on droplet: `MOVER_POLL_SECONDS=3` (or `2`). Tune sensitivity: `/movers set 7 15` (7% within 15m).
+Tune: `MOVER_POLL_SECONDS=3`, `/movers set 7 15`, `MOVER_COOLDOWN_SECONDS=45`.
 
 ---
 
@@ -238,7 +248,7 @@ python tests/test_v3_futures_and_movers.py
 # or: make test
 ```
 
-Covers: stable_id crossing after rank shift, market isolation, futures resolve (`ZHIPU`→`ZHIPUSTOCK_USDT`), mover downside-only + cooldown, watchlist remove, alerts table isolation.
+Covers: stable_id crossing after rank shift, market isolation, futures resolve (`ZHIPU`→`ZHIPUSTOCK_USDT`), mover downside-only + step-down cascade, watchlist remove, alerts table isolation.
 
 ---
 

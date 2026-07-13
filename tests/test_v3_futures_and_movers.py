@@ -45,7 +45,8 @@ def _settings(**kwargs):
         "mover_lookback_seconds": 60,
         "mover_threshold_percent": 5.0,
         "mover_poll_seconds": 15,
-        "mover_cooldown_seconds": 3600,
+        "mover_cooldown_seconds": 45,
+        "mover_recovery_percent": 3.0,
         "mover_markets": "futures",
     }
     base.update(kwargs)
@@ -214,7 +215,7 @@ def test_mover_peak_drawdown_within_window():
     print("PASS: peak drawdown within window")
 
 
-def test_mover_scanner_downside_only_and_cooldown():
+def test_mover_scanner_downside_only_and_no_spam_same_level():
     with tempfile.TemporaryDirectory() as td:
         path = Path(td) / "alerts.db"
         mstore = MoverStore(path)
@@ -228,8 +229,11 @@ def test_mover_scanner_downside_only_and_cooldown():
         def notify(uid, msg, parse_mode=None):
             notifications.append((uid, msg))
 
-        settings = _settings(mover_lookback_seconds=60, mover_threshold_percent=5.0, mover_cooldown_seconds=3600)
-        # Fake futures: we'll inject history by calling _record_all after setting prices
+        settings = _settings(
+            mover_lookback_seconds=60,
+            mover_threshold_percent=5.0,
+            mover_cooldown_seconds=0,  # no min-gap; step rule alone must prevent spam
+        )
         fut = FakePriceProvider({"BTC_USDT": 100.0})
         scanner = MoverScanner(
             settings=settings,
@@ -239,13 +243,10 @@ def test_mover_scanner_downside_only_and_cooldown():
         )
 
         now = time.time()
-        # Seed old high price + current dump
         scanner.history.record("futures", "BTC_USDT", 100.0, ts=now - 90)
         scanner.history.record("futures", "BTC_USDT", 90.0, ts=now)  # -10%
 
-        # Force one evaluation without re-fetch overwriting badly: patch fetch to current 90
         fut._prices = {"BTC_USDT": 90.0}
-        # Manually run check — it will also re-record 90 at "now" which is fine
         scanner._check_once()
 
         assert len(notifications) == 1, notifications
@@ -253,18 +254,172 @@ def test_mover_scanner_downside_only_and_cooldown():
         assert "BTC_USDT" in notifications[0][1]
         assert "within" in notifications[0][1] or "High" in notifications[0][1]
 
-        # Second cycle immediately → cooldown blocks
+        # Same price again → no second fire (need another full step from anchor 90)
         scanner._check_once()
-        assert len(notifications) == 1, "cooldown should block second fire"
+        assert len(notifications) == 1, "same level must not re-fire"
 
-        # Upside should not fire even with empty cooldown for another coin
+        # Upside should not fire
         mstore.add_watchlist(u, "ETH_USDT", "futures")
         scanner.history.record("futures", "ETH_USDT", 100.0, ts=now - 90)
         scanner.history.record("futures", "ETH_USDT", 120.0, ts=now)
         fut._prices = {"BTC_USDT": 90.0, "ETH_USDT": 120.0}
         scanner._check_once()
         assert len(notifications) == 1, "upside must not fire"
-        print("PASS: mover scanner downside-only + cooldown")
+        print("PASS: mover scanner downside-only + no spam at same level")
+
+
+def test_mover_scanner_step_down_cascade():
+    """After first fire, another full threshold from fire price alerts again."""
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "alerts.db"
+        mstore = MoverStore(path)
+        u = 77
+        mstore.set_params(u, threshold_percent=7.0, lookback_seconds=900, default_enabled=True)
+        mstore.set_enabled(u, True, 7.0, 900)
+        mstore.set_watchlist(u, [{"symbol": "ABC_USDT", "market": "futures"}])
+
+        notifications = []
+
+        def notify(uid, msg, parse_mode=None):
+            notifications.append((uid, msg))
+
+        settings = _settings(
+            mover_lookback_seconds=900,
+            mover_threshold_percent=7.0,
+            mover_cooldown_seconds=0,
+            mover_recovery_percent=3.0,
+        )
+        fut = FakePriceProvider({"ABC_USDT": 100.0})
+        scanner = MoverScanner(
+            settings=settings,
+            mover_store=mstore,
+            notifier=notify,
+            futures_provider=fut,
+        )
+        now = time.time()
+        # Leg 1: high 100 → 92 (−8%)
+        scanner.history.record("futures", "ABC_USDT", 100.0, ts=now - 900)
+        scanner.history.record("futures", "ABC_USDT", 92.0, ts=now)
+        fut._prices = {"ABC_USDT": 92.0}
+        scanner._check_once()
+        assert len(notifications) == 1, notifications
+        assert "within" in notifications[0][1]
+
+        # Mild further drop not yet another full 7% from 92 (92 * 0.93 = 85.56)
+        fut._prices = {"ABC_USDT": 88.0}
+        scanner.history.record("futures", "ABC_USDT", 88.0, ts=time.time())
+        scanner._check_once()
+        assert len(notifications) == 1, "partial step must not fire"
+
+        # Leg 2: below 85.56
+        fut._prices = {"ABC_USDT": 85.0}
+        scanner.history.record("futures", "ABC_USDT", 85.0, ts=time.time())
+        scanner._check_once()
+        assert len(notifications) == 2, notifications
+        assert "step from last alert" in notifications[1][1]
+
+        # Leg 3: another 7% from 85 → 79.05
+        fut._prices = {"ABC_USDT": 79.0}
+        scanner.history.record("futures", "ABC_USDT", 79.0, ts=time.time())
+        scanner._check_once()
+        assert len(notifications) == 3, notifications
+        print("PASS: mover step-down cascade")
+
+
+def test_mover_scanner_recovery_clears_anchor():
+    """Bounce above anchor clears cascade; new peak dump can fire again."""
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "alerts.db"
+        mstore = MoverStore(path)
+        u = 55
+        mstore.set_params(u, threshold_percent=7.0, lookback_seconds=900, default_enabled=True)
+        mstore.set_enabled(u, True, 7.0, 900)
+        mstore.set_watchlist(u, [{"symbol": "XYZ_USDT", "market": "futures"}])
+
+        notifications = []
+
+        def notify(uid, msg, parse_mode=None):
+            notifications.append((uid, msg))
+
+        settings = _settings(
+            mover_lookback_seconds=900,
+            mover_threshold_percent=7.0,
+            mover_cooldown_seconds=0,
+            mover_recovery_percent=3.0,
+        )
+        fut = FakePriceProvider({"XYZ_USDT": 100.0})
+        scanner = MoverScanner(
+            settings=settings,
+            mover_store=mstore,
+            notifier=notify,
+            futures_provider=fut,
+        )
+        t0 = time.time()
+        scanner.history.record("futures", "XYZ_USDT", 100.0, ts=t0 - 900)
+        scanner.history.record("futures", "XYZ_USDT", 90.0, ts=t0)
+        fut._prices = {"XYZ_USDT": 90.0}
+        scanner._check_once()
+        assert len(notifications) == 1
+
+        # Bounce +3% above anchor 90 → clears anchor
+        fut._prices = {"XYZ_USDT": 93.0}
+        scanner.history.record("futures", "XYZ_USDT", 93.0, ts=time.time())
+        scanner._check_once()
+        assert len(notifications) == 1
+        assert (u, "futures", "XYZ_USDT") not in scanner._anchors
+
+        # New wave: need peak in window and −7% from that peak
+        # Record a higher peak then dump
+        t1 = time.time()
+        scanner.history.record("futures", "XYZ_USDT", 100.0, ts=t1 - 100)
+        scanner.history.record("futures", "XYZ_USDT", 90.0, ts=t1)
+        fut._prices = {"XYZ_USDT": 90.0}
+        # Ensure left edge exists for 900s lookback
+        scanner.history.record("futures", "XYZ_USDT", 100.0, ts=t1 - 900)
+        scanner._check_once()
+        assert len(notifications) == 2, notifications
+        assert "within" in notifications[1][1]
+        print("PASS: mover recovery clears anchor")
+
+
+def test_mover_min_gap_blocks_rapid_repeat():
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "alerts.db"
+        mstore = MoverStore(path)
+        u = 33
+        mstore.set_params(u, threshold_percent=5.0, lookback_seconds=60, default_enabled=True)
+        mstore.set_enabled(u, True, 5.0, 60)
+        mstore.set_watchlist(u, [{"symbol": "BTC_USDT", "market": "futures"}])
+        notifications = []
+
+        def notify(uid, msg, parse_mode=None):
+            notifications.append((uid, msg))
+
+        settings = _settings(
+            mover_lookback_seconds=60,
+            mover_threshold_percent=5.0,
+            mover_cooldown_seconds=3600,  # long min-gap
+        )
+        fut = FakePriceProvider({"BTC_USDT": 90.0})
+        scanner = MoverScanner(
+            settings=settings,
+            mover_store=mstore,
+            notifier=notify,
+            futures_provider=fut,
+        )
+        now = time.time()
+        scanner.history.record("futures", "BTC_USDT", 100.0, ts=now - 90)
+        scanner.history.record("futures", "BTC_USDT", 90.0, ts=now)
+        fut._prices = {"BTC_USDT": 90.0}
+        scanner._check_once()
+        assert len(notifications) == 1
+
+        # Big further step would qualify, but min-gap blocks
+        fut._prices = {"BTC_USDT": 80.0}
+        scanner.history.record("futures", "BTC_USDT", 80.0, ts=time.time())
+        scanner._check_once()
+        assert len(notifications) == 1, "min-gap should block rapid second fire"
+        print("PASS: mover min-gap blocks rapid repeat")
 
 
 def test_mover_scanner_peak_not_endpoint():
@@ -353,7 +508,10 @@ if __name__ == "__main__":
     test_futures_skipped_without_provider()
     test_mover_history_downside_pct()
     test_mover_peak_drawdown_within_window()
-    test_mover_scanner_downside_only_and_cooldown()
+    test_mover_scanner_downside_only_and_no_spam_same_level()
+    test_mover_scanner_step_down_cascade()
+    test_mover_scanner_recovery_clears_anchor()
+    test_mover_min_gap_blocks_rapid_repeat()
     test_mover_scanner_peak_not_endpoint()
     test_mover_does_not_touch_alerts_table()
     test_mover_watchlist_remove_and_add()
