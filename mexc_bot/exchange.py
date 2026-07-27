@@ -122,10 +122,11 @@ class MexcFuturesClient:
       GET {base}/contract/ticker
       Optional query: symbol=BTC_USDT
 
-    Symbols use underscore form: BTC_USDT (crypto) or TSLASTOCK_USDT (stock perps).
+    Symbols as returned by MEXC contract ticker, e.g.:
+      BTC_USDT (crypto), TSLASTOCK_USDT (legacy stock), TSLAUSDT (compact stock UI).
 
     resolve_symbol() maps friendly input (TSLA, zhipu, samsung) onto the live
-    contract list so users do not need to guess STOCK suffixes.
+    contract list so users do not need to guess STOCK / compact suffixes.
     """
 
     def __init__(
@@ -377,8 +378,34 @@ def _futures_input_base(raw: str) -> str:
     return base
 
 
+def _futures_symbol_body(sym: str) -> Optional[str]:
+    """Strip quote from a live contract id → base body.
+
+    Supports both crypto-style underscores and compact stock UI form:
+      BTC_USDT      → BTC
+      TSLASTOCK_USDT → TSLASTOCK
+      TSLAUSDT      → TSLA   (MEXC stock perps often omit the underscore)
+    """
+    s = str(sym or "").strip().upper()
+    if not s:
+        return None
+    if "_" in s:
+        parts = s.split("_")
+        if parts[-1] in ("USDT", "USDC", "USD"):
+            return "_".join(parts[:-1]) or None
+        return s
+    for q in ("USDT", "USDC", "USD"):
+        if s.endswith(q) and len(s) > len(q):
+            return s[: -len(q)]
+    return s
+
+
 def futures_symbol_candidates(raw: str) -> list[str]:
-    """Ordered candidate contract ids for a user-typed futures symbol."""
+    """Ordered candidate contract ids for a user-typed futures symbol.
+
+    Includes underscore form (BTC_USDT), compact stock form (TSLAUSDT),
+    and *STOCK* legacy stock perps (TSLASTOCK_USDT).
+    """
     base = _futures_input_base(raw)
     if not base:
         return []
@@ -402,13 +429,18 @@ def futures_symbol_candidates(raw: str) -> list[str]:
     # Exact normalized form first (crypto-style)
     add(normalize_futures_symbol(raw))
     for core in cores:
+        # Compact form first for stock-like names (UI: TSLAUSDT Perpetual)
+        add(f"{core}USDT")
         add(f"{core}_USDT")
         if not core.endswith("STOCK"):
             add(f"{core}STOCK_USDT")
+            add(f"{core}STOCKUSDT")
         else:
             bare = core[: -len("STOCK")]
             add(f"{bare}STOCK_USDT")
+            add(f"{bare}STOCKUSDT")
             add(f"{bare}_USDT")
+            add(f"{bare}USDT")
     return out
 
 
@@ -420,10 +452,10 @@ def resolve_futures_symbol(
     Map friendly input to a real MEXC futures contract symbol.
 
     When `known` is a set of live contract ids (from batch ticker):
-      TSLA  → TSLASTOCK_USDT (if that exists)
+      TSLA  → TSLAUSDT (stock UI form) or TSLASTOCK_USDT (legacy) or TSLA_USDT
       ZHIPU → ZHIPUSTOCK_USDT
       BTC   → BTC_USDT
-      SAMSUNG → SAMSUNGSTOCK_USDT
+      SAMSUNG → SAMSUNGUSDT / SAMSUNGSTOCK_USDT
 
     When `known` is None: returns the first deterministic candidate (usually BASE_USDT).
     """
@@ -447,16 +479,17 @@ def resolve_futures_symbol(
     if not base:
         return None
 
-    # Ranked search against the live universe
+    # Ranked search against the live universe (underscore + compact USDT ids)
     ranked: list[tuple[int, str]] = []
     for sym in known_u:
-        if not sym.endswith("_USDT"):
+        body = _futures_symbol_body(sym)
+        if not body:
             continue
-        body = sym[: -len("_USDT")]  # e.g. BTC, TSLASTOCK, ZHIPUSTOCK
         if body == base:
-            ranked.append((0, sym))  # perfect crypto-style
+            # Prefer compact stock UI (TSLAUSDT) and crypto BASE_USDT equally strong
+            ranked.append((0, sym))
         elif body == f"{base}STOCK":
-            ranked.append((1, sym))  # stock perp
+            ranked.append((1, sym))  # stock perp *STOCK*
         elif body.startswith(f"{base}STOCK"):
             ranked.append((2, sym))
         elif body.startswith(f"{base}_"):

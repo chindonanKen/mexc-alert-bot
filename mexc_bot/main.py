@@ -60,12 +60,15 @@ def main() -> None:
         logger.info("Mover store ready (tables in same DB file, separate from alerts)")
 
     # Create bot first (with price_provider for /price). Attach monitor after.
+    # Pass futures client whenever it exists so /mw add f TSLA can resolve stock
+    # perps even if FEATURE_FUTURES_ALERTS is off (movers-only). /af still gated
+    # by the feature flag inside bot handlers.
     tg_bot = create_bot(
         settings,
         store,
         price_provider=price_provider,
         monitor=None,
-        futures_provider=futures_provider if settings.feature_futures_alerts else None,
+        futures_provider=futures_provider,
         mover_store=mover_store,
         mover_scanner=None,
     )

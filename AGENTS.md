@@ -137,7 +137,7 @@ Fire condition: price **crossed** target since last sample **or** within toleran
 | `/af TSLA 250` | Resolves stock perps (e.g. `TSLASTOCK_USDT`) |
 | `/p f BTC` / `/p f zhipu` | Futures price (short names OK) |
 
-**Symbol resolve** (`exchange.resolve_futures_symbol`): maps `TSLA` / `ZHIPU` / `samsung` → live contract list including `*STOCK*_USDT`. Do not assume every name is `BASE_USDT`.
+**Symbol resolve** (`exchange.resolve_futures_symbol`): maps `TSLA` / `ZHIPU` / `samsung` → live contract list. Stock perps may be **compact** (`TSLAUSDT` as on MEXC UI), **legacy** `*STOCK*_USDT`, or crypto-style `BASE_USDT`. Do not assume only underscores.
 
 ### Movers (`FEATURE_MOVER_SCANNER`)
 

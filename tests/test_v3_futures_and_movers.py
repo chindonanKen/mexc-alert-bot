@@ -88,6 +88,31 @@ def test_resolve_stock_futures_against_known_list():
     print("PASS: resolve stock futures against known list")
 
 
+def test_resolve_compact_stock_ui_form():
+    """MEXC stock UI uses TSLAUSDT (no underscore); must resolve from TSLA."""
+    known = {
+        "BTC_USDT",
+        "ETH_USDT",
+        "TSLAUSDT",  # compact stock perpetual (UI title)
+        "SAMSUNGUSDT",
+        "MUUSDT",
+        "ZHIPUSTOCK_USDT",
+    }
+    assert resolve_futures_symbol("TSLA", known) == "TSLAUSDT"
+    assert resolve_futures_symbol("tsla", known) == "TSLAUSDT"
+    assert resolve_futures_symbol("tesla", known) == "TSLAUSDT"
+    assert resolve_futures_symbol("TSLAUSDT", known) == "TSLAUSDT"
+    assert resolve_futures_symbol("samsung", known) == "SAMSUNGUSDT"
+    assert resolve_futures_symbol("MU", known) == "MUUSDT"
+    # crypto still underscore
+    assert resolve_futures_symbol("BTC", known) == "BTC_USDT"
+    # compact form in candidates
+    cands = futures_symbol_candidates("TSLA")
+    assert "TSLAUSDT" in cands
+    assert "TSLA_USDT" in cands
+    print("PASS: resolve compact stock UI form (TSLAUSDT)")
+
+
 def test_existing_spot_alerts_default_market():
     with tempfile.TemporaryDirectory() as td:
         store = AlertStore(Path(td) / "alerts.db")
@@ -504,6 +529,7 @@ def test_mover_watchlist_remove_and_add():
 if __name__ == "__main__":
     test_symbol_normalization()
     test_resolve_stock_futures_against_known_list()
+    test_resolve_compact_stock_ui_form()
     test_existing_spot_alerts_default_market()
     test_futures_alert_isolated_price_book()
     test_futures_skipped_without_provider()
