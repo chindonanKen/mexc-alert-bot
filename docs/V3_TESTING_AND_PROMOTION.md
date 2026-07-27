@@ -1,8 +1,11 @@
 # V3 — Futures alerts + downside movers
 
+> **Current agent orientation:** [AGENTS.md](../AGENTS.md) · **Latest session handoff:** [SESSION_HANDOFF.md](SESSION_HANDOFF.md).  
+> Movers now include peak drawdown, step-down cascade, velocity/volume/heat; optional klines. This doc remains the **staging → prod** checklist.
+
 ## What was built
 
-Two features, both **off by default** (`FEATURE_*=false`):
+Two features, both **off by default** in templates (`FEATURE_*=false`):
 
 | Feature | How you use it | How it works |
 |---------|----------------|--------------|

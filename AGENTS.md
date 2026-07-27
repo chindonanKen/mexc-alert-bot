@@ -1,32 +1,38 @@
 # AGENTS.md — MEXC Alert Bot
 
-Guide for humans and coding agents working on this repo. Read this before changing production behavior.
+Guide for humans and coding agents. **Read this before changing production behavior.**
+
+**Repo (GitHub):** `https://github.com/chindonanKen/mexc-alert-bot` · branch `main`  
+**Local folder:** often `~/mexc-bot` · **droplet folder:** often `~/mexc-alert-bot`  
+**Owner use case:** daytrading MEXC; primary edge is **sharp downside / panic dumps** (AD / average-drop style scale-ins). Movers are the high-value feature.
+
+For a dated handoff of recent work, see **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)**.
 
 ---
 
 ## What this project is
 
-**Telegram bot** that:
+**Telegram bot** (Python 3.11+, Docker on DigitalOcean):
 
-1. **Target price alerts (V1 core)** — one-shot alerts when a MEXC price crosses a user target (spot by default).
-2. **Futures target alerts (V3)** — same one-shot model on MEXC **USDT-M futures** contracts.
-3. **Downside movers (V3)** — watchlist scanner that fires when a coin drops ≥ X% over a lookback window (default 15m). **Down only.** Spot and futures can mix on the same list.
+| # | Feature | Notes |
+|---|---------|--------|
+| 1 | **Target price alerts (V1)** | One-shot when MEXC **spot** price crosses target |
+| 2 | **Futures targets (V3)** | Same one-shot on **USDT-M futures** (`/af`) |
+| 3 | **Downside movers (V3)** | Watchlist scanner: ≥ X% **down** within lookback (default 15m). Spot + futures mix. Cascades re-alert via step-down |
 
-Runtime: Python 3.11+, Docker on a DigitalOcean droplet, long-poll Telegram (`pyTelegramBotAPI`), public MEXC REST (no trading keys).
-
-**Repo:** typically `mexc-alert-bot` on GitHub · **local folder** may be `mexc-bot`.
+Stack: long-poll Telegram (`pyTelegramBotAPI`), **public** MEXC REST only (no trading keys).
 
 ---
 
 ## Non‑negotiable safety rules
 
-1. **Do not break existing spot target alerts.** Large live alert sets run in production.
-2. **Feature flags default OFF** in code/config templates. Production enables them explicitly in `.env`.
+1. **Do not break existing spot target alerts.** Live production alert sets are large.
+2. **Feature flags default OFF** in code / `.env.example`. Production enables them in droplet `.env`.
 3. **Additive DB only** — never rewrite or drop `alerts` rows in migrations.
 4. **Movers must not delete target alerts.** Separate tables + `MoverScanner` (no shared fire/remove path with `PriceMonitor`).
 5. **Prefer `/mw add` / `/mw remove`** over bare `/mw SYMBOL…` (replace-all wipes the whole watchlist).
-6. **Never commit `.env`** or bot tokens. Use `.env.example` / `.env.staging.example` only.
-7. **Staging uses a separate volume** (`./data-staging`) and preferably a second BotFather token.
+6. **Never commit `.env`** or bot tokens. Templates only: `.env.example`, `.env.staging.example`.
+7. **Staging** uses `./data-staging` (and preferably a second BotFather token) — never prod `./data`.
 
 ---
 
@@ -38,52 +44,79 @@ Telegram user
     ▼
 bot.py  ─────────────────────────────►  AlertStore (SQLite: alerts)
     │                                         ▲
-    │                                         │
     │         PriceMonitor (thread)  ─────────┘  one-shot fire → remove by stable_id
     │              │
     │              ├── MexcClient (spot /ticker/price)
-    │              └── MexcFuturesClient (futures /contract/ticker)  [if flag on]
+    │              └── MexcFuturesClient (futures /contract/ticker)
     │
-    └── MoverStore + MoverScanner (thread)   [if flag on]
-            │         downside % only, step-down re-arm, never touches alerts
-            ├── spot and/or futures prices from watchlist markets
-            └── PriceHistory ring buffer
+    └── MoverStore + MoverScanner (thread)
+            │  peak drawdown + step-down re-arm; never touches alerts
+            ├── spot and/or futures books from watchlist markets
+            ├── PriceHistory ring buffer
+            └── enrichments: velocity, volume, heat board, optional kline reds
 ```
 
 | Module | Role |
 |--------|------|
-| `mexc_bot/main.py` | Wire settings, store, providers, monitor, movers, Telegram polling |
-| `mexc_bot/config.py` | Env → `Settings` (flags, poll intervals, mover defaults) |
-| `mexc_bot/bot.py` | All Telegram handlers (`/a`, `/af`, `/mw`, …) |
-| `mexc_bot/monitor.py` | Target-price loop: cross or tolerance band → notify → delete |
-| `mexc_bot/exchange.py` | Spot + futures clients; **futures symbol resolve** (STOCK perps) |
-| `mexc_bot/storage.py` | SQLite `alerts` + visual ranks + `market` column |
-| `mexc_bot/movers/` | Isolated downside scanner (`scanner`, `history`, `storage`) |
-| `tests/` | Crossing/remove regression + V3 resolve/movers unit tests |
-| `docs/V3_TESTING_AND_PROMOTION.md` | Staging → prod promotion runbook |
-| `docker-compose.yml` | `mexc-bot` (prod) + `mexc-bot-staging` (profile `staging`) |
+| `mexc_bot/main.py` | Wire settings, stores, providers, monitor, movers, polling. **Pass `futures_provider` into bot whenever the client exists** (movers-only still needs resolve for `/mw add f TSLA`). |
+| `mexc_bot/config.py` | Env → `Settings` |
+| `mexc_bot/bot.py` | All Telegram handlers; plain-text replies |
+| `mexc_bot/monitor.py` | Target-price loop; stable_id crossing |
+| `mexc_bot/exchange.py` | Spot + futures clients; **stock/crypto futures resolve** |
+| `mexc_bot/storage.py` | SQLite `alerts` + visual ranks + `market` |
+| `mexc_bot/movers/scanner.py` | Mover loop: peak/step fire, cascade anchors, enrichments, heat auto |
+| `mexc_bot/movers/history.py` | Ring buffer; `peak_drawdown` |
+| `mexc_bot/movers/storage.py` | `mover_settings` + `mover_watchlist` |
+| `mexc_bot/movers/velocity.py` | `%/min` + PANIC/FAST/GRIND bands |
+| `mexc_bot/movers/heat.py` | Ranked dump board (auto + `/mw`) |
+| `mexc_bot/movers/klines.py` | Optional consecutive closed red counts (5m/15m/1h/4h) |
+| `tests/` | Crossing, V3 resolve/movers, enrichment |
+| `docs/V3_TESTING_AND_PROMOTION.md` | Staging → prod checklist |
+| `docs/FUTURE_STRATEGY_BOTS.md` | Separate strategy-bot backlog (not movers) |
+| `docs/SESSION_HANDOFF.md` | Latest session status + deploy notes |
+| `docker-compose.yml` | `mexc-bot` + `mexc-bot-staging` (profile `staging`) |
 
 ---
 
-## Feature flags (`.env`)
+## Feature flags & mover env (`.env`)
+
+### Core flags
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `FEATURE_FUTURES_ALERTS` | `false` | `/af`, `/p f`, futures book in `PriceMonitor` |
-| `FEATURE_MOVER_SCANNER` | `false` | `/movers`, `/mw`, `MoverScanner` thread |
-| `MOVER_LOOKBACK_SECONDS` | `900` | Default rolling window (user can override via `/movers set`) |
-| `MOVER_THRESHOLD_PERCENT` | `5` | Default downside % from **high within window** |
-| `MOVER_POLL_SECONDS` | `5` | Scanner cadence (code floor **2s**). Lower = snappier |
-| `MOVER_COOLDOWN_SECONDS` | `45` | **Min-gap** between fires (anti-spam only — not a long mute) |
-| `MOVER_RECOVERY_PERCENT` | `3` | Bounce above last-fire price clears cascade anchor |
-| `MOVER_MARKETS` | `both` | Idle fallback only; **live scans follow watchlist row markets** |
-| `PRICE_POLL_INTERVAL_SECONDS` | `1`–`2` | Target-alert monitor loop |
-| `ALERT_TOLERANCE_PERCENT` | `0.0005` | Band fallback for target alerts |
-| `ALERTS_FILE` | `data/alerts.json` | Path; storage uses sibling `.db` (JSON migrates once) |
-| `MEXC_API_BASE` | spot v3 | Spot REST |
-| `MEXC_FUTURES_API_BASE` | `https://contract.mexc.com/api/v1` | Futures REST |
+| `FEATURE_FUTURES_ALERTS` | `false` | `/af`, futures rows in `PriceMonitor` |
+| `FEATURE_MOVER_SCANNER` | `false` | `/movers`, `/mw`, `MoverScanner` |
 
-Kill switch: set flag(s) to `false` and `docker compose up -d mexc-bot`.
+### Mover timing / cascade
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `MOVER_LOOKBACK_SECONDS` | `900` | Default rolling window (`/movers set` overrides per user) |
+| `MOVER_THRESHOLD_PERCENT` | `5` | Default downside % from **high within window** |
+| `MOVER_POLL_SECONDS` | `5` | Scanner cadence (code floor **2s**) |
+| `MOVER_COOLDOWN_SECONDS` | `45` | **Min-gap** between fires only — **not** a long mute. Prod must not leave `1800` if cascade matters |
+| `MOVER_RECOVERY_PERCENT` | `3` | Bounce above last-fire **anchor** clears cascade → peak mode again |
+| `MOVER_MARKETS` | `both` | Idle fallback; live scans follow watchlist row markets |
+
+### Mover enrichments (scanner-owned; never touch `alerts`)
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `MOVER_ENRICH_VELOCITY` | `true` | `%/min` + PANIC / FAST / GRIND on fires |
+| `MOVER_VELOCITY_PANIC` | `2.0` | %/min ≥ this → PANIC |
+| `MOVER_VELOCITY_FAST` | `0.8` | %/min ≥ this → FAST (else GRIND) |
+| `MOVER_ENRICH_VOLUME` | `true` | 24h vol line when futures ticker provides it |
+| `MOVER_ENRICH_KLINES` | **`false`** | Red-candle streaks via klines; **opt-in** (extra API; closed candles only) |
+| `MOVER_HEAT_AUTO` | `true` | Auto **PANIC BOARD** when many watchlist names dump |
+| `MOVER_HEAT_BREADTH_MIN` | `3` | Min dumping names to auto-push board |
+| `MOVER_HEAT_TOP_N` | `5` | Top rows on board |
+| `MOVER_HEAT_MIN_GAP_SECONDS` | `45` | Anti-spam for auto board |
+| `MOVER_HEAT_REFRESH_SECONDS` | `90` | Refresh interval for similar board |
+| `MOVER_HEAT_ON_MW` | `true` | Show heat ranking on `/mw` |
+
+Other: `PRICE_POLL_INTERVAL_SECONDS`, `ALERT_TOLERANCE_PERCENT`, `ALERTS_FILE`, `MEXC_API_BASE`, `MEXC_FUTURES_API_BASE`.
+
+**Kill switch:** set `FEATURE_*=false` and `docker compose up -d mexc-bot`.
 
 ---
 
@@ -93,176 +126,184 @@ Kill switch: set flag(s) to `false` and `docker compose up -d mexc-bot`.
 
 | Column | Notes |
 |--------|--------|
-| `id` | Stable PK (autoincrement). **Crossing history keys on this**, not visual rank. |
+| `id` | Stable PK. **Crossing history keys on this**, not visual rank |
 | `user_id` | Telegram user id |
-| `symbol` | Spot: `BTCUSDT`. Futures: `BTC_USDT` or `TSLASTOCK_USDT` |
+| `symbol` | Spot: `BTCUSDT`. Futures: `BTC_USDT`, `TSLAUSDT`, `TSLASTOCK_USDT`, … |
 | `price` | Target |
 | `enabled` | 0/1 |
-| `market` | `'spot'` (default) or `'futures'` — **additive migration** |
+| `market` | `'spot'` (default) or `'futures'` — additive |
 
-**Visual id** shown in `/l` is 1-based rank (`ORDER BY id ASC`), recomputed every read. `/r` / `/t` use visual ids. Monitor removes by **stable_id**.
+Visual id in `/l` = 1-based rank by `id ASC`. Monitor removes by **stable_id**. One-shot: fire → notify → delete.
 
-One-shot: fire → Telegram → `remove_alerts_by_stable_ids`.
+### Movers — same DB file, separate tables
 
-Fire condition: price **crossed** target since last sample **or** within tolerance band.
-
-### Movers — separate tables (same DB file)
-
-- `mover_settings` — per-user enabled, threshold %, lookback seconds  
-- `mover_watchlist` — `(user_id, symbol, market)` — **spot and futures mix allowed**  
-- Cascade anchors + min-gap: **in-memory** (reset on container restart)
+- `mover_settings` — per-user enabled, threshold %, lookback  
+- `mover_watchlist` — `(user_id, symbol, market)` — spot + futures mix  
+- Cascade **anchors** + min-gap + heat anti-spam: **in-memory** (reset on restart)
 
 ---
 
-## Telegram commands (cheat sheet)
+## Telegram commands
 
-### Spot target alerts (always)
+### Spot targets (always)
 
 | Command | Action |
 |---------|--------|
-| `/a BTC 65000` | Add spot one-shot (`BTCUSDT`) |
-| `/l` | List alerts (`[S]` / `[F]`) |
-| `/r 3` or `/r BTCUSDT` | Remove |
-| `/t 3` | Toggle |
+| `/a BTC 65000` | Spot one-shot |
+| `/l` `/r` `/t` | List / remove / toggle |
 | `/p BTC` | Spot price |
-| `/s` | Status + flags + health |
-| `/clearall confirm` | Wipe all target alerts |
-| `/disableall` | Disable without delete |
+| `/s` | Status + flags + mover health |
+| `/clearall confirm` / `/disableall` | Wipe or disable all targets |
 
 ### Futures targets (`FEATURE_FUTURES_ALERTS`)
 
 | Command | Action |
 |---------|--------|
-| `/af BTC 65000` | Futures one-shot |
-| `/af TSLA 250` | Resolves stock perps (e.g. `TSLASTOCK_USDT`) |
-| `/p f BTC` / `/p f zhipu` | Futures price (short names OK) |
-
-**Symbol resolve** (`exchange.resolve_futures_symbol`): maps `TSLA` / `ZHIPU` / `samsung` → live contract list. Stock perps may be **compact** (`TSLAUSDT` as on MEXC UI), **legacy** `*STOCK*_USDT`, or crypto-style `BASE_USDT`. Do not assume only underscores.
+| `/af BTC 65000` | Crypto perp |
+| `/af TSLA 250` | Stock perp (resolve to live id) |
+| `/p f TSLA` | Futures price |
 
 ### Movers (`FEATURE_MOVER_SCANNER`)
 
 | Command | Action |
 |---------|--------|
-| `/movers on` / `off` | Enable scanner for you |
-| `/movers set 5 15` | 5% down in 15 minutes |
-| `/movers list` | Settings + grouped watchlist |
-| `/mw` | Show watchlist + tips |
-| `/mw add f BTC ETH` | Add **futures** (does not wipe spot) |
-| `/mw add s SIREN` | Add **spot** only (own book — e.g. when futures price differs) |
-| `/mw add f:BTC s:SIREN` | Mixed add in one message |
-| `/mw remove SIREN` | Remove (either market; or `s`/`f` filter) |
-| `/mw clear` | Empty watchlist |
+| `/movers on\|off\|set 7 15\|list` | Enable / params / status |
+| `/mw` | Watchlist + optional heat |
+| `/mw add f BTC ETH` | Futures (no wipe of spot) |
+| `/mw add s SIREN` | Spot book only |
+| `/mw add f:BTC s:SIREN` | Mixed |
+| `/mw remove …` / `/mw clear` | Edit list |
 | Bare `/mw BTC ETH` | **Replaces entire list** — avoid when mixed |
 
-Movers fire message prefix: `MOVER` with `[F]` or `[S]`. Not one-shot — **step-down re-arm** on further legs of a dump.
+---
 
-### Mover enrichments (scanner-owned)
+## Mover detection model (do not regress)
 
-When movers are on, the scanner can add (env-tunable; see `.env.example`):
+1. **First fire (peak):** rolling **high → now** drawdown over lookback ≥ threshold. No candle-close wait.  
+2. **Cascade (step):** after fire, `anchor = price_now`. Next fire when another full threshold **below anchor**.  
+3. **Min-gap:** `MOVER_COOLDOWN_SECONDS` (default 45s) only blocks rapid double-sends.  
+4. **Recovery:** price ≥ anchor × (1 + recovery%) → clear anchor (skip fire that cycle) → peak mode next.  
+5. **Enrichments** attach to messages; klines **off by default**. Heat board can push without `/mw`.
 
-| Feature | Default | Notes |
-|---------|---------|--------|
-| **Velocity** | on | `%/min` from peak + `PANIC` / `FAST` / `GRIND` on each fire |
-| **Volume** | on | 24h vol line when futures ticker provides it |
-| **Auto heat board** | on | Pushes ranked top-N when ≥`MOVER_HEAT_BREADTH_MIN` names dump — **no `/mw` needed** |
-| **`/mw` heat** | on | Same ranking on demand |
-| **Red candles** | **off** | 5m/15m/1h/4h consecutive closed reds via klines (`MOVER_ENRICH_KLINES`) |
+Message shapes:
+- Peak: `−X% within 15m · High → now`  
+- Step: `−X% step from last alert · Last → now`  
+- Plus velocity / volume / optional reds  
 
-Still **never** deletes target `alerts`. Backlog of other strategy bots: `docs/FUTURE_STRATEGY_BOTS.md`.
+**Spot vs futures:** never mix books for the same name.
 
-### Mover detection model (precision + cascade)
+---
 
-**First fire:** every poll, **rolling high → now** drawdown over lookback (default 15m). Fire as soon as ≤ −threshold. No candle close wait.
+## Futures / stock symbol resolve (TSLA, etc.)
 
-**Cascade (step-down):** on fire, set `anchor = price_now`. Next fire when  
-`price_now ≤ anchor × (1 − threshold)`  
-(e.g. another −7% from the last alert price). Then anchor moves to the new price.  
-A −7% then another −20% cascade can produce multiple alerts — **not** silenced for 30 minutes.
+**Problem:** MEXC stock perps are **not** always `BASE_USDT`. Live forms include:
 
-**Min-gap:** `MOVER_COOLDOWN_SECONDS` (default **45s**) only blocks rapid double-sends. It is **not** a long mute. Production must not leave this at `1800` if cascade legs matter.
+| Form | Example |
+|------|---------|
+| Compact UI | `TSLAUSDT` |
+| Legacy STOCK | `TSLASTOCK_USDT`, `ZHIPUSTOCK_USDT` |
+| Crypto | `BTC_USDT` |
 
-**Recovery:** if price rises `MOVER_RECOVERY_PERCENT` (default **3%**) above the anchor, clear anchor and return to peak-within-window mode for a new wave.
+**Resolve path:** `MexcFuturesClient.resolve_symbol` → `resolve_futures_symbol` against **live** contract ticker keys (`exchange.py`). Aliases: `TESLA`→`TSLA`, etc. (`FUTURES_BASE_ALIASES`).
 
-| Concept | Meaning |
-|---------|--------|
-| Window | Last N seconds of samples (N = user lookback) |
-| Peak fire | `(price_now − peak) / peak` ≤ −threshold |
-| Step fire | `(price_now − anchor) / anchor` ≤ −threshold |
-| Latency after cross | ≈ poll interval (default 5s, floor 2s) |
-| Cold start | Needs ~one full lookback of samples before first **peak** eval |
+**User commands that work for Tesla-like names:**
+- `/af TSLA 250`, `/p f TSLA`, `/mw add f TSLA` (or `TESLA`)
+- **Not** spot `/a TSLA` / `/mw add s TSLA` unless a real spot pair exists
 
-**Spot vs futures:** separate books. Spot row never uses futures lastPrice.
+**Wiring:** `main.py` must pass `futures_provider` into `create_bot` whenever the futures client is constructed (movers and/or futures alerts). Do **not** gate bot resolve on `FEATURE_FUTURES_ALERTS` only.
 
-**Message shapes:**
-- Peak: `… −X% within 15m · High … → now …`
-- Step: `… −X% step from last alert · Last … → now …`
+---
 
-Tune: `MOVER_POLL_SECONDS=3`, `/movers set 7 15`, `MOVER_COOLDOWN_SECONDS=45`.
+## Shipped vs not shipped (orientation)
+
+### Shipped (movers / V3 path)
+
+- Futures targets + mixed movers watchlist  
+- Peak drawdown (high→now), faster poll  
+- Step-down cascade re-arm + recovery + short min-gap  
+- Velocity, volume, auto heat board, heat on `/mw`  
+- Optional red-candle counts (code present, **default off**)  
+- Compact + STOCK + crypto futures resolve (TSLA class)  
+
+### Not shipped (do not assume present)
+
+- Per-coin named **buckets** (different %/lookback per group)  
+- Bounce/reclaim alerts, layer planner, defensive-mode messaging  
+- Telegram inline buttons / deep links / web UI  
+- Full kline **OHLC fire path** (only optional red tags)  
+- Separate strategy bots (see `docs/FUTURE_STRATEGY_BOTS.md`)  
 
 ---
 
 ## Important implementation details
 
-### Crossing keying (do not regress)
+### Crossing keying
 
-`PriceMonitor._last_prices` is keyed by `(user_id, stable_id)`, **not** visual rank. Visual ranks shift on any remove; stable keys prevent mass false fires. See `tests/test_crossing_and_remove_logic.py`.
+`PriceMonitor._last_prices` keyed by `(user_id, stable_id)`, **not** visual rank. See `tests/test_crossing_and_remove_logic.py`.
 
 ### Telegram formatting
 
-- Command replies: **plain text** (`parse_mode=None`). Default Markdown breaks on `BTC_USDT` underscores (400 parse entities).
+- Command replies: **plain text** (`parse_mode=None`). Markdown breaks on `_` in futures symbols.  
 - Fire notifications: **HTML** with escaped symbols.
 
-### Futures client cache
+### Futures cache vs movers
 
-`MexcFuturesClient` caches full ticker batch (~2 min) for resolve + prices. `get_all_prices()` force-refreshes.
+`MexcFuturesClient` ~2 min cache for resolve/`get_price`. Movers use `get_all_prices()` which **force-refreshes**. Cache does **not** make movers 2 minutes late.
 
-### Movers scanner markets
+### Klines (`MOVER_ENRICH_KLINES`)
 
-Fetches **only markets present on enabled users’ watchlists**. Spot row → spot book; futures row → futures book. Never compare spot SIREN to futures SIREN.
-
-History uses `PriceHistory.peak_drawdown` (not candle OHLC). Futures resolve cache (~2 min) does **not** apply to mover cycles — `get_all_prices()` force-refreshes.
+- Optional **tags only**; do not block fire if kline API fails.  
+- Closed candles → slight lag on the tag, not the dump trigger.  
+- Leave **false** until user wants red overview on messages; then set `true` and restart.
 
 ---
 
 ## Local dev
 
 ```bash
-cp .env.example .env   # set TELEGRAM_BOT_TOKEN
+cp .env.example .env   # TELEGRAM_BOT_TOKEN
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-make test              # or: python tests/test_*.py
+make test
 python -m mexc_bot.main
 ```
 
 ---
 
-## Docker / droplet
+## Docker / droplet deploy
 
 ```bash
-# Production (volume ./data)
+cd ~/mexc-alert-bot          # droplet path
+git pull origin main
+# edit .env if needed (flags, MOVER_*, never commit)
 docker compose up -d --build mexc-bot
-docker logs -f mexc-alert-bot
+docker logs --tail 80 mexc-alert-bot
+```
 
-# Staging (profile + ./data-staging + .env.staging)
+Staging:
+
+```bash
 cp .env.staging.example .env.staging
 docker compose --profile staging up -d --build mexc-bot-staging
 ```
 
-Healthcheck expects `/app/data/alerts.db`. Permissions: non-root `appuser` (uid 1000) — `chown -R 1000:1000 data` if SQLite fails to open.
+Healthcheck: `/app/data/alerts.db`. SQLite perms: `chown -R 1000:1000 data` if needed.
 
-Deploy flow: push GitHub → droplet `git pull` → `docker compose up -d --build mexc-bot`.
+**Prod checklist after pull:** `/s`, `/l` (targets intact), `/p f TSLA`, `/mw`, watch one real dump for MOVER + optional heat board.
 
 ---
 
 ## Tests agents must keep green
 
 ```bash
-python tests/test_crossing_and_remove_logic.py
-python tests/test_v3_futures_and_movers.py
-# or: make test
+make test
+# or:
+python3 tests/test_crossing_and_remove_logic.py
+python3 tests/test_v3_futures_and_movers.py
+python3 tests/test_mover_enrichment.py
 ```
 
-Covers: stable_id crossing after rank shift, market isolation, futures resolve (`ZHIPU`→`ZHIPUSTOCK_USDT`), mover downside-only + step-down cascade, watchlist remove, alerts table isolation.
+Covers: stable_id crossing, market isolation, stock resolve (compact `TSLAUSDT` + STOCK), peak/step cascade, recovery, min-gap, heat/velocity, alerts table isolation.
 
 ---
 
@@ -270,42 +311,50 @@ Covers: stable_id crossing after rank shift, market isolation, futures resolve (
 
 | Goal | Where | Notes |
 |------|--------|------|
-| New Telegram command | `bot.py` | Gate V3 behind flags; keep `/a` path unchanged |
-| New price source | `exchange.py` + `PriceProvider` | Don’t hardcode REST in monitor |
-| Alert fields | `storage.py` additive columns | Default old rows |
-| Mover behavior | `mexc_bot/movers/*` only | No `AlertStore.remove_*` from scanner |
-| Stock aliases | `FUTURES_BASE_ALIASES` in `exchange.py` | e.g. TESLA→TSLA |
+| New Telegram command | `bot.py` | Gate V3; keep `/a` unchanged |
+| Mover fire logic | `movers/scanner.py` + `history.py` | No `AlertStore` deletes |
+| Enrichment | `movers/velocity|heat|klines.py` | Fail soft; flags default sensible |
+| Symbol resolve | `exchange.py` | Prefer live `known` set |
+| Stock aliases | `FUTURES_BASE_ALIASES` | e.g. TESLA→TSLA |
+| Separate strategy bot | new module + flag | See `docs/FUTURE_STRATEGY_BOTS.md` |
 
 ---
 
 ## What not to do
 
 - Don’t key monitor history by visual alert id  
-- Don’t reintroduce global Markdown parse mode on the bot  
+- Don’t reintroduce global Markdown parse mode  
 - Don’t put mover rules in the `alerts` table  
-- Don’t point staging volume at production `./data`  
-- Don’t assume futures symbol == spot base + `_USDT` (stock perps use `*STOCK*`)  
-- Don’t lower production mover thresholds for “testing” without telling the user  
+- Don’t point staging at production `./data`  
+- Don’t assume futures id is only `BASE_USDT` or only `*STOCK*`  
+- Don’t set long `MOVER_COOLDOWN_SECONDS` (e.g. 1800) if cascade re-alerts matter  
+- Don’t enable `MOVER_ENRICH_KLINES` in prod without a heads-up (API load + message noise)  
+- Don’t lower prod mover thresholds for “testing” without telling the user  
 
 ---
 
 ## Related docs
 
-- `README.md` — product overview + deploy narrative  
-- `docs/V3_TESTING_AND_PROMOTION.md` — staging/prod promotion checklist  
-- `docs/FUTURE_STRATEGY_BOTS.md` — backlog of separate strategy bots (sympathy, base-break, divergence, …); revisit when planning next features  
-- `.env.example` / `.env.staging.example` — env templates  
+| Doc | Purpose |
+|-----|---------|
+| `README.md` | Product overview |
+| `AGENTS.md` | **This file** — primary agent guide |
+| `docs/SESSION_HANDOFF.md` | Latest build + what was done / next |
+| `docs/V3_TESTING_AND_PROMOTION.md` | Staging → prod |
+| `docs/FUTURE_STRATEGY_BOTS.md` | Future separate bots backlog |
+| `.env.example` | Full env template |
 
 ---
 
 ## Quick status check (production)
 
 ```text
-/s          → flags, poll health
+/s          → flags, mover cycle / anchors / min_gap
 /l          → target alerts still present
 /p BTC      → spot
-/p f BTC    → futures
-/mw         → movers watchlist grouped [F]/[S]
+/p f TSLA   → futures resolve (expect TSLAUSDT or *STOCK* form)
+/mw         → watchlist [F]/[S] + heat if on
+/movers list → threshold, lookback, step-down copy
 ```
 
-If target alerts vanish or mass-fire: check recent changes to `monitor.py` / `storage.py` stable_id logic and run crossing tests immediately.
+If targets vanish or mass-fire: check `monitor.py` / `storage.py` stable_id logic; run crossing tests immediately.

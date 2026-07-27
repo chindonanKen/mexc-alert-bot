@@ -1,5 +1,7 @@
 # Future strategy bots (backlog)
 
+> Shipped mover enrichments and product rules live in [AGENTS.md](../AGENTS.md) and [SESSION_HANDOFF.md](SESSION_HANDOFF.md). This file is only **separate bots not yet built**.
+
 Ideas for **separate** scanners/bots that can run **alongside** AD / movers — not inside them.
 
 **Rules when implementing any of these:**

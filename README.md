@@ -2,31 +2,28 @@
 
 Telegram bot that watches MEXC exchange prices and sends you instant alerts when a crypto hits your target price.
 
-**For agents & contributors:** see **[AGENTS.md](AGENTS.md)** — architecture, flags, commands, safety rules, and how not to break live alerts.
+**For agents & contributors:** start with **[AGENTS.md](AGENTS.md)** (architecture, flags, safety, movers model).  
+**Session / latest build handoff:** [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md).  
+**Future strategy bots backlog:** [docs/FUTURE_STRATEGY_BOTS.md](docs/FUTURE_STRATEGY_BOTS.md).
 
 Originally a single-file script running 24/7 on a Digital Ocean VPS. This is the restructured, production-ready version with proper architecture, configuration, and deployment tooling.
 
 ## Current Features
 
-- Set one-shot price alerts via Telegram (`/addalert SYMBOL PRICE`)
-- Supports any symbol MEXC lists (e.g. `BTCUSDT`, `SOLUSDT`, `ENAUSDT`)
-- Triggers on price crossing your target level (either direction since last check) or landing in the small tolerance band (default 0.05%). The crossing logic is the primary reliable mechanism for "price reached or passed".
-- Enable/disable individual alerts
-- List and remove alerts
-- Background price polling (configurable interval)
-- Alerts are removed automatically after they trigger
-- SQLite persistence (with JSON migration) + Dockerized deploy
+- One-shot **spot** target alerts via Telegram (`/a BTC 65000`)
+- Triggers on price **crossing** the target or landing in the tolerance band
+- Enable/disable, list, remove; alerts removed after fire
+- Background price polling + SQLite + Docker on DigitalOcean
 
-### V3 (opt-in, default OFF)
-
-Feature flags keep production V1 behavior until you enable them:
+### V3 (flags default OFF in templates; production may enable)
 
 | Flag | Feature |
 |------|---------|
-| `FEATURE_FUTURES_ALERTS=true` | Futures one-shot targets via `/af BTC 65000` (MEXC contract book) |
-| `FEATURE_MOVER_SCANNER=true` | Downside % movers (`/movers`, `/mw`) over 10–15 min, watchlist + cooldown |
+| `FEATURE_FUTURES_ALERTS=true` | Futures one-shots `/af`, stock perps resolve (`TSLA` → live contract e.g. `TSLAUSDT`) |
+| `FEATURE_MOVER_SCANNER=true` | Downside movers: peak high→now, **step-down cascade**, velocity/volume/heat board; optional kline reds |
 
-**Do not enable on production until staging is verified.** See [docs/V3_TESTING_AND_PROMOTION.md](docs/V3_TESTING_AND_PROMOTION.md).
+Details, env knobs, and “do not break prod” rules: **[AGENTS.md](AGENTS.md)**.  
+Staging checklist: [docs/V3_TESTING_AND_PROMOTION.md](docs/V3_TESTING_AND_PROMOTION.md).
 
 Staging service (separate data volume):
 
