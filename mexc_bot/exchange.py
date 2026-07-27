@@ -311,7 +311,7 @@ def normalize_spot_symbol(raw: str) -> str:
     return s
 
 
-# Friendly aliases → MEXC-style base tickers (before STOCK / _USDT resolution)
+# Friendly aliases → preferred short base (for display / normalize fallback)
 FUTURES_BASE_ALIASES: Dict[str, str] = {
     "TESLA": "TSLA",
     "GOOGLE": "GOOGL",
@@ -325,6 +325,34 @@ FUTURES_BASE_ALIASES: Dict[str, str] = {
     "NVIDIA": "NVDA",
     "NVDIA": "NVDA",  # common typo
 }
+
+# Bidirectional base groups: MEXC stock UI may use ticker (TSLAUSDT) while the
+# contract id uses the company name (TESLA_USDT — see mexc.com/futures/TESLA_USDT).
+FUTURES_BASE_ALIAS_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"TSLA", "TESLA"}),
+    frozenset({"GOOGL", "GOOGLE", "ALPHABET"}),
+    frozenset({"META", "FACEBOOK", "FB"}),
+    frozenset({"AAPL", "APPLE"}),
+    frozenset({"MSFT", "MICROSOFT"}),
+    frozenset({"AMZN", "AMAZON"}),
+    frozenset({"NFLX", "NETFLIX"}),
+    frozenset({"NVDA", "NVIDIA", "NVDIA"}),
+)
+
+
+def _alias_expanded_bases(base: str) -> list[str]:
+    """Return base + all alias-group siblings (TSLA ↔ TESLA, …)."""
+    b = (base or "").strip().upper()
+    if not b:
+        return []
+    out: list[str] = [b]
+    for group in FUTURES_BASE_ALIAS_GROUPS:
+        if b in group:
+            for g in sorted(group):
+                if g not in out:
+                    out.append(g)
+            break
+    return out
 
 
 def normalize_futures_symbol(raw: str) -> str:
@@ -403,20 +431,29 @@ def _futures_symbol_body(sym: str) -> Optional[str]:
 def futures_symbol_candidates(raw: str) -> list[str]:
     """Ordered candidate contract ids for a user-typed futures symbol.
 
-    Includes underscore form (BTC_USDT), compact stock form (TSLAUSDT),
-    and *STOCK* legacy stock perps (TSLASTOCK_USDT).
+    Includes underscore form (BTC_USDT / TESLA_USDT), compact stock form
+    (TSLAUSDT), and *STOCK* legacy stock perps (TSLASTOCK_USDT).
+
+    Expands alias groups both ways: TSLA also tries TESLA_USDT (MEXC path
+    /futures/TESLA_USDT while the chart title may say TSLAUSDT).
     """
     base = _futures_input_base(raw)
     if not base:
         return []
 
+    # Expand TSLA↔TESLA etc., then STOCK variants of each
     cores: list[str] = []
-    # Prefer as-typed core first
-    cores.append(base)
-    if base.endswith("STOCK") and len(base) > 5:
-        cores.append(base[: -len("STOCK")])
-    else:
-        cores.append(base + "STOCK")
+    for b in _alias_expanded_bases(base):
+        if b not in cores:
+            cores.append(b)
+        if b.endswith("STOCK") and len(b) > 5:
+            bare = b[: -len("STOCK")]
+            if bare not in cores:
+                cores.append(bare)
+        else:
+            stock = b + "STOCK"
+            if stock not in cores:
+                cores.append(stock)
 
     out: list[str] = []
     seen: set[str] = set()
@@ -426,10 +463,8 @@ def futures_symbol_candidates(raw: str) -> list[str]:
             seen.add(sym)
             out.append(sym)
 
-    # Exact normalized form first (crypto-style)
-    add(normalize_futures_symbol(raw))
+    # Prefer compact UI + company-name underscore (stock) before short TSLA_USDT
     for core in cores:
-        # Compact form first for stock-like names (UI: TSLAUSDT Perpetual)
         add(f"{core}USDT")
         add(f"{core}_USDT")
         if not core.endswith("STOCK"):
@@ -441,6 +476,8 @@ def futures_symbol_candidates(raw: str) -> list[str]:
             add(f"{bare}STOCKUSDT")
             add(f"{bare}_USDT")
             add(f"{bare}USDT")
+    # Keep normalize last as crypto-style fallback (TSLA_USDT)
+    add(normalize_futures_symbol(raw))
     return out
 
 
@@ -479,30 +516,49 @@ def resolve_futures_symbol(
     if not base:
         return None
 
+    bases = set(_alias_expanded_bases(base))
+
     # Ranked search against the live universe (underscore + compact USDT ids)
     ranked: list[tuple[int, str]] = []
     for sym in known_u:
         body = _futures_symbol_body(sym)
         if not body:
             continue
-        if body == base:
-            # Prefer compact stock UI (TSLAUSDT) and crypto BASE_USDT equally strong
-            ranked.append((0, sym))
-        elif body == f"{base}STOCK":
-            ranked.append((1, sym))  # stock perp *STOCK*
-        elif body.startswith(f"{base}STOCK"):
-            ranked.append((2, sym))
-        elif body.startswith(f"{base}_"):
-            ranked.append((4, sym))  # rare BASE_OTHER
-        elif len(base) >= 4 and body.startswith(base):
-            rest = body[len(base) :]
-            if rest == "STOCK":
-                ranked.append((1, sym))
-            elif rest.startswith("STOCK"):
+        matched = False
+        for b in bases:
+            if body == b:
+                # Compact TSLAUSDT / TESLA_USDT / crypto BASE_USDT
+                ranked.append((0, sym))
+                matched = True
+                break
+            if body == f"{b}STOCK":
+                ranked.append((1, sym))  # *STOCK* legacy
+                matched = True
+                break
+            if body.startswith(f"{b}STOCK"):
                 ranked.append((2, sym))
-            # else: weak prefix (BTC→BTCDOM) — skip for short bases; allow long unique
-            elif len(base) >= 5 and rest.isalpha() and len(rest) <= 8:
-                ranked.append((6, sym))
+                matched = True
+                break
+            if body.startswith(f"{b}_"):
+                ranked.append((4, sym))
+                matched = True
+                break
+            if len(b) >= 4 and body.startswith(b):
+                rest = body[len(b) :]
+                if rest == "STOCK":
+                    ranked.append((1, sym))
+                    matched = True
+                    break
+                if rest.startswith("STOCK"):
+                    ranked.append((2, sym))
+                    matched = True
+                    break
+                if len(b) >= 5 and rest.isalpha() and len(rest) <= 8:
+                    ranked.append((6, sym))
+                    matched = True
+                    break
+        if matched:
+            continue
 
     if not ranked:
         return None

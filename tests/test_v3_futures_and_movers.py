@@ -113,6 +113,23 @@ def test_resolve_compact_stock_ui_form():
     print("PASS: resolve compact stock UI form (TSLAUSDT)")
 
 
+def test_resolve_tesla_company_name_contract():
+    """MEXC path /futures/TESLA_USDT — API id may be TESLA_USDT not TSLA_USDT."""
+    known = {
+        "BTC_USDT",
+        "ETH_USDT",
+        "TESLA_USDT",  # company-name contract id
+        "ZHIPUSTOCK_USDT",
+    }
+    assert resolve_futures_symbol("TSLA", known) == "TESLA_USDT"
+    assert resolve_futures_symbol("tesla", known) == "TESLA_USDT"
+    assert resolve_futures_symbol("TESLA", known) == "TESLA_USDT"
+    cands = futures_symbol_candidates("TSLA")
+    assert "TESLA_USDT" in cands
+    assert "TESLAUSDT" in cands
+    print("PASS: resolve TESLA_USDT company-name contract from TSLA")
+
+
 def test_existing_spot_alerts_default_market():
     with tempfile.TemporaryDirectory() as td:
         store = AlertStore(Path(td) / "alerts.db")
@@ -530,6 +547,7 @@ if __name__ == "__main__":
     test_symbol_normalization()
     test_resolve_stock_futures_against_known_list()
     test_resolve_compact_stock_ui_form()
+    test_resolve_tesla_company_name_contract()
     test_existing_spot_alerts_default_market()
     test_futures_alert_isolated_price_book()
     test_futures_skipped_without_provider()

@@ -612,11 +612,16 @@ def create_bot(
             symbol = _resolve_futures(raw, futures_provider)
             price = futures_provider.get_price(raw)
             if price is None:
-                tried = symbol or normalize_futures_symbol(raw)
+                from .exchange import futures_symbol_candidates
+
+                cands = futures_symbol_candidates(raw)[:8]
+                tried = ", ".join(cands) if cands else (symbol or normalize_futures_symbol(raw))
                 _reply(
                     message,
-                    f"Couldn't get futures price for {raw} (tried {tried}).\n"
-                    f"It may not be listed on MEXC futures, or the name is different.",
+                    f"Couldn't get futures price for {raw}.\n"
+                    f"Tried: {tried}\n"
+                    f"If the chart is open, copy the exact contract id from MEXC "
+                    f"(e.g. TESLA_USDT or TSLAUSDT) and use /p f THAT_ID.",
                 )
             else:
                 # Show resolved contract id so user learns the real name
