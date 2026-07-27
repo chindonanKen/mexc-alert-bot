@@ -136,6 +136,53 @@ def _format_watchlist(wl: list) -> list[str]:
     return lines
 
 
+def _format_mw_with_heat(
+    wl: list,
+    settings: Settings,
+    mover_store,
+    user_id: int,
+    mover_scanner=None,
+) -> list[str]:
+    """Watchlist plus optional live heat rank (does not require prompting for boards)."""
+    lines = _format_watchlist(wl)
+    if not wl or not getattr(settings, "mover_heat_on_mw", True):
+        return lines
+    scanner = mover_scanner or None
+    if scanner is None or not hasattr(scanner, "history"):
+        return lines
+    try:
+        from .movers.heat import format_heat_plain, heat_snapshot
+
+        s = mover_store.get_settings(
+            user_id,
+            settings.mover_threshold_percent,
+            settings.mover_lookback_seconds,
+        )
+        lookback = float(s["lookback_seconds"])
+        thr = float(s["threshold_percent"])
+        breadth = getattr(settings, "mover_heat_breadth_pct", None)
+        if breadth is None:
+            breadth = max(0.5, thr * 0.6)
+        board = heat_snapshot(
+            scanner.history,
+            wl,
+            lookback,
+            panic_per_min=float(getattr(settings, "mover_velocity_panic", 2.0)),
+            fast_per_min=float(getattr(settings, "mover_velocity_fast", 0.8)),
+            breadth_pct=float(breadth),
+        )
+        lines.append("")
+        lines.extend(format_heat_plain(board, top_n=int(getattr(settings, "mover_heat_top_n", 5))))
+        if getattr(settings, "mover_heat_auto", True):
+            lines.append(
+                f"(Auto board ON when ≥{getattr(settings, 'mover_heat_breadth_min', 3)} "
+                f"names dump — no need to type /mw in a panic)"
+            )
+    except Exception:
+        pass
+    return lines
+
+
 def _parse_mw_token(raw: str, default_market: str = "futures") -> tuple[str, str] | None:
     """
     Parse one watchlist token into (symbol_raw, market).
@@ -682,7 +729,10 @@ def create_bot(
                     f"Min gap between fires: {settings.mover_cooldown_seconds}s (not a long mute)",
                     f"Watchlist ({len(wl)}) — mixed spot/futures OK:",
                 ]
-                lines.extend(_format_watchlist(wl))
+                mscan = mover_scanner or getattr(bot, "_mover_scanner_ref", None)
+                lines.extend(
+                    _format_mw_with_heat(wl, settings, mover_store, user_id, mscan)
+                )
                 if not wl:
                     lines.append("Add: /mw add f BTC   or   /mw add s SIREN")
                 _reply(message, "\n".join(lines))
@@ -710,7 +760,10 @@ def create_bot(
                     f"{s['threshold_percent']}% / {s['lookback_seconds']//60}m"
                 )
                 lines.append(f"Watchlist ({len(wl)}):")
-                lines.extend(_format_watchlist(wl))
+                mscan = mover_scanner or getattr(bot, "_mover_scanner_ref", None)
+                lines.extend(
+                    _format_mw_with_heat(wl, settings, mover_store, user_id, mscan)
+                )
                 _reply(message, "\n".join(lines))
 
             if not args:

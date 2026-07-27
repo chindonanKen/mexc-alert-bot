@@ -8,3 +8,4 @@ from .scanner import MoverScanner
 from .storage import MoverStore
 
 __all__ = ["MoverScanner", "MoverStore"]
+# Heat/velocity/klines are internal modules used by scanner + bot.

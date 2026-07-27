@@ -201,11 +201,12 @@ def test_mover_peak_drawdown_within_window():
 
     dd = h.peak_drawdown("spot", "PENGUINUSDT", 900, now=now)
     assert dd is not None
-    change, peak, price_now = dd
+    change, peak, price_now, peak_ts = dd
     assert abs(peak - 110.0) < 1e-9
     assert abs(price_now - 101.2) < 1e-9
     assert abs(change - ((101.2 - 110.0) / 110.0)) < 1e-9
     assert change <= -0.07, change  # fires a 7% threshold
+    assert abs(peak_ts - (now - 120)) < 1e-6
 
     # Cold start: no sample at/before window start → None
     h3 = PriceHistory(max_age_seconds=1200)

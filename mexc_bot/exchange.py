@@ -140,10 +140,29 @@ class MexcFuturesClient:
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "mexc-alert-bot/0.3"})
         self._price_cache: Dict[str, float] = {}
+        self._volume_cache: Dict[str, float] = {}
         self._price_cache_ts: float = 0.0
 
+    @staticmethod
+    def _volume_from_ticker_item(item: dict) -> Optional[float]:
+        """Prefer quote turnover (amount24) so units stay comparable across symbols."""
+        for key in ("amount24", "amount24Quote", "quoteVolume24", "turnover"):
+            raw = item.get(key)
+            if raw is None:
+                continue
+            try:
+                v = float(raw)
+                if v > 0:
+                    return v
+            except (TypeError, ValueError):
+                continue
+        return None
+
     def _fetch_batch(self) -> Dict[str, float]:
-        """Fetch all contract last prices. Keys are uppercase with underscore."""
+        """Fetch all contract last prices. Keys are uppercase with underscore.
+
+        Also refreshes optional volume cache when fields are present.
+        """
         url = f"{self.base_url}/contract/ticker"
         try:
             resp = self.session.get(url, timeout=self.timeout)
@@ -164,6 +183,7 @@ class MexcFuturesClient:
                 return {}
 
             prices: Dict[str, float] = {}
+            volumes: Dict[str, float] = {}
             for item in items:
                 if not isinstance(item, dict):
                     continue
@@ -172,8 +192,13 @@ class MexcFuturesClient:
                     if not sym or item.get("lastPrice") is None:
                         continue
                     prices[sym] = float(item["lastPrice"])
+                    vol = self._volume_from_ticker_item(item)
+                    if vol is not None:
+                        volumes[sym] = vol
                 except (TypeError, ValueError):
                     continue
+            if volumes:
+                self._volume_cache = volumes
             logger.debug(f"Futures batch fetched {len(prices)} prices")
             return prices
         except requests.RequestException as e:
@@ -181,6 +206,13 @@ class MexcFuturesClient:
         except Exception as e:
             logger.warning(f"Unexpected error in futures batch price fetch: {e}")
         return {}
+
+    def get_all_volumes(self) -> Dict[str, float]:
+        """24h volume/amount map from last futures batch (may be empty)."""
+        # Ensure cache is warm; get_all_prices already force-refreshes for movers
+        if not self._volume_cache:
+            self._ensure_price_cache(force=True)
+        return dict(self._volume_cache)
 
     def _ensure_price_cache(self, force: bool = False) -> Dict[str, float]:
         import time as _time

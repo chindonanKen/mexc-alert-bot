@@ -3,6 +3,7 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -12,6 +13,16 @@ def _env_bool(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_optional_float(name: str) -> Optional[float]:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -42,6 +53,20 @@ class Settings:
     # Bounce above last-fire anchor by this % clears cascade state → peak mode again
     mover_recovery_percent: float
     mover_markets: str  # "futures" | "spot" | "both"
+
+    # Mover enrichments (scanner-owned; never touch target alerts)
+    mover_enrich_velocity: bool
+    mover_enrich_volume: bool
+    mover_enrich_klines: bool
+    mover_velocity_panic: float
+    mover_velocity_fast: float
+    mover_heat_auto: bool
+    mover_heat_on_mw: bool
+    mover_heat_breadth_min: int
+    mover_heat_breadth_pct: Optional[float]  # None → 0.6 × user threshold
+    mover_heat_top_n: int
+    mover_heat_min_gap_seconds: float
+    mover_heat_refresh_seconds: float
 
     @property
     def alerts_file_path(self) -> Path:
@@ -96,4 +121,18 @@ def load_settings() -> Settings:
         mover_cooldown_seconds=int(os.getenv("MOVER_COOLDOWN_SECONDS", "45")),
         mover_recovery_percent=float(os.getenv("MOVER_RECOVERY_PERCENT", "3")),
         mover_markets=mover_markets,
+        # Enrichments: velocity/volume/auto-heat ON by default when movers are on;
+        # klines OFF until staging validates (API + rate limits).
+        mover_enrich_velocity=_env_bool("MOVER_ENRICH_VELOCITY", True),
+        mover_enrich_volume=_env_bool("MOVER_ENRICH_VOLUME", True),
+        mover_enrich_klines=_env_bool("MOVER_ENRICH_KLINES", False),
+        mover_velocity_panic=float(os.getenv("MOVER_VELOCITY_PANIC", "2.0")),
+        mover_velocity_fast=float(os.getenv("MOVER_VELOCITY_FAST", "0.8")),
+        mover_heat_auto=_env_bool("MOVER_HEAT_AUTO", True),
+        mover_heat_on_mw=_env_bool("MOVER_HEAT_ON_MW", True),
+        mover_heat_breadth_min=int(os.getenv("MOVER_HEAT_BREADTH_MIN", "3")),
+        mover_heat_breadth_pct=_env_optional_float("MOVER_HEAT_BREADTH_PCT"),
+        mover_heat_top_n=int(os.getenv("MOVER_HEAT_TOP_N", "5")),
+        mover_heat_min_gap_seconds=float(os.getenv("MOVER_HEAT_MIN_GAP_SECONDS", "45")),
+        mover_heat_refresh_seconds=float(os.getenv("MOVER_HEAT_REFRESH_SECONDS", "90")),
     )

@@ -10,6 +10,7 @@ run:
 test:
 	python tests/test_crossing_and_remove_logic.py
 	python tests/test_v3_futures_and_movers.py
+	python tests/test_mover_enrichment.py
 
 docker-build:
 	docker compose build

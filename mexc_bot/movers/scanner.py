@@ -11,6 +11,12 @@ Detection model (snappy, no candle close):
      to peak-drawdown mode for the next wave.
   4) MOVER_COOLDOWN_SECONDS is only a short **min-gap** anti-spam between fires
      for the same (user, market, symbol) — not a 30-minute silence.
+
+Enrichments (optional, never block core fire):
+  - Velocity / panic band
+  - Volume line (when available)
+  - Red-candle streaks (kline API, flag-gated)
+  - Auto panic heat board when watchlist breadth dumps (no /mw required)
 """
 
 from __future__ import annotations
@@ -23,8 +29,16 @@ from typing import Callable, Dict, Optional, Set, Tuple
 
 from ..config import Settings
 from ..exchange import PriceProvider
+from .heat import (
+    board_fingerprint,
+    format_heat_board_html,
+    heat_snapshot,
+    is_widespread_panic,
+)
 from .history import PriceHistory
+from .klines import KlineClient, format_reds_line
 from .storage import MoverStore
+from .velocity import format_velocity_line, score_dump
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +56,7 @@ class MoverScanner:
     - Step-down re-arm from last fire price (cascade dumps keep alerting)
     - Short min-gap only (settings.mover_cooldown_seconds)
     - Watchlist-only (empty watchlist → no fires for that user)
+    - Auto panic board when many watchlist names dump together
     """
 
     def __init__(
@@ -73,8 +88,27 @@ class MoverScanner:
         self._anchors: Dict[Key, float] = {}
         # Min-gap: last fire monotonic time per key
         self._last_fire_mono: Dict[Key, float] = {}
+        # Wall-clock last fire (for step-mode velocity, not mono clock)
+        self._last_fire_wall: Dict[Key, float] = {}
         self._fires_total: int = 0
         self._missing_symbol_logs: int = 0
+
+        # Auto heat board anti-spam (per user)
+        self._last_heat_mono: Dict[int, float] = {}
+        self._last_heat_fp: Dict[int, tuple] = {}
+        self._heat_boards_total: int = 0
+
+        # Optional volume cache from last futures batch: symbol -> amount24-like
+        self._volume_by_market: Dict[str, Dict[str, float]] = {}
+
+        self._kline_client: Optional[KlineClient] = None
+        if getattr(settings, "mover_enrich_klines", False):
+            self._kline_client = KlineClient(
+                spot_base=getattr(settings, "mexc_api_base", "https://api.mexc.com/api/v3"),
+                futures_base=getattr(
+                    settings, "mexc_futures_api_base", "https://contract.mexc.com/api/v1"
+                ),
+            )
 
     def get_health(self) -> dict:
         now = time.monotonic()
@@ -85,8 +119,10 @@ class MoverScanner:
             "tracked_series": self.history.tracked_count(),
             "active_anchors": len(self._anchors),
             "fires_total": self._fires_total,
+            "heat_boards_total": self._heat_boards_total,
             "poll_seconds": max(_MIN_POLL_SECONDS, float(self.settings.mover_poll_seconds)),
             "min_gap_seconds": float(self.settings.mover_cooldown_seconds),
+            "heat_auto": bool(getattr(self.settings, "mover_heat_auto", True)),
         }
 
     def _markets_to_scan(self) -> Set[str]:
@@ -129,6 +165,13 @@ class MoverScanner:
         if "futures" in markets and self.futures_provider is not None:
             try:
                 out["futures"] = self.futures_provider.get_all_prices() or {}
+                # Optional volume map if provider exposes it
+                getter = getattr(self.futures_provider, "get_all_volumes", None)
+                if callable(getter) and getattr(self.settings, "mover_enrich_volume", True):
+                    try:
+                        self._volume_by_market["futures"] = getter() or {}
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.warning(f"Mover futures fetch failed: {e}")
                 out["futures"] = {}
@@ -160,12 +203,129 @@ class MoverScanner:
         return f"{minutes:.1f}m"
 
     def _recovery_frac(self) -> float:
-        # Optional setting; default 3% bounce clears cascade anchor
         raw = getattr(self.settings, "mover_recovery_percent", 3.0)
         try:
             return max(0.0, float(raw)) / 100.0
         except (TypeError, ValueError):
             return 0.03
+
+    def _velocity_thresholds(self) -> Tuple[float, float]:
+        panic = float(getattr(self.settings, "mover_velocity_panic", 2.0))
+        fast = float(getattr(self.settings, "mover_velocity_fast", 0.8))
+        return panic, fast
+
+    def _breadth_pct_for_user(self, user_threshold_percent: float) -> float:
+        raw = getattr(self.settings, "mover_heat_breadth_pct", None)
+        if raw is not None and str(raw).strip() != "":
+            try:
+                return abs(float(raw))
+            except (TypeError, ValueError):
+                pass
+        # Default: slightly earlier than full MOVER fire (60% of user threshold)
+        return max(0.5, abs(float(user_threshold_percent)) * 0.6)
+
+    def _volume_line(self, market: str, symbol: str) -> str:
+        if not getattr(self.settings, "mover_enrich_volume", True):
+            return ""
+        book = self._volume_by_market.get(market) or {}
+        vol = book.get(symbol.upper())
+        if vol is None or vol <= 0:
+            return ""
+        # Heuristic format
+        if vol >= 1_000_000:
+            s = f"{vol / 1_000_000:.1f}M"
+        elif vol >= 1_000:
+            s = f"{vol / 1_000:.1f}K"
+        else:
+            s = f"{vol:.4g}"
+        # Avoid full-exchange terciles (alts always look "low"); raw turnover only.
+        return f"Vol 24h: {s}"
+
+    def _reds_line(self, market: str, symbol: str) -> str:
+        if not getattr(self.settings, "mover_enrich_klines", False):
+            return ""
+        if self._kline_client is None:
+            return ""
+        try:
+            counts = self._kline_client.consecutive_reds(market, symbol)
+            return format_reds_line(counts)
+        except Exception as e:
+            logger.debug("Reds enrich failed %s:%s: %s", market, symbol, e)
+            return ""
+
+    def _maybe_send_heat_board(
+        self,
+        user_id: int,
+        lookback: float,
+        threshold_percent: float,
+        watchlist: list,
+        now: float,
+    ) -> None:
+        if not getattr(self.settings, "mover_heat_auto", True):
+            return
+        if not watchlist:
+            return
+
+        breadth_min = int(getattr(self.settings, "mover_heat_breadth_min", 3))
+        top_n = int(getattr(self.settings, "mover_heat_top_n", 5))
+        min_gap = float(getattr(self.settings, "mover_heat_min_gap_seconds", 45))
+        refresh = float(getattr(self.settings, "mover_heat_refresh_seconds", 90))
+        panic_v, fast_v = self._velocity_thresholds()
+        breadth_pct = self._breadth_pct_for_user(threshold_percent)
+
+        board = heat_snapshot(
+            self.history,
+            watchlist,
+            lookback,
+            now=now,
+            panic_per_min=panic_v,
+            fast_per_min=fast_v,
+            breadth_pct=breadth_pct,
+        )
+        if not is_widespread_panic(board, breadth_min):
+            return
+
+        fp = board_fingerprint(board.ranked, top_n)
+        mono = time.monotonic()
+        last_m = self._last_heat_mono.get(user_id)
+        last_fp = self._last_heat_fp.get(user_id)
+
+        # Anti-spam: first board free; later only if min-gap passed and
+        # (fingerprint changed + refresh elapsed) OR leader changed after min-gap.
+        allow = False
+        if last_m is None:
+            allow = True
+        else:
+            elapsed = mono - last_m
+            if elapsed >= min_gap and last_fp != fp:
+                # Leader identity only (market, symbol) — ignore 0.1% dd noise
+                def _leader_id(x):
+                    if not x:
+                        return None
+                    row = x[0]
+                    return (row[0], row[1]) if len(row) >= 2 else row
+
+                leader_changed = _leader_id(last_fp) != _leader_id(fp)
+                if elapsed >= refresh or leader_changed:
+                    allow = True
+
+        if not allow:
+            return
+
+        msg = format_heat_board_html(board, top_n=top_n)
+        try:
+            self.notifier(user_id, msg, parse_mode="HTML")
+            self._last_heat_mono[user_id] = mono
+            self._last_heat_fp[user_id] = fp
+            self._heat_boards_total += 1
+            logger.info(
+                "HEAT BOARD user=%s dumping=%s top=%s",
+                user_id,
+                board.breadth_frac,
+                fp[:3] if fp else (),
+            )
+        except Exception as e:
+            logger.error(f"Heat board notify failed user={user_id}: {e}")
 
     def _check_once(self) -> None:
         t0 = time.perf_counter()
@@ -181,6 +341,8 @@ class MoverScanner:
         enabled_users = self.mover_store.get_enabled_users()
         fired = 0
         recovery_frac = self._recovery_frac()
+        panic_v, fast_v = self._velocity_thresholds()
+        enrich_velocity = getattr(self.settings, "mover_enrich_velocity", True)
 
         for user_id in enabled_users:
             settings = self.mover_store.get_settings(
@@ -196,6 +358,14 @@ class MoverScanner:
             watchlist = self.mover_store.get_watchlist(user_id)
             if not watchlist:
                 continue
+
+            # Auto panic board FIRST (triage before individual fires)
+            try:
+                self._maybe_send_heat_board(
+                    user_id, lookback, float(settings["threshold_percent"]), watchlist, now
+                )
+            except Exception as e:
+                logger.warning(f"Heat board error user={user_id}: {e}")
 
             for item in watchlist:
                 market = str(item.get("market", "futures")).lower()
@@ -221,10 +391,6 @@ class MoverScanner:
                 key: Key = (user_id, market, symbol)
                 anchor = self._anchors.get(key)
 
-                # Dead-cat bounce: clear cascade state so next dump uses peak mode again.
-                # Skip fire evaluation this cycle — bounce can still look like −threshold
-                # vs an old window high (e.g. 100→90 fire, bounce to 93 clears, but
-                # 100→93 is still −7% peak drawdown).
                 if anchor is not None and recovery_frac > 0:
                     if price_now >= anchor * (1.0 + recovery_frac):
                         logger.debug(
@@ -240,27 +406,34 @@ class MoverScanner:
                 fire_mode: Optional[str] = None  # "peak" | "step"
                 pct: float = 0.0
                 ref_price: float = 0.0
+                peak_ts: Optional[float] = None
+                peak_price_for_vel: Optional[float] = None
 
                 if anchor is None:
-                    # First / re-armed wave: high within lookback → now
                     dd = self.history.peak_drawdown(market, symbol, lookback, now=now)
                     if dd is None:
                         continue
-                    change, peak_price, hist_now = dd
+                    change, peak_price, hist_now, p_ts = dd
                     price_now = float(hist_now)
                     if change > -threshold_frac:
                         continue
                     fire_mode = "peak"
                     pct = change * 100.0
                     ref_price = float(peak_price)
+                    peak_ts = float(p_ts)
+                    peak_price_for_vel = float(peak_price)
                 else:
-                    # Cascade: another full threshold step below last fire price
                     step_change = (price_now - anchor) / anchor
                     if step_change > -threshold_frac:
                         continue
                     fire_mode = "step"
                     pct = step_change * 100.0
                     ref_price = float(anchor)
+                    # Velocity from last fire wall time → now (real cascade pace)
+                    peak_price_for_vel = float(anchor)
+                    peak_ts = self._last_fire_wall.get(key)
+                    if peak_ts is None:
+                        peak_ts = now - 60.0  # fallback: mild grind-ish window
 
                 if self._min_gap_blocks(key):
                     continue
@@ -278,12 +451,35 @@ class MoverScanner:
                     line3 = (
                         f"Last <code>{ref_price:.8g}</code> → now <code>{price_now:.8g}</code>"
                     )
+                extra_lines = []
+                if enrich_velocity and peak_ts is not None and peak_price_for_vel is not None:
+                    vel, mins, band = score_dump(
+                        peak_ts,
+                        peak_price_for_vel,
+                        now,
+                        price_now,
+                        panic_per_min=panic_v,
+                        fast_per_min=fast_v,
+                    )
+                    vline = format_velocity_line(vel, mins, band)
+                    if vline:
+                        extra_lines.append(_html.escape(vline))
+                vline2 = self._volume_line(market, symbol)
+                if vline2:
+                    extra_lines.append(_html.escape(vline2))
+                rline = self._reds_line(market, symbol)
+                if rline:
+                    extra_lines.append(_html.escape(rline))
+
                 msg = f"📉 <b>MOVER</b> [{tag}]\n{line2}\n{line3}"
+                if extra_lines:
+                    msg += "\n" + "\n".join(extra_lines)
 
                 try:
                     self.notifier(user_id, msg, parse_mode="HTML")
                     self._anchors[key] = price_now
                     self._last_fire_mono[key] = time.monotonic()
+                    self._last_fire_wall[key] = now
                     self._fires_total += 1
                     fired += 1
                     logger.info(
@@ -301,13 +497,17 @@ class MoverScanner:
         poll = max(_MIN_POLL_SECONDS, float(self.settings.mover_poll_seconds))
         logger.info(
             "Mover scanner started (markets=%s lookback=%ss threshold=%s%% poll=%ss "
-            "min_gap=%ss recovery=%s%% mode=peak+step_rearm)",
+            "min_gap=%ss recovery=%s%% heat_auto=%s velocity=%s volume=%s klines=%s)",
             self.settings.mover_markets,
             self.settings.mover_lookback_seconds,
             self.settings.mover_threshold_percent,
             poll,
             self.settings.mover_cooldown_seconds,
             getattr(self.settings, "mover_recovery_percent", 3.0),
+            getattr(self.settings, "mover_heat_auto", True),
+            getattr(self.settings, "mover_enrich_velocity", True),
+            getattr(self.settings, "mover_enrich_volume", True),
+            getattr(self.settings, "mover_enrich_klines", False),
         )
         while not self._stop_event.is_set():
             try:
@@ -333,3 +533,8 @@ class MoverScanner:
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=8)
+        if self._kline_client is not None:
+            try:
+                self._kline_client.close()
+            except Exception:
+                pass

@@ -156,6 +156,20 @@ Fire condition: price **crossed** target since last sample **or** within toleran
 
 Movers fire message prefix: `MOVER` with `[F]` or `[S]`. Not one-shot — **step-down re-arm** on further legs of a dump.
 
+### Mover enrichments (scanner-owned)
+
+When movers are on, the scanner can add (env-tunable; see `.env.example`):
+
+| Feature | Default | Notes |
+|---------|---------|--------|
+| **Velocity** | on | `%/min` from peak + `PANIC` / `FAST` / `GRIND` on each fire |
+| **Volume** | on | 24h vol line when futures ticker provides it |
+| **Auto heat board** | on | Pushes ranked top-N when ≥`MOVER_HEAT_BREADTH_MIN` names dump — **no `/mw` needed** |
+| **`/mw` heat** | on | Same ranking on demand |
+| **Red candles** | **off** | 5m/15m/1h/4h consecutive closed reds via klines (`MOVER_ENRICH_KLINES`) |
+
+Still **never** deletes target `alerts`. Backlog of other strategy bots: `docs/FUTURE_STRATEGY_BOTS.md`.
+
 ### Mover detection model (precision + cascade)
 
 **First fire:** every poll, **rolling high → now** drawdown over lookback (default 15m). Fire as soon as ≤ −threshold. No candle close wait.
@@ -279,6 +293,7 @@ Covers: stable_id crossing after rank shift, market isolation, futures resolve (
 
 - `README.md` — product overview + deploy narrative  
 - `docs/V3_TESTING_AND_PROMOTION.md` — staging/prod promotion checklist  
+- `docs/FUTURE_STRATEGY_BOTS.md` — backlog of separate strategy bots (sympathy, base-break, divergence, …); revisit when planning next features  
 - `.env.example` / `.env.staging.example` — env templates  
 
 ---
