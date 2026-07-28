@@ -6,6 +6,8 @@ One HTTP request per cycle gets prices for all symbols → instant lookups.
 V3: optional futures PriceProvider. Spot path is unchanged when market='spot'.
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 import time
@@ -41,12 +43,15 @@ class PriceMonitor:
         price_provider: PriceProvider,
         notifier: Callable[..., None],  # user_id, message, optional parse_mode
         futures_provider: Optional[PriceProvider] = None,
+        event_store=None,
     ):
         self.settings = settings
         self.store = store
         self.price_provider = price_provider
         self.futures_provider = futures_provider
         self.notifier = notifier
+        # Optional learning EventStore — log target fires only; never delete via learning path
+        self.event_store = event_store
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_poll_ms: int = 0
@@ -188,6 +193,33 @@ class PriceMonitor:
                         fired += 1
                         fired_visuals.append(a["id"])
                         fired_stables.append(a["stable_id"])
+                        # Learning log after successful notify (soft-fail; does not affect remove path)
+                        if self.event_store is not None and getattr(
+                            self.settings, "feature_learning", False
+                        ):
+                            try:
+                                drop_pct = None
+                                if target and target != 0:
+                                    drop_pct = ((current - target) / target) * 100.0
+                                self.event_store.log_event(
+                                    user_id,
+                                    "target",
+                                    symbol,
+                                    market,
+                                    price=float(current),
+                                    ref_price=float(target),
+                                    drop_pct=drop_pct,
+                                    mode=trigger_reason,
+                                    payload={
+                                        "stable_id": a["stable_id"],
+                                        "visual_id": a["id"],
+                                        "reason": trigger_reason,
+                                    },
+                                )
+                            except Exception as le:
+                                logger.error(
+                                    "learning log failed after target fire: %s", le
+                                )
                     except Exception as e:
                         logger.error(f"Failed sending alert #{a['id']}: {e}")
                         # Do not remove if we couldn't notify — will retry next cycle

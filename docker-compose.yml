@@ -17,8 +17,10 @@ services:
       start_period: 15s
 
   # Staging: separate container + data dir + env so you never touch prod alerts.
-  # Start with: docker compose --profile staging up -d --build mexc-bot-staging
-  # Requires .env.staging with its own TELEGRAM_BOT_TOKEN (recommended: second bot).
+  # Start: ./scripts/staging_up.sh   OR
+  #        docker compose --profile staging up -d --build mexc-bot-staging
+  # Requires .env.staging with its own TELEGRAM_BOT_TOKEN (second BotFather bot).
+  # Volume ./data-staging is isolated from prod ./data — both containers can run together.
   mexc-bot-staging:
     profiles: ["staging"]
     build: .
@@ -26,6 +28,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env.staging
+    environment:
+      # Force container data path (volume maps host data-staging → /app/data)
+      ALERTS_FILE: /app/data/alerts.json
     volumes:
       - ./data-staging:/app/data
     healthcheck:

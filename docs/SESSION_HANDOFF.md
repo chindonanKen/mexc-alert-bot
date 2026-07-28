@@ -1,8 +1,8 @@
 # Session handoff — pick up here
 
-**Last updated:** 2026-07-28  
+**Last updated:** 2026-07-28 (V4 learning V1.0 scaffold)  
 **GitHub:** `chindonanKen/mexc-alert-bot` · branch `main`  
-**Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md) · [TRADING_STRATEGY.md](TRADING_STRATEGY.md)
+**Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md) · [TRADING_STRATEGY.md](TRADING_STRATEGY.md) · [V4_TRADING_ASSISTANT.md](V4_TRADING_ASSISTANT.md)
 
 This file is a **dated snapshot** so the next human/agent (including a **new MacBook + new Grok session**) does not rediscover the same ground.
 
@@ -96,11 +96,16 @@ Smoke: `/s` · `/l` · `/p f TSLA` · `/mw`.
 
 | Status | Item |
 |--------|------|
-| **Next (owner)** | **Major alarm-system upgrade** + coach agents that learn from alerts/movers using [TRADING_STRATEGY.md](TRADING_STRATEGY.md) |
-| **Playbook** | Full AD / panic / layering / psychology doc: [TRADING_STRATEGY.md](TRADING_STRATEGY.md) |
-| Later | `MOVER_ENRICH_KLINES=true` (code ready) |
+| **Design** | [V4_TRADING_ASSISTANT.md](V4_TRADING_ASSISTANT.md) — full plan (learning, fatal news, voice→fluent agent, V2 UI) |
+| **Verify** | [VERIFY_BUILD.md](VERIFY_BUILD.md) + `./scripts/verify_build.sh` + `.grok/workflows/verify-build.rhai` |
+| **Shipped (code)** | V1.0 learning: EventStore, mover **and target** fire log, `/j` `/events` `/trade` `/brief` `/coach`, outcome poller, integrity helpers |
+| **Staging** | **Droplet-first** — [DROPLET_OPS.md](DROPLET_OPS.md). Local Mac staging torn down (no long-running local bot; no local `.env.staging`). |
+| **Ops model** | Prefer **Grok on the droplet** for docker/logs/staging; laptop Grok + `scripts/droplet.sh` if SSH host `mexc-droplet` is set. |
+| **Next** | (1) SSH or Grok on droplet (2) staging container + staging token on server only (3) test learning (4) V1.1 news |
+| **Playbook** | [TRADING_STRATEGY.md](TRADING_STRATEGY.md) |
+| Later | Voice (V1.2), MEXC read-only fills (V1.3), `MOVER_ENRICH_KLINES=true` |
 | Backlog | Named mover buckets, bounce/reclaim, layer planner, TG buttons |
-| Deferred | Full web UI; Buzz as primary chat (Telegram stays primary for push alerts) |
+| Deferred | Full web UI (V2); Buzz as primary chat |
 | Separate bots | [FUTURE_STRATEGY_BOTS.md](FUTURE_STRATEGY_BOTS.md) |
 
 ### Buzz (context only)

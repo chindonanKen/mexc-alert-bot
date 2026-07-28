@@ -1,5 +1,7 @@
 """Configuration and settings for the MEXC Alert Bot."""
 
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +25,20 @@ def _env_optional_float(name: str) -> Optional[float]:
         return float(raw)
     except ValueError:
         return None
+
+
+def _env_int_tuple(name: str, default: str) -> tuple:
+    raw = os.getenv(name, default)
+    out = []
+    for part in str(raw).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.append(int(part))
+        except ValueError:
+            continue
+    return tuple(out) if out else tuple(int(x) for x in default.split(",") if x.strip())
 
 
 @dataclass(frozen=True)
@@ -68,14 +84,31 @@ class Settings:
     mover_heat_min_gap_seconds: float
     mover_heat_refresh_seconds: float
 
+    # V4 learning / coach (default OFF — additive memory; never touches alerts delete path)
+    feature_learning: bool
+    learning_outcome_horizons_seconds: tuple  # e.g. (900, 3600, 14400)
+    learning_outcome_poll_seconds: float
+    # Placeholders for later phases (wired false until implemented)
+    feature_news_monitor: bool
+    feature_voice: bool
+
     @property
     def alerts_file_path(self) -> Path:
         return self.alerts_file
 
 
 def load_settings() -> Settings:
-    """Load settings from environment. Raises if required values are missing."""
-    load_dotenv()
+    """Load settings from environment. Raises if required values are missing.
+
+    Load order: process env wins (python-dotenv default). Then optional
+    MEXC_BOT_ENV_FILE, then .env. Staging scripts export vars first and set
+    ALERTS_FILE to data-staging so prod ./data is never opened.
+    """
+    # Optional explicit file (e.g. MEXC_BOT_ENV_FILE=.env.staging) for clarity.
+    explicit = os.getenv("MEXC_BOT_ENV_FILE")
+    if explicit:
+        load_dotenv(explicit, override=False)
+    load_dotenv(override=False)
 
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -135,4 +168,13 @@ def load_settings() -> Settings:
         mover_heat_top_n=int(os.getenv("MOVER_HEAT_TOP_N", "5")),
         mover_heat_min_gap_seconds=float(os.getenv("MOVER_HEAT_MIN_GAP_SECONDS", "45")),
         mover_heat_refresh_seconds=float(os.getenv("MOVER_HEAT_REFRESH_SECONDS", "90")),
+        feature_learning=_env_bool("FEATURE_LEARNING", False),
+        learning_outcome_horizons_seconds=_env_int_tuple(
+            "LEARNING_OUTCOME_HORIZONS_SECONDS", "900,3600,14400"
+        ),
+        learning_outcome_poll_seconds=float(
+            os.getenv("LEARNING_OUTCOME_POLL_SECONDS", "60")
+        ),
+        feature_news_monitor=_env_bool("FEATURE_NEWS_MONITOR", False),
+        feature_voice=_env_bool("FEATURE_VOICE", False),
     )

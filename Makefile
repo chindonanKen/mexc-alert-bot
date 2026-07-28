@@ -8,9 +8,32 @@ run:
 	python -m mexc_bot.main
 
 test:
-	python tests/test_crossing_and_remove_logic.py
-	python tests/test_v3_futures_and_movers.py
-	python tests/test_mover_enrichment.py
+	python3 tests/test_crossing_and_remove_logic.py
+	python3 tests/test_v3_futures_and_movers.py
+	python3 tests/test_mover_enrichment.py
+	python3 tests/test_learning_events.py
+
+verify:
+	bash scripts/verify_build.sh
+
+# Staging: prefer droplet (see docs/DROPLET_OPS.md). Local scripts still work if needed.
+staging-up:
+	bash scripts/staging_up.sh
+
+staging-down:
+	bash scripts/staging_down.sh
+
+staging-logs:
+	@if [ -f .staging.log ]; then tail -f .staging.log; \
+	elif command -v docker >/dev/null 2>&1; then docker logs -f mexc-alert-bot-staging; \
+	else echo "Prefer droplet: ./scripts/droplet.sh staging-logs"; fi
+
+# Requires ~/.ssh/config Host mexc-droplet
+droplet-status:
+	bash scripts/droplet.sh status
+
+droplet-staging:
+	bash scripts/droplet.sh deploy-staging
 
 docker-build:
 	docker compose build

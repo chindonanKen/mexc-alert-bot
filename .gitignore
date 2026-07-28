@@ -29,6 +29,7 @@ env/
 # Environment & secrets
 .env
 .env.local
+.env.staging
 *.pem
 *.key
 
@@ -36,6 +37,14 @@ env/
 # We want the directory to exist on clone but not the actual alerts.json
 data/*
 !data/.gitkeep
+
+# Staging isolation (never share with prod ./data)
+data-staging/*
+!data-staging/.gitkeep
+
+# Staging process pid (local non-Docker runs)
+.staging.pid
+.staging.log
 
 # IDE / editors
 .idea/

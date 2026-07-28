@@ -66,12 +66,15 @@ class MoverScanner:
         notifier: Callable[..., None],
         spot_provider: Optional[PriceProvider] = None,
         futures_provider: Optional[PriceProvider] = None,
+        event_store=None,
     ):
         self.settings = settings
         self.mover_store = mover_store
         self.notifier = notifier
         self.spot_provider = spot_provider
         self.futures_provider = futures_provider
+        # Optional learning EventStore — log fires only; never touch alerts
+        self.event_store = event_store
 
         max_age = max(
             float(settings.mover_lookback_seconds) * 1.5,
@@ -452,6 +455,7 @@ class MoverScanner:
                         f"Last <code>{ref_price:.8g}</code> → now <code>{price_now:.8g}</code>"
                     )
                 extra_lines = []
+                vel_band: Optional[str] = None
                 if enrich_velocity and peak_ts is not None and peak_price_for_vel is not None:
                     vel, mins, band = score_dump(
                         peak_ts,
@@ -461,6 +465,7 @@ class MoverScanner:
                         panic_per_min=panic_v,
                         fast_per_min=fast_v,
                     )
+                    vel_band = band
                     vline = format_velocity_line(vel, mins, band)
                     if vline:
                         extra_lines.append(_html.escape(vline))
@@ -486,6 +491,33 @@ class MoverScanner:
                         f"MOVER FIRED user={user_id} {market}:{symbol} mode={fire_mode} "
                         f"pct={pct:.2f}% ref={ref_price} now={price_now} lookback={lookback}s"
                     )
+                    # Learning log (soft-fail inside EventStore; never affects fire)
+                    if self.event_store is not None and getattr(
+                        self.settings, "feature_learning", False
+                    ):
+                        try:
+                            src = (
+                                "mover_peak"
+                                if fire_mode == "peak"
+                                else "mover_step"
+                            )
+                            self.event_store.log_event(
+                                user_id,
+                                src,
+                                symbol,
+                                market,
+                                ts=now,
+                                price=float(price_now),
+                                ref_price=float(ref_price),
+                                drop_pct=float(pct),
+                                velocity_band=vel_band,
+                                mode=fire_mode,
+                                payload={"lookback_seconds": lookback},
+                            )
+                        except Exception as le:
+                            logger.error(
+                                "learning log failed after mover fire: %s", le
+                            )
                 except Exception as e:
                     logger.error(f"Mover notify failed user={user_id} {symbol}: {e}")
 

@@ -1,5 +1,7 @@
 """Alert storage layer. SQLite-backed (with migration from legacy JSON) + in-memory caches for visuals/ranks + RLock for thread safety across bot commands + monitor thread."""
 
+from __future__ import annotations
+
 import json
 import logging
 import os

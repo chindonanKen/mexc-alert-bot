@@ -8,6 +8,10 @@ Grok sessions **do not** sync between Mac mini and MacBook — only **git (GitHu
 | **This file** | First open / machine move |
 | **[AGENTS.md](AGENTS.md)** | Before **any** code change (safety + architecture) |
 | **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** | **How Kenneth trades** — required before coach/learning agents |
+| **[docs/V4_TRADING_ASSISTANT.md](docs/V4_TRADING_ASSISTANT.md)** | Learning / coach / news design |
+| **[docs/VERIFY_BUILD.md](docs/VERIFY_BUILD.md)** | Post-change verify gate + **agent prompt** |
+| **[docs/STAGING.md](docs/STAGING.md)** | Test new builds while **prod keeps running** |
+| **[docs/DROPLET_OPS.md](docs/DROPLET_OPS.md)** | **Droplet-first ops** — Grok on server, fewer handoffs |
 | **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)** | What shipped recently, prod posture, open work |
 | **[docs/FUTURE_STRATEGY_BOTS.md](docs/FUTURE_STRATEGY_BOTS.md)** | Separate bots *not* built yet |
 | **[docs/V3_TESTING_AND_PROMOTION.md](docs/V3_TESTING_AND_PROMOTION.md)** | Staging → droplet deploy |

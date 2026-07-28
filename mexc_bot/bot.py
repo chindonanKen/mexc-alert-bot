@@ -6,6 +6,8 @@ Short aliases everywhere. Smart parsing so you can type quickly.
 V3 commands (/af, /movers, /mw) are registered only when feature flags are on.
 """
 
+from __future__ import annotations
+
 import logging
 import re
 from typing import List, Optional, Tuple
@@ -245,6 +247,7 @@ def create_bot(
     futures_provider: PriceProvider | None = None,
     mover_store=None,
     mover_scanner=None,
+    event_store=None,
 ) -> telebot.TeleBot:
     """Create and configure the Telegram bot with all handlers."""
 
@@ -302,6 +305,21 @@ def create_bot(
                     "/mw add f:BTC s:SIREN   → mix in one go",
                     "/mw remove SIREN        → remove (either market)",
                     "/mw clear",
+                ]
+            )
+        if getattr(settings, "feature_learning", False):
+            lines.extend(
+                [
+                    "",
+                    "Learning / coach (V4):",
+                    "/events [n]             → recent sensor fires",
+                    "/j took|skip [sym]      → label latest fire",
+                    "/j bounce strong|weak|none|failed",
+                    "/j pride | /j note …",
+                    "/trade open f SYM [px]  → journal",
+                    "/trade list | /trade close [id|sym]",
+                    "/brief                  → session brief",
+                    "/coach [topic]          → rule-based coach",
                 ]
             )
         lines.extend(
@@ -537,7 +555,8 @@ def create_bot(
 
         flags = (
             f"\nFlags: futures={settings.feature_futures_alerts} "
-            f"movers={settings.feature_mover_scanner}"
+            f"movers={settings.feature_mover_scanner} "
+            f"learning={getattr(settings, 'feature_learning', False)}"
         )
 
         mover_line = ""
@@ -554,11 +573,263 @@ def create_bot(
             except Exception:
                 pass
 
+        learning_line = ""
+        if getattr(settings, "feature_learning", False) and event_store is not None:
+            try:
+                since = __import__("time").time() - 86400
+                n24 = event_store.count_events_since(user_id, since)
+                learning_line = f"\nLearning: events_24h={n24}"
+            except Exception:
+                learning_line = "\nLearning: on"
+
         _reply(
             message,
             f"You have {count} alert(s)\n"
-            f"Bot running. Total users: {total_users}{health_line}{flags}{mover_line}\n"
+            f"Bot running. Total users: {total_users}{health_line}{flags}"
+            f"{mover_line}{learning_line}\n"
             f"Tolerance: {settings.alert_tolerance_percent*100:.3f}%"
+        )
+
+    # ====================== LEARNING / COACH (V4, flag-gated) ======================
+    def _learning_enabled() -> bool:
+        return bool(getattr(settings, "feature_learning", False) and event_store is not None)
+
+    @bot.message_handler(commands=["events"])
+    def cmd_events(message):
+        if not _learning_enabled():
+            _reply(message, "Learning is off. Set FEATURE_LEARNING=true and restart.")
+            return
+        args = message.text.split()[1:]
+        limit = 15
+        if args:
+            try:
+                limit = int(args[0])
+            except ValueError:
+                pass
+        rows = event_store.recent_events(message.from_user.id, limit=limit)
+        if not rows:
+            _reply(message, "No learning events yet. Mover/target fires will log here.")
+            return
+        lines = [f"Last {len(rows)} event(s):"]
+        for e in rows:
+            band = e.get("velocity_band") or "—"
+            drop = e.get("drop_pct")
+            drop_s = f"{drop:.1f}%" if drop is not None else "?"
+            act = e.get("last_action") or "unlabeled"
+            lines.append(
+                f"#{e['id']} [{(e.get('market') or '?')[:1].upper()}] "
+                f"{e['symbol']} {drop_s} {e.get('mode') or e.get('source')} "
+                f"{band} · {act}"
+            )
+        _reply(message, "\n".join(lines))
+
+    @bot.message_handler(commands=["j", "journal_label"])
+    def cmd_j(message):
+        if not _learning_enabled():
+            _reply(message, "Learning is off. Set FEATURE_LEARNING=true and restart.")
+            return
+        args = message.text.split()[1:]
+        if not args:
+            _reply(
+                message,
+                "Usage:\n"
+                "/j took [symbol]\n"
+                "/j skip [symbol]\n"
+                "/j bounce strong|weak|none|failed [symbol]\n"
+                "/j pride [symbol]\n"
+                "/j note your text…",
+            )
+            return
+        sub = args[0].lower()
+        rest = args[1:]
+        user_id = message.from_user.id
+        action = bounce = behavior = notes = None
+        symbol = None
+
+        if sub in ("took", "take", "in"):
+            action = "took"
+            symbol = rest[0] if rest else None
+        elif sub in ("skip", "skipped", "pass", "no"):
+            action = "skip"
+            symbol = rest[0] if rest else None
+        elif sub in ("watch", "watching"):
+            action = "watch"
+            symbol = rest[0] if rest else None
+        elif sub == "bounce":
+            if not rest:
+                _reply(message, "Usage: /j bounce strong|weak|none|failed [symbol]")
+                return
+            bounce = rest[0].lower()
+            if bounce not in ("strong", "weak", "none", "failed"):
+                _reply(message, "bounce must be strong|weak|none|failed")
+                return
+            symbol = rest[1] if len(rest) > 1 else None
+        elif sub == "pride":
+            behavior = "pride"
+            symbol = rest[0] if rest else None
+        elif sub == "note":
+            notes = " ".join(rest) if rest else None
+            if not notes:
+                _reply(message, "Usage: /j note your text")
+                return
+        else:
+            _reply(message, f"Unknown /j subcommand: {sub}")
+            return
+
+        eid = event_store.label_latest(
+            user_id,
+            symbol=symbol,
+            action=action,
+            bounce_quality=bounce,
+            behavior=behavior,
+            notes=notes,
+        )
+        if eid is None:
+            _reply(message, "No matching event to label. Wait for a fire or check /events.")
+            return
+        bits = [f"Labeled event #{eid}"]
+        if action:
+            bits.append(f"action={action}")
+        if bounce:
+            bits.append(f"bounce={bounce}")
+        if behavior:
+            bits.append(f"behavior={behavior}")
+        if notes:
+            bits.append("note saved")
+        _reply(message, " · ".join(bits))
+
+    @bot.message_handler(commands=["trade"])
+    def cmd_trade(message):
+        if not _learning_enabled():
+            _reply(message, "Learning is off. Set FEATURE_LEARNING=true and restart.")
+            return
+        args = message.text.split()[1:]
+        user_id = message.from_user.id
+        if not args:
+            _reply(
+                message,
+                "Usage:\n"
+                "/trade open f TSLA [price] [notes…]\n"
+                "/trade open s SIREN [price]\n"
+                "/trade list\n"
+                "/trade close [id|symbol] [exit_price] [notes…]",
+            )
+            return
+        sub = args[0].lower()
+        if sub == "list":
+            rows = event_store.journal_list(user_id, open_only=True)
+            if not rows:
+                _reply(message, "No open journal trades.")
+                return
+            lines = ["Open journal trades:"]
+            for t in rows:
+                entry = t.get("entry_avg")
+                es = f" @ {entry}" if entry is not None else ""
+                lines.append(
+                    f"#{t['id']} [{t['market'][:1].upper()}] {t['symbol']}{es}"
+                )
+            _reply(message, "\n".join(lines))
+            return
+        if sub == "open":
+            rest = args[1:]
+            market = "futures"
+            if rest and rest[0].lower() in ("f", "futures", "s", "spot"):
+                market = "futures" if rest[0].lower() in ("f", "futures") else "spot"
+                rest = rest[1:]
+            if not rest:
+                _reply(message, "Usage: /trade open f SYMBOL [price] [notes]")
+                return
+            symbol = rest[0].upper()
+            entry = None
+            notes = None
+            if len(rest) >= 2:
+                try:
+                    entry = float(rest[1].replace(",", ""))
+                    notes = " ".join(rest[2:]) or None
+                except ValueError:
+                    notes = " ".join(rest[1:]) or None
+            tid = event_store.journal_open(
+                user_id, symbol, market, entry_avg=entry, notes=notes
+            )
+            _reply(
+                message,
+                f"Journal open #{tid} [{market[:1].upper()}] {symbol}"
+                + (f" @ {entry}" if entry is not None else ""),
+            )
+            return
+        if sub == "close":
+            rest = args[1:]
+            trade_id = None
+            symbol = None
+            exit_avg = None
+            notes = None
+            if rest:
+                try:
+                    trade_id = int(rest[0])
+                    rest = rest[1:]
+                except ValueError:
+                    symbol = rest[0]
+                    rest = rest[1:]
+            if rest:
+                try:
+                    exit_avg = float(rest[0].replace(",", ""))
+                    notes = " ".join(rest[1:]) or None
+                except ValueError:
+                    notes = " ".join(rest) or None
+            ok = event_store.journal_close(
+                user_id,
+                trade_id=trade_id,
+                symbol=symbol,
+                exit_avg=exit_avg,
+                notes=notes,
+            )
+            if not ok:
+                _reply(message, "No open trade matched.")
+                return
+            _reply(message, "Journal trade closed.")
+            return
+        _reply(message, f"Unknown /trade subcommand: {sub}")
+
+    @bot.message_handler(commands=["brief"])
+    def cmd_brief(message):
+        if not _learning_enabled():
+            _reply(message, "Learning is off. Set FEATURE_LEARNING=true and restart.")
+            return
+        from .coach import format_brief
+
+        recent = event_store.recent_events(message.from_user.id, limit=12)
+        opens = event_store.journal_list(message.from_user.id, open_only=True)
+        _reply(
+            message,
+            format_brief(
+                recent_events=recent,
+                open_trades=opens,
+                learning_on=True,
+            ),
+        )
+
+    @bot.message_handler(commands=["coach"])
+    def cmd_coach(message):
+        if not _learning_enabled():
+            _reply(message, "Learning is off. Set FEATURE_LEARNING=true and restart.")
+            return
+        from .coach import format_coach_reply
+
+        parts = message.text.split(maxsplit=1)
+        question = parts[1] if len(parts) > 1 else "checklist"
+        recent = event_store.recent_events(message.from_user.id, limit=5)
+        stats = None
+        # If question mentions a token-like word, pull stats
+        for tok in question.replace(",", " ").split():
+            t = tok.strip().upper()
+            if len(t) >= 2 and t.isalpha():
+                stats = event_store.stats_for_symbol(message.from_user.id, t)
+                if stats.get("events"):
+                    break
+                stats = None
+        _reply(
+            message,
+            format_coach_reply(question, recent_events=recent, stats=stats),
         )
 
     # ====================== DIAG / DEBUG ======================

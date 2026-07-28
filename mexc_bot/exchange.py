@@ -9,10 +9,19 @@ Current implementations:
 - MexcFuturesClient — futures/contract, batch /contract/ticker (lastPrice)
 """
 
+from __future__ import annotations
+
 import logging
 from typing import Dict, Optional, Protocol
 
 import requests
+
+try:
+    import certifi
+
+    _CA_BUNDLE = certifi.where()
+except Exception:  # pragma: no cover
+    _CA_BUNDLE = True  # requests default
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +62,7 @@ class MexcClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
+        self.session.verify = _CA_BUNDLE
         self.session.headers.update({"User-Agent": "mexc-alert-bot/0.3"})
 
     def get_price(self, symbol: str) -> Optional[float]:
@@ -139,6 +149,7 @@ class MexcFuturesClient:
         self.timeout = timeout
         self.symbol_cache_ttl_seconds = symbol_cache_ttl_seconds
         self.session = requests.Session()
+        self.session.verify = _CA_BUNDLE
         self.session.headers.update({"User-Agent": "mexc-alert-bot/0.3"})
         self._price_cache: Dict[str, float] = {}
         self._volume_cache: Dict[str, float] = {}

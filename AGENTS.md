@@ -343,10 +343,22 @@ Covers: stable_id crossing, market isolation, stock resolve (compact `TSLAUSDT` 
 | `START_HERE.md` | New machine / new Grok session |
 | `AGENTS.md` | **This file** — engineering safety + architecture |
 | `docs/TRADING_STRATEGY.md` | **Owner trading playbook** for coach/learning agents |
+| `docs/V4_TRADING_ASSISTANT.md` | Learning / coach / fatal news / voice → fluent agent design |
 | `docs/SESSION_HANDOFF.md` | Latest build + what was done / next |
 | `docs/V3_TESTING_AND_PROMOTION.md` | Staging → prod |
 | `docs/FUTURE_STRATEGY_BOTS.md` | Future separate bots backlog |
 | `.env.example` | Full env template |
+
+### V4 learning (default OFF)
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `FEATURE_LEARNING` | `false` | Event log on mover fires, `/j` `/events` `/trade` `/brief` `/coach`, outcome poller |
+| `LEARNING_OUTCOME_HORIZONS_SECONDS` | `900,3600,14400` | Bounce/DD measurement windows after fires |
+| `FEATURE_NEWS_MONITOR` | `false` | V1.1 fatal news (not fully wired until that phase) |
+| `FEATURE_VOICE` | `false` | V1.2 voice channel |
+
+Tables: `learning_events`, `learning_labels`, `learning_outcomes`, `journal_trades` — same DB file, **never** delete `alerts`.
 
 ---
 
