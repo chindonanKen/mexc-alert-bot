@@ -18,6 +18,9 @@ test:
 verify:
 	bash scripts/verify_build.sh
 
+stress:
+	bash scripts/stress_staging.sh
+
 # Staging: prefer droplet (see docs/DROPLET_OPS.md). Local scripts still work if needed.
 staging-up:
 	bash scripts/staging_up.sh
