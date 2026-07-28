@@ -480,8 +480,54 @@ class MoverScanner:
                 if extra_lines:
                     msg += "\n" + "\n".join(extra_lines)
 
+                # Log learning event first so we can attach Took/Skip buttons by event_id
+                event_id = 0
+                reply_markup = None
+                if self.event_store is not None and getattr(
+                    self.settings, "feature_learning", False
+                ):
+                    try:
+                        src = (
+                            "mover_peak"
+                            if fire_mode == "peak"
+                            else "mover_step"
+                        )
+                        event_id = self.event_store.log_event(
+                            user_id,
+                            src,
+                            symbol,
+                            market,
+                            ts=now,
+                            price=float(price_now),
+                            ref_price=float(ref_price),
+                            drop_pct=float(pct),
+                            velocity_band=vel_band,
+                            mode=fire_mode,
+                            payload={"lookback_seconds": lookback},
+                        )
+                        if event_id:
+                            try:
+                                from ..assistant.ux import fire_action_keyboard
+
+                                reply_markup = fire_action_keyboard(event_id)
+                                msg += (
+                                    "\n\n<i>Tap Took / Skip / Later — no typing</i>"
+                                )
+                            except Exception as ke:
+                                logger.error("fire keyboard build failed: %s", ke)
+                    except Exception as le:
+                        logger.error(
+                            "learning log failed before mover notify: %s", le
+                        )
+
                 try:
-                    self.notifier(user_id, msg, parse_mode="HTML")
+                    # Only pass reply_markup when set — older notifiers use (uid, msg, parse_mode=)
+                    if reply_markup is not None:
+                        self.notifier(
+                            user_id, msg, parse_mode="HTML", reply_markup=reply_markup
+                        )
+                    else:
+                        self.notifier(user_id, msg, parse_mode="HTML")
                     self._anchors[key] = price_now
                     self._last_fire_mono[key] = time.monotonic()
                     self._last_fire_wall[key] = now
@@ -490,34 +536,8 @@ class MoverScanner:
                     logger.info(
                         f"MOVER FIRED user={user_id} {market}:{symbol} mode={fire_mode} "
                         f"pct={pct:.2f}% ref={ref_price} now={price_now} lookback={lookback}s"
+                        f" event_id={event_id or '-'}"
                     )
-                    # Learning log (soft-fail inside EventStore; never affects fire)
-                    if self.event_store is not None and getattr(
-                        self.settings, "feature_learning", False
-                    ):
-                        try:
-                            src = (
-                                "mover_peak"
-                                if fire_mode == "peak"
-                                else "mover_step"
-                            )
-                            self.event_store.log_event(
-                                user_id,
-                                src,
-                                symbol,
-                                market,
-                                ts=now,
-                                price=float(price_now),
-                                ref_price=float(ref_price),
-                                drop_pct=float(pct),
-                                velocity_band=vel_band,
-                                mode=fire_mode,
-                                payload={"lookback_seconds": lookback},
-                            )
-                        except Exception as le:
-                            logger.error(
-                                "learning log failed after mover fire: %s", le
-                            )
                 except Exception as e:
                     logger.error(f"Mover notify failed user={user_id} {symbol}: {e}")
 

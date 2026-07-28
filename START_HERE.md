@@ -12,6 +12,7 @@ Grok sessions **do not** sync between Mac mini and MacBook — only **git (GitHu
 | **[docs/VERIFY_BUILD.md](docs/VERIFY_BUILD.md)** | Post-change verify gate + **agent prompt** |
 | **[docs/STAGING.md](docs/STAGING.md)** | Test new builds while **prod keeps running** |
 | **[docs/DROPLET_OPS.md](docs/DROPLET_OPS.md)** | **Droplet-first ops** — Grok on server, fewer handoffs |
+| **[docs/ASSISTANT_UX.md](docs/ASSISTANT_UX.md)** | Buttons / desk / plain language — not command encyclopedia |
 | **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)** | What shipped recently, prod posture, open work |
 | **[docs/FUTURE_STRATEGY_BOTS.md](docs/FUTURE_STRATEGY_BOTS.md)** | Separate bots *not* built yet |
 | **[docs/V3_TESTING_AND_PROMOTION.md](docs/V3_TESTING_AND_PROMOTION.md)** | Staging → droplet deploy |

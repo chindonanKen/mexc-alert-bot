@@ -64,6 +64,7 @@ Strategy fit is defined in [TRADING_STRATEGY.md](TRADING_STRATEGY.md): AD mean-r
 | Phase | Ship | Flag(s) |
 |-------|------|---------|
 | **V1.0** | Event log, labels, outcome poller, journal cmds, `/coach` + `/brief` (rule-based) | `FEATURE_LEARNING` |
+| **V1.0b UX** | Fire **inline buttons** Took/Skip/Later, `/desk`, plain-language labels — see [ASSISTANT_UX.md](ASSISTANT_UX.md) | `FEATURE_LEARNING` |
 | **V1.1** | Fatal news watcher + fire tags + optional push | `FEATURE_NEWS_MONITOR` |
 | **V1.2** | Voice notes → STT → same tools | `FEATURE_VOICE` |
 | **V1.3** | Optional MEXC **read-only** fills → journal | `FEATURE_MEXC_PRIVATE_READ` |

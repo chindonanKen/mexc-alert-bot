@@ -27,6 +27,7 @@ $PY tests/test_crossing_and_remove_logic.py
 $PY tests/test_v3_futures_and_movers.py
 $PY tests/test_mover_enrichment.py
 $PY tests/test_learning_events.py
+$PY tests/test_assistant_ux.py
 echo "All unit tests OK"
 echo
 

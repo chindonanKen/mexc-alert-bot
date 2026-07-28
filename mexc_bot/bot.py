@@ -265,69 +265,36 @@ def create_bot(
     # ====================== HELP / START ======================
     @bot.message_handler(commands=["start", "help"])
     def cmd_start(message):
+        # Progressive disclosure — assistant first, power commands secondary.
+        # See docs/ASSISTANT_UX.md
         lines = [
-            "MEXC Alert Bot — fast & simple\n",
-            "Quick add (recommended):",
-            "/a BTC 65000          → spot BTCUSDT @ 65000",
-            "/a eth 2.4k sol 145   → multiple in one go",
-            "/a PEPE 0.000012",
-            "(Multiple per symbol supported)\n",
-            "Other fast commands:",
-            "/l or /list             — your alerts",
-            "/p BTC                  — current spot price",
-            "/t 3 5 8                — toggle multiple IDs",
-            "/r 3 5 8 or /r BTCUSDT  — remove by ID(s) or symbol",
-            "/clearall confirm       — delete everything",
-            "/disableall             — turn all off (keep list)",
-            "/s or /status           — stats",
-            "/d or /diag or /debug   — debug state",
+            "MEXC trading assistant\n",
+            "PRIMARY — after a dump alert:",
+            "  Tap Took / Skip / Later on the message (no typing)",
+            "  Or type: took · skip · later · brief · coach\n",
+            "HOME: /desk",
+            "Status: /s\n",
+            "SENSORS (when you need levels):",
+            "/a BTC 65000     spot target",
+            "/l  /p BTC       list / price",
         ]
         if settings.feature_futures_alerts:
-            lines.extend(
-                [
-                    "",
-                    "Futures (V3):",
-                    "/af BTC 65000           → crypto perp",
-                    "/af TSLA 250            → stock perp (auto-resolves TSLASTOCK…)",
-                    "/af eth 2.4k sol 145    → multiple futures",
-                    "/p f BTC  |  /p f TSLA  → futures price (short names OK)",
-                ]
-            )
+            lines.append("/af BTC 65000 · /p f TSLA   futures targets")
         if settings.feature_mover_scanner:
-            lines.extend(
-                [
-                    "",
-                    "Downside movers (V3) — spot + futures can mix:",
-                    "/movers on | off | set 5 15 | list",
-                    "/mw                     → show watchlist",
-                    "/mw add f BTC ETH       → add futures",
-                    "/mw add s SIREN         → add spot (own book)",
-                    "/mw add f:BTC s:SIREN   → mix in one go",
-                    "/mw remove SIREN        → remove (either market)",
-                    "/mw clear",
-                ]
-            )
+            lines.append("/movers on · /mw add f BTC   downside movers")
         if getattr(settings, "feature_learning", False):
             lines.extend(
                 [
                     "",
-                    "Learning / coach (V4):",
-                    "/events [n]             → recent sensor fires",
-                    "/j took|skip [sym]      → label latest fire",
-                    "/j bounce strong|weak|none|failed",
-                    "/j pride | /j note …",
-                    "/trade open f SYM [px]  → journal",
-                    "/trade list | /trade close [id|sym]",
-                    "/brief                  → session brief",
-                    "/coach [topic]          → rule-based coach",
+                    "Assistant memory is ON.",
+                    "Power tools (optional): /events /brief /coach /j /trade",
                 ]
             )
         lines.extend(
             [
                 "",
-                "Alert numbers (#) are always the current position from the top of /l (1-based, no gaps).",
-                "If you remove something above, the numbers below shift down automatically.",
-                "Target alerts are one-shot: fire once on cross/band, then remove themselves.",
+                "Target alerts are one-shot (fire → remove).",
+                "Full command list is not the main UX — use /desk.",
             ]
         )
         _reply(message, "\n".join(lines))
@@ -590,9 +557,115 @@ def create_bot(
             f"Tolerance: {settings.alert_tolerance_percent*100:.3f}%"
         )
 
-    # ====================== LEARNING / COACH (V4, flag-gated) ======================
+    # ====================== ASSISTANT UX + LEARNING (V4, flag-gated) ======================
     def _learning_enabled() -> bool:
         return bool(getattr(settings, "feature_learning", False) and event_store is not None)
+
+    def _label_event_id(
+        user_id: int,
+        event_id: int,
+        *,
+        action: Optional[str] = None,
+        bounce_quality: Optional[str] = None,
+        behavior: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> bool:
+        if not event_store or event_id <= 0:
+            return False
+        return event_store.label_event(
+            event_id,
+            user_id,
+            action=action,
+            bounce_quality=bounce_quality,
+            behavior=behavior,
+            notes=notes,
+        )
+
+    @bot.message_handler(commands=["desk", "home", "assistant"])
+    def cmd_desk(message):
+        from .assistant.ux import desk_text
+
+        recent_n = 0
+        open_n = 0
+        if _learning_enabled():
+            try:
+                recent_n = len(event_store.recent_events(message.from_user.id, limit=12))
+                open_n = len(event_store.journal_list(message.from_user.id, open_only=True))
+            except Exception:
+                pass
+        _reply(
+            message,
+            desk_text(
+                learning_on=_learning_enabled(),
+                recent_n=recent_n,
+                open_trades_n=open_n,
+            ),
+        )
+
+    @bot.callback_query_handler(func=lambda c: c.data and c.data.startswith("L:"))
+    def cb_learning_label(call):
+        """One-tap Took/Skip/Later (and bounce) — primary assistant UX."""
+        from .assistant.ux import bounce_keyboard, parse_callback
+
+        if not _learning_enabled():
+            try:
+                bot.answer_callback_query(call.id, "Learning is off")
+            except Exception:
+                pass
+            return
+        parsed = parse_callback(call.data or "")
+        if not parsed:
+            try:
+                bot.answer_callback_query(call.id, "Unknown button")
+            except Exception:
+                pass
+            return
+        action, eid = parsed
+        user_id = call.from_user.id
+        try:
+            if action == "took":
+                ok = _label_event_id(user_id, eid, action="took")
+                bot.answer_callback_query(call.id, "Marked TOOK" if ok else "Failed")
+                if ok:
+                    try:
+                        bot.send_message(
+                            call.message.chat.id,
+                            f"Logged TOOK on event #{eid}. Optional bounce quality:",
+                            reply_markup=bounce_keyboard(eid),
+                        )
+                    except Exception as e:
+                        logger.warning("bounce keyboard send failed: %s", e)
+            elif action == "skip":
+                ok = _label_event_id(user_id, eid, action="skip")
+                bot.answer_callback_query(call.id, "Marked SKIP" if ok else "Failed")
+                if ok:
+                    bot.send_message(call.message.chat.id, f"Logged SKIP on event #{eid}.")
+            elif action == "watch":
+                ok = _label_event_id(user_id, eid, action="watch")
+                bot.answer_callback_query(call.id, "Watching" if ok else "Failed")
+                if ok:
+                    bot.send_message(call.message.chat.id, f"Watching event #{eid}.")
+            elif action.startswith("bounce_"):
+                quality = action.replace("bounce_", "", 1)  # strong|weak|none|failed
+                if quality == "failed":
+                    quality = "failed"
+                ok = _label_event_id(user_id, eid, bounce_quality=quality)
+                bot.answer_callback_query(
+                    call.id, f"Bounce={quality}" if ok else "Failed"
+                )
+                if ok:
+                    bot.send_message(
+                        call.message.chat.id,
+                        f"Bounce quality on #{eid}: {quality}",
+                    )
+            else:
+                bot.answer_callback_query(call.id, "Unknown")
+        except Exception as e:
+            logger.error("callback learning label failed: %s", e)
+            try:
+                bot.answer_callback_query(call.id, "Error")
+            except Exception:
+                pass
 
     @bot.message_handler(commands=["events"])
     def cmd_events(message):
@@ -608,7 +681,10 @@ def create_bot(
                 pass
         rows = event_store.recent_events(message.from_user.id, limit=limit)
         if not rows:
-            _reply(message, "No learning events yet. Mover/target fires will log here.")
+            _reply(
+                message,
+                "No fires logged yet. When a mover dumps, use the buttons on the alert.",
+            )
             return
         lines = [f"Last {len(rows)} event(s):"]
         for e in rows:
@@ -621,6 +697,7 @@ def create_bot(
                 f"{e['symbol']} {drop_s} {e.get('mode') or e.get('source')} "
                 f"{band} · {act}"
             )
+        lines.append("\nTip: label from the fire buttons — no /j needed.")
         _reply(message, "\n".join(lines))
 
     @bot.message_handler(commands=["j", "journal_label"])
@@ -632,7 +709,8 @@ def create_bot(
         if not args:
             _reply(
                 message,
-                "Usage:\n"
+                "Prefer buttons on the dump alert, or type: took / skip / later\n\n"
+                "Power /j (optional):\n"
                 "/j took [symbol]\n"
                 "/j skip [symbol]\n"
                 "/j bounce strong|weak|none|failed [symbol]\n"
@@ -652,7 +730,7 @@ def create_bot(
         elif sub in ("skip", "skipped", "pass", "no"):
             action = "skip"
             symbol = rest[0] if rest else None
-        elif sub in ("watch", "watching"):
+        elif sub in ("watch", "watching", "later"):
             action = "watch"
             symbol = rest[0] if rest else None
         elif sub == "bounce":
@@ -673,7 +751,7 @@ def create_bot(
                 _reply(message, "Usage: /j note your text")
                 return
         else:
-            _reply(message, f"Unknown /j subcommand: {sub}")
+            _reply(message, f"Unknown /j subcommand: {sub}\nOr just type: took / skip")
             return
 
         eid = event_store.label_latest(
@@ -685,7 +763,7 @@ def create_bot(
             notes=notes,
         )
         if eid is None:
-            _reply(message, "No matching event to label. Wait for a fire or check /events.")
+            _reply(message, "No matching event to label. Wait for a fire (use buttons there).")
             return
         bits = [f"Labeled event #{eid}"]
         if action:
@@ -1202,9 +1280,92 @@ def create_bot(
                 header += f"\nCould not resolve: {', '.join(failed)}"
             show_list(header)
 
-    # Catch-all unknown
+    # Plain-language assistant (learning on) — before unknown-/ catch-all
+    @bot.message_handler(
+        func=lambda m: bool(
+            m.text
+            and not m.text.startswith("/")
+            and getattr(settings, "feature_learning", False)
+            and event_store is not None
+        )
+    )
+    def cmd_plain_assistant(message):
+        from .assistant.ux import parse_plain_intent
+        from .coach import format_brief, format_coach_reply
+
+        intent = parse_plain_intent(message.text or "")
+        if not intent:
+            # Do not spam — only guide if short message looks like a question
+            t = (message.text or "").strip()
+            if len(t) < 40 and t.endswith("?"):
+                _reply(message, "Try: took / skip / brief / coach / desk — or /desk")
+            return
+
+        user_id = message.from_user.id
+        kind = intent["intent"]
+
+        if kind in ("took", "skip", "watch"):
+            eid = event_store.label_latest(user_id, action=kind)
+            if eid is None:
+                _reply(message, "No recent fire to label. Wait for a mover, then tap or say took/skip.")
+                return
+            _reply(message, f"OK — {kind} on event #{eid}.")
+            return
+        if kind == "pride":
+            eid = event_store.label_latest(user_id, behavior="pride")
+            if eid is None:
+                _reply(message, "No recent event for pride flag.")
+                return
+            _reply(message, f"Pride flag on event #{eid}. Stick to the plan if structure is still valid.")
+            return
+        if kind == "brief":
+            recent = event_store.recent_events(user_id, limit=12)
+            opens = event_store.journal_list(user_id, open_only=True)
+            _reply(
+                message,
+                format_brief(recent_events=recent, open_trades=opens, learning_on=True),
+            )
+            return
+        if kind == "coach":
+            q = intent.get("question") or "checklist"
+            recent = event_store.recent_events(user_id, limit=5)
+            _reply(message, format_coach_reply(q, recent_events=recent, stats=None))
+            return
+        if kind == "open":
+            rows = event_store.journal_list(user_id, open_only=True)
+            if not rows:
+                _reply(
+                    message,
+                    "No open journal trades yet.\n"
+                    "(Soon: auto from MEXC. For now /trade open … or just trade and label fires with buttons.)",
+                )
+                return
+            lines = ["Open journal:"]
+            for t in rows:
+                entry = t.get("entry_avg")
+                es = f" @ {entry}" if entry is not None else ""
+                lines.append(f"#{t['id']} [{t['market'][:1].upper()}] {t['symbol']}{es}")
+            _reply(message, "\n".join(lines))
+            return
+        if kind == "events":
+            # reuse list
+            rows = event_store.recent_events(user_id, limit=10)
+            if not rows:
+                _reply(message, "No events yet.")
+                return
+            lines = ["Recent fires:"]
+            for e in rows:
+                act = e.get("last_action") or "unlabeled"
+                lines.append(f"#{e['id']} {e.get('symbol')} · {act}")
+            _reply(message, "\n".join(lines))
+            return
+
+    # Catch-all unknown slash commands
     @bot.message_handler(func=lambda m: m.text and m.text.startswith("/"))
     def cmd_unknown(message):
-        _reply(message, "Unknown. Try /help or just /a BTC 65000 (fastest)")
+        _reply(
+            message,
+            "Unknown command. Try /desk (assistant) or /a BTC 65000 (alert).",
+        )
 
     return bot

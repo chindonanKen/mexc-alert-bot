@@ -12,6 +12,7 @@ test:
 	python3 tests/test_v3_futures_and_movers.py
 	python3 tests/test_mover_enrichment.py
 	python3 tests/test_learning_events.py
+	python3 tests/test_assistant_ux.py
 
 verify:
 	bash scripts/verify_build.sh

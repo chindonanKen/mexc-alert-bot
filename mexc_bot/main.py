@@ -100,9 +100,19 @@ def main() -> None:
         event_store=event_store,
     )
 
-    def send_telegram_notification(user_id: int, text: str, parse_mode: str | None = None) -> None:
+    def send_telegram_notification(
+        user_id: int,
+        text: str,
+        parse_mode: str | None = None,
+        reply_markup=None,
+    ) -> None:
         try:
-            tg_bot.send_message(user_id, text, parse_mode=parse_mode)
+            tg_bot.send_message(
+                user_id,
+                text,
+                parse_mode=parse_mode,
+                reply_markup=reply_markup,
+            )
         except Exception as e:
             logger.error(f"Failed to send Telegram message to {user_id}: {e}")
 
