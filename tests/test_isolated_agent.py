@@ -123,7 +123,7 @@ class TestStoreAndQueue(unittest.TestCase):
         store.record_investigation_outcome(
             iid,
             event_id=99,
-            horizon_seconds=3600,
+            horizon_seconds=14400,
             max_bounce_pct=0.5,
             max_dd_pct=-3.0,
             verdict="NEWS_RELATED",

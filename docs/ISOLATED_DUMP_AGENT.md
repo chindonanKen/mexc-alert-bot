@@ -38,7 +38,7 @@ Outcome bridge → learning_outcomes → source_expertise weights
 
 Table `source_expertise`: per `(source, kind)`  
 - hits, confirmed_moves, false_alarms, weight  
-- Updated when investigation has `event_id` and learning outcome exists (~1h bounce/dd)
+- Updated when investigation has `event_id` and learning outcome exists at the **4h** horizon (`ISOLATED_OUTCOME_HORIZON_SECONDS=14400` by default)
 
 Commands: `/inv` recent checks · `/inv sources` learned weights
 

@@ -24,7 +24,7 @@ class InvestigationOutcomeBridge:
         inv_store: InvestigatorStore,
         event_store: EventStore,
         *,
-        horizon_seconds: int = 3600,
+        horizon_seconds: int = 14400,
         poll_seconds: float = 120.0,
     ):
         self.inv_store = inv_store

@@ -40,7 +40,7 @@ class IsolatedDumpAgent:
         cooldown_seconds: float = 900.0,
         always_report: bool = True,
         notify_none: bool = True,
-        learning_outcome_horizon: int = 3600,
+        learning_outcome_horizon: int = 14400,
         get_price: Optional[Callable[[str, str], Optional[float]]] = None,
     ):
         self.store = store

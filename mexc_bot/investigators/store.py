@@ -342,7 +342,7 @@ class InvestigatorStore:
                     (confirmed, false_a, bsum, bn, weight, time.time(), src, kind),
                 )
 
-    def pending_outcome_links(self, horizon_seconds: int = 3600, limit: int = 50) -> List[dict]:
+    def pending_outcome_links(self, horizon_seconds: int = 14400, limit: int = 50) -> List[dict]:
         """Investigations with event_id old enough and not yet scored for horizon."""
         cutoff = time.time() - horizon_seconds
         with self._lock:

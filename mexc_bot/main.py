@@ -190,6 +190,7 @@ def main() -> None:
             criteria=criteria,
             cooldown_seconds=settings.isolated_cooldown_seconds,
             notify_none=settings.isolated_notify_none,
+            learning_outcome_horizon=settings.isolated_outcome_horizon_seconds,
             get_price=_inv_price,
         )
         if mover_scanner is not None:
@@ -197,14 +198,18 @@ def main() -> None:
         tg_bot._isolated_agent_ref = isolated_agent  # type: ignore[attr-defined]
         tg_bot._investigator_store_ref = inv_store  # type: ignore[attr-defined]
         logger.info(
-            "Isolated dump agent ready (min_drop=%s%% mult=%s max_heat=%s)",
+            "Isolated dump agent ready (min_drop=%s%% mult=%s max_heat=%s outcome_h=%ss)",
             settings.isolated_min_drop_pct,
             settings.isolated_threshold_multiplier,
             settings.isolated_max_heat_breadth,
+            settings.isolated_outcome_horizon_seconds,
         )
         if event_store is not None:
             inv_bridge = InvestigationOutcomeBridge(
-                inv_store, event_store, horizon_seconds=3600, poll_seconds=120
+                inv_store,
+                event_store,
+                horizon_seconds=settings.isolated_outcome_horizon_seconds,
+                poll_seconds=120,
             )
 
     if settings.feature_news_monitor and news_store is not None:

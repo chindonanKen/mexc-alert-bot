@@ -110,6 +110,8 @@ class Settings:
     isolated_cooldown_seconds: float
     isolated_notify_none: bool
     delist_radar_poll_seconds: float
+    # Cause→effect scoring horizon for isolated agent (default 4h)
+    isolated_outcome_horizon_seconds: int
 
     @property
     def alerts_file_path(self) -> Path:
@@ -224,4 +226,7 @@ def load_settings() -> Settings:
         isolated_cooldown_seconds=float(os.getenv("ISOLATED_COOLDOWN_SECONDS", "900")),
         isolated_notify_none=_env_bool("ISOLATED_NOTIFY_NONE", True),
         delist_radar_poll_seconds=float(os.getenv("DELIST_RADAR_POLL_SECONDS", "180")),
+        isolated_outcome_horizon_seconds=int(
+            os.getenv("ISOLATED_OUTCOME_HORIZON_SECONDS", "14400")
+        ),
     )
