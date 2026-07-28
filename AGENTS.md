@@ -2,7 +2,8 @@
 
 Guide for humans and coding agents. **Read this before changing production behavior.**
 
-**New machine or new Grok chat?** Start with **[START_HERE.md](START_HERE.md)** (clone, tests, bootstrap prompt), then this file, then **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)**.
+**New machine or new Grok chat?** Start with **[START_HERE.md](START_HERE.md)** (clone, tests, bootstrap prompt), then this file, then **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)**.  
+**How the owner trades (AD, panic, layers, psychology):** **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** — required before building coach / learning / recommendation agents.
 
 **Repo (GitHub):** `https://github.com/chindonanKen/mexc-alert-bot` · branch `main`  
 **Local folder:** `~/mexc-bot` (Mac mini or MacBook — same clone) · **droplet:** often `~/mexc-alert-bot`  
@@ -339,7 +340,9 @@ Covers: stable_id crossing, market isolation, stock resolve (compact `TSLAUSDT` 
 | Doc | Purpose |
 |-----|---------|
 | `README.md` | Product overview |
-| `AGENTS.md` | **This file** — primary agent guide |
+| `START_HERE.md` | New machine / new Grok session |
+| `AGENTS.md` | **This file** — engineering safety + architecture |
+| `docs/TRADING_STRATEGY.md` | **Owner trading playbook** for coach/learning agents |
 | `docs/SESSION_HANDOFF.md` | Latest build + what was done / next |
 | `docs/V3_TESTING_AND_PROMOTION.md` | Staging → prod |
 | `docs/FUTURE_STRATEGY_BOTS.md` | Future separate bots backlog |

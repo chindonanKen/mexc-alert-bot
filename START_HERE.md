@@ -7,6 +7,7 @@ Grok sessions **do not** sync between Mac mini and MacBook — only **git (GitHu
 |-----|------|
 | **This file** | First open / machine move |
 | **[AGENTS.md](AGENTS.md)** | Before **any** code change (safety + architecture) |
+| **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** | **How Kenneth trades** — required before coach/learning agents |
 | **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)** | What shipped recently, prod posture, open work |
 | **[docs/FUTURE_STRATEGY_BOTS.md](docs/FUTURE_STRATEGY_BOTS.md)** | Separate bots *not* built yet |
 | **[docs/V3_TESTING_AND_PROMOTION.md](docs/V3_TESTING_AND_PROMOTION.md)** | Staging → droplet deploy |
@@ -96,12 +97,13 @@ Smoke: Telegram `/s` · `/l` · `/p f TSLA` · `/mw`.
 
 ```
 You are working on mexc-alert-bot (folder may be mexc-bot).
-1. Read START_HERE.md, AGENTS.md, docs/SESSION_HANDOFF.md.
-2. Run make test before/after behavior changes.
-3. Never break spot target stable_id crossing; never delete alerts from movers.
-4. Feature flags default OFF in templates; prod enables on droplet.
-5. Stock futures resolve: TSLA may be TSLAUSDT / TESLA_USDT / *STOCK*_USDT — see exchange.py.
-6. Deploy path: push GitHub → droplet git pull → docker compose up -d --build mexc-bot.
+1. Read START_HERE.md, AGENTS.md, docs/TRADING_STRATEGY.md, docs/SESSION_HANDOFF.md.
+2. Trading strategy (AD / panic / layering / psychology) is in docs/TRADING_STRATEGY.md — required for coach/learning agents.
+3. Run make test before/after behavior changes.
+4. Never break spot target stable_id crossing; never delete alerts from movers.
+5. Feature flags default OFF in templates; prod enables on droplet.
+6. Stock futures resolve: TSLA may be TSLAUSDT / TESLA_USDT / *STOCK*_USDT — see exchange.py.
+7. Deploy path: push GitHub → droplet git pull → docker compose up -d --build mexc-bot.
 ```
 
 ---

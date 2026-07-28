@@ -4,6 +4,7 @@ Telegram bot that watches MEXC exchange prices and sends you instant alerts when
 
 **New machine / new Grok session:** **[START_HERE.md](START_HERE.md)** first.  
 **Agents & safety:** **[AGENTS.md](AGENTS.md)**.  
+**How Kenneth trades (for coach agents):** [docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md).  
 **Latest build handoff:** [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md).  
 **Future strategy bots:** [docs/FUTURE_STRATEGY_BOTS.md](docs/FUTURE_STRATEGY_BOTS.md).
 

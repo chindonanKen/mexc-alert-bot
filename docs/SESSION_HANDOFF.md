@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-07-28  
 **GitHub:** `chindonanKen/mexc-alert-bot` · branch `main`  
-**Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md)
+**Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md) · [TRADING_STRATEGY.md](TRADING_STRATEGY.md)
 
 This file is a **dated snapshot** so the next human/agent (including a **new MacBook + new Grok session**) does not rediscover the same ground.
 
@@ -96,7 +96,8 @@ Smoke: `/s` · `/l` · `/p f TSLA` · `/mw`.
 
 | Status | Item |
 |--------|------|
-| **Next (owner)** | **Major alarm-system upgrade** — plan carefully; keep V1 spot path safe |
+| **Next (owner)** | **Major alarm-system upgrade** + coach agents that learn from alerts/movers using [TRADING_STRATEGY.md](TRADING_STRATEGY.md) |
+| **Playbook** | Full AD / panic / layering / psychology doc: [TRADING_STRATEGY.md](TRADING_STRATEGY.md) |
 | Later | `MOVER_ENRICH_KLINES=true` (code ready) |
 | Backlog | Named mover buckets, bounce/reclaim, layer planner, TG buttons |
 | Deferred | Full web UI; Buzz as primary chat (Telegram stays primary for push alerts) |
