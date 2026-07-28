@@ -1,10 +1,32 @@
 # Session handoff — pick up here
 
-**Last updated:** 2026-07-27  
+**Last updated:** 2026-07-28  
 **GitHub:** `chindonanKen/mexc-alert-bot` · branch `main`  
-**Primary guide:** [AGENTS.md](../AGENTS.md)
+**Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md)
 
-This file is a **dated snapshot** of what shipped recently and what is still open so the next human/agent does not rediscover the same ground.
+This file is a **dated snapshot** so the next human/agent (including a **new MacBook + new Grok session**) does not rediscover the same ground.
+
+---
+
+## Machine / workspace move (Mac mini → MacBook)
+
+| Fact | Detail |
+|------|--------|
+| **Dev machine** | Owner moving exclusive Grok Build work to **MacBook** |
+| **Sessions** | Grok chats **do not** follow the machine — only **git + docs** do |
+| **Repo source of truth** | `https://github.com/chindonanKen/mexc-alert-bot` (`main`) |
+| **Live bot** | Stays on **DigitalOcean** Docker (`~/mexc-alert-bot` typical) |
+| **Laptop role** | Clone → code with Grok → `git push` → droplet pull/rebuild |
+
+**On MacBook:**
+
+```bash
+git clone https://github.com/chindonanKen/mexc-alert-bot.git ~/mexc-bot
+cd ~/mexc-bot && make test
+# New Grok session: open ~/mexc-bot, read START_HERE.md + AGENTS.md + this file
+```
+
+Do **not** rely on copying `.grok` session folders from the mini unless you explicitly want old transcripts for reference.
 
 ---
 
@@ -14,117 +36,108 @@ Recent commits on `main` (newest first, approximate):
 
 | Commit (prefix) | What |
 |-----------------|------|
+| `9382793` | AGENTS + SESSION_HANDOFF docs refresh |
 | `e3f48eb` | TSLA resolve also tries `TESLA_USDT` contract id |
-| `80d7639` | Compact stock UI resolve (`TSLAUSDT`); bot always gets futures client when constructed |
+| `80d7639` | Compact stock UI resolve (`TSLAUSDT`); bot gets futures client when client exists |
 | `409a450` | Heat board, velocity, volume, optional kline reds |
 | `990af4e` | Step-down re-arm (cascade dumps; short min-gap) |
 | `3498ac4` | Peak high→now drawdown + faster poll |
-| `8f462d8` | Initial `AGENTS.md` |
 
-**Always confirm live tip:** `git log -1 --oneline` on Mac and droplet after `git pull`.
+**Always confirm tip:** `git log -1 --oneline` after `git pull` (MacBook and droplet).
 
 ---
 
 ## Production posture (owner)
 
-- DigitalOcean droplet runs Docker service `mexc-bot` (compose project path often `~/mexc-alert-bot`).
-- V3 features **enabled in prod `.env`** (futures + movers) after staged validation.
-- Owner trades **panic downside dumps** (AD / average-drop style). Movers are the main edge tool; target alerts remain safety net.
+- DigitalOcean: Docker service `mexc-bot` (path often `~/mexc-alert-bot`).
+- V3 **on** in prod `.env` (futures + movers).
+- Edge: **panic downside** (AD-style scale-in). Movers = main tool; target alerts = safety net.
 
-### Recommended prod mover-related env (verify on droplet)
+### Recommended prod mover env (verify on droplet)
 
 ```bash
 FEATURE_FUTURES_ALERTS=true
 FEATURE_MOVER_SCANNER=true
-MOVER_POLL_SECONDS=3          # or 5
-MOVER_COOLDOWN_SECONDS=45     # NOT 1800 — that blocked cascade legs
+MOVER_POLL_SECONDS=3
+MOVER_COOLDOWN_SECONDS=45     # NOT 1800
 MOVER_RECOVERY_PERCENT=3
 MOVER_ENRICH_VELOCITY=true
 MOVER_ENRICH_VOLUME=true
-MOVER_ENRICH_KLINES=false     # user chose OFF for now; enable later for chart triage
+MOVER_ENRICH_KLINES=false     # OFF for now; enable later for red-candle tags
 MOVER_HEAT_AUTO=true
 ```
 
-User explicit decision: **leave kline red-candle tags off for now**; turn on soon for faster chart overview before entries.
+---
+
+## What works (user-confirmed)
+
+- Movers + step-down cascade useful live  
+- Heat / velocity / volume enrichments  
+- **TSLA** via `/p f TSLA`, `/af TSLA`, `/mw add f TSLA` after resolve fixes  
+- Spot targets must remain intact  
 
 ---
 
-## What works today (user-confirmed)
-
-- Movers + step-down cascade useful in live trading  
-- Heat / velocity / volume enrichments deployed  
-- **TSLA / stock perps** addable via `/af TSLA`, `/mw add f TSLA`, `/p f TSLA` after resolve fixes  
-- Spot targets remain the non-negotiable path  
-
----
-
-## How to deploy updates (droplet)
+## Deploy (droplet)
 
 ```bash
 ssh <droplet>
-cd ~/mexc-alert-bot    # adjust if different
+cd ~/mexc-alert-bot
 git pull origin main
-# edit .env only if new vars needed
 docker compose up -d --build mexc-bot
 docker logs --tail 80 mexc-alert-bot
 ```
 
-Telegram smoke: `/s` · `/l` · `/p f TSLA` · `/mw` · wait for a real dump.
+Smoke: `/s` · `/l` · `/p f TSLA` · `/mw`.
 
 ---
 
-## Open / next (not built)
+## Open / next
 
-See also [FUTURE_STRATEGY_BOTS.md](FUTURE_STRATEGY_BOTS.md).
+| Status | Item |
+|--------|------|
+| **Next (owner)** | **Major alarm-system upgrade** — plan carefully; keep V1 spot path safe |
+| Later | `MOVER_ENRICH_KLINES=true` (code ready) |
+| Backlog | Named mover buckets, bounce/reclaim, layer planner, TG buttons |
+| Deferred | Full web UI; Buzz as primary chat (Telegram stays primary for push alerts) |
+| Separate bots | [FUTURE_STRATEGY_BOTS.md](FUTURE_STRATEGY_BOTS.md) |
 
-| Priority-ish | Idea | Notes |
-|--------------|------|--------|
-| User later | `MOVER_ENRICH_KLINES=true` | Code ready; env flip + restart |
-| Discussed | Named mover **buckets** (per-group %/lookback) | Not started |
-| Discussed | Bounce/reclaim after dump | Backlog |
-| Discussed | Layer planner on cascade steps | Backlog |
-| Discussed | Deep links / Telegram buttons | Backlog |
-| Explicitly deferred | Full web UI | Commands + heat first |
-| Optional | Kline high/low as **fire** input | Different from red tags |
+### Buzz (context only)
 
----
-
-## Trading context (for feature design)
-
-Owner style (from AD agent + trade bible, high level):
-
-- **Average Drop (AD)** mean-reversion: scale into dips expecting bounce  
-- Prefers **sharp / panic** dumps with volume over slow grinds  
-- Multi-layer scale-in; holds often day–week  
-- Weaknesses to support with product: holding losers, early exit on good ADs, isolated “news” dumps vs market panic  
-
-Do **not** auto-trade from this bot without a separate, explicit project decision.
-
-Related local project (not this repo): `~/ad-theory-trading-agent` (chart AD analysis / learning).
+Owner asked whether **Buzz** (Block agent chat) could replace Telegram. **Feasible for dual-notify / agent workspace; not recommended as primary** for mobile panic alerts (poll-based inbound, early product). Telegram remains production path. See prior plan discussion in Grok history if needed; no Buzz code in this repo yet.
 
 ---
 
-## Agent checklist when starting a new session
+## Trading context (feature design)
 
-1. Read **AGENTS.md** safety rules.  
-2. `git status` / `git log -5 --oneline` / compare to `origin/main`.  
-3. Skim this handoff + `.env.example` for current knobs.  
-4. Run `make test` before and after behavior changes.  
-5. Never commit `.env`; never break spot target stable_id crossing.  
-6. After shipping: update **this file’s date**, commit table, and “open/next” if priorities change.
+- **AD (Average Drop)** mean-reversion; prefer **sharp panic** dumps + volume  
+- Scale in layers; holds often day–week  
+- Product should support discipline (cascade legs, heat board, not spam)  
+
+Related (not this repo): `~/ad-theory-trading-agent`.
 
 ---
 
-## Quick file map for movers
+## Agent checklist (every new session)
+
+1. Read **START_HERE.md** → **AGENTS.md** → **this file**.  
+2. `git status` / `git log -5 --oneline` / sync with `origin/main`.  
+3. `make test` before/after behavior changes.  
+4. Never commit `.env`; never break spot `stable_id` crossing.  
+5. After shipping: update this file’s **date**, commit table, and open/next.  
+
+---
+
+## Quick movers file map
 
 ```
 mexc_bot/movers/
-  scanner.py   # fire loop, cascade, enrichment hooks, heat auto
+  scanner.py   # fire loop, cascade, enrichments, heat auto
   history.py   # peak_drawdown
   storage.py   # SQLite mover tables
   velocity.py  # PANIC/FAST/GRIND
-  heat.py      # board snapshot + format
-  klines.py    # consecutive reds (gated)
+  heat.py      # board
+  klines.py    # red tags (gated)
 ```
 
-<!-- agents: search SESSION_HANDOFF or "pick up here" -->
+<!-- agents: search SESSION_HANDOFF or START_HERE -->

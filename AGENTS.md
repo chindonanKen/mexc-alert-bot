@@ -2,11 +2,12 @@
 
 Guide for humans and coding agents. **Read this before changing production behavior.**
 
-**Repo (GitHub):** `https://github.com/chindonanKen/mexc-alert-bot` · branch `main`  
-**Local folder:** often `~/mexc-bot` · **droplet folder:** often `~/mexc-alert-bot`  
-**Owner use case:** daytrading MEXC; primary edge is **sharp downside / panic dumps** (AD / average-drop style scale-ins). Movers are the high-value feature.
+**New machine or new Grok chat?** Start with **[START_HERE.md](START_HERE.md)** (clone, tests, bootstrap prompt), then this file, then **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)**.
 
-For a dated handoff of recent work, see **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)**.
+**Repo (GitHub):** `https://github.com/chindonanKen/mexc-alert-bot` · branch `main`  
+**Local folder:** `~/mexc-bot` (Mac mini or MacBook — same clone) · **droplet:** often `~/mexc-alert-bot`  
+**Owner use case:** daytrading MEXC; primary edge is **sharp downside / panic dumps** (AD / average-drop style scale-ins). Movers are the high-value feature.  
+**Dev vs prod:** Grok Build on the **laptop** is for code; **live bot stays on DigitalOcean**. Grok sessions are **not** portable between machines — **git + these docs** are.
 
 ---
 
