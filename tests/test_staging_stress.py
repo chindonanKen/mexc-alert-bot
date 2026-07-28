@@ -135,14 +135,22 @@ class TestStagingStress(unittest.TestCase):
         self.assertLess(len([x for x in pending2 if x["horizon_seconds"] == 900]), len(pending))
 
     def test_price_history_many_series(self):
-        h = PriceHistory(max_age_seconds=900)
+        # peak_drawdown requires a sample at/before (now - lookback)
+        h = PriceHistory(max_age_seconds=2000)
         t0 = time.time()
+        lookback = 900
         for s in range(200):
             sym = f"S{s}_USDT"
             for j in range(50):
-                h.record("futures", sym, 100.0 - j * 0.05, ts=t0 - 800 + j * 10)
+                # from now-lookback-50 through near now
+                h.record(
+                    "futures",
+                    sym,
+                    100.0 - j * 0.05,
+                    ts=t0 - lookback - 50 + j * 20,
+                )
         for s in range(200):
-            dd = h.peak_drawdown("futures", f"S{s}_USDT", 900, now=t0)
+            dd = h.peak_drawdown("futures", f"S{s}_USDT", lookback, now=t0)
             self.assertIsNotNone(dd)
         print("  200 series × 50 samples peak_drawdown OK")
 
