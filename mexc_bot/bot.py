@@ -532,7 +532,8 @@ def create_bot(
             f"learning={getattr(settings, 'feature_learning', False)} "
             f"news={getattr(settings, 'feature_news_monitor', False)} "
             f"voice={getattr(settings, 'feature_voice', False)} "
-            f"mexc_read={getattr(settings, 'feature_mexc_private_read', False)}"
+            f"mexc_read={getattr(settings, 'feature_mexc_private_read', False)} "
+            f"isolated={getattr(settings, 'feature_isolated_dump_agent', False)}"
         )
 
         mover_line = ""
@@ -959,6 +960,49 @@ def create_bot(
                 f"[{r.get('severity')}] {r.get('class')} "
                 f"{r.get('symbol') or '—'} · {r.get('title', '')[:80]}"
             )
+        _reply(message, "\n".join(lines))
+
+    @bot.message_handler(commands=["inv", "investigate", "isolated"])
+    def cmd_inv(message):
+        """Recent isolated-dump investigations + learned source weights."""
+        inv_store = getattr(bot, "_investigator_store_ref", None)
+        if not getattr(settings, "feature_isolated_dump_agent", False) or inv_store is None:
+            _reply(
+                message,
+                "Isolated dump agent is off.\n"
+                "Set FEATURE_ISOLATED_DUMP_AGENT=true (staging) and rebuild.",
+            )
+            return
+        args = (message.text or "").split()[1:]
+        if args and args[0].lower() in ("sources", "expertise", "learn"):
+            rows = inv_store.top_sources(limit=12)
+            if not rows:
+                _reply(message, "No source expertise yet — wait for investigations + outcomes.")
+                return
+            lines = ["Source expertise (higher weight = more trusted for toxic moves):"]
+            for r in rows:
+                lines.append(
+                    f"  {r['source']}/{r['kind']} w={r['weight']:.2f} "
+                    f"hits={r['hits']} conf={r['confirmed_moves']} false={r['false_alarms']}"
+                )
+            _reply(message, "\n".join(lines))
+            return
+        rows = inv_store.recent_investigations(message.from_user.id, limit=10)
+        if not rows:
+            _reply(
+                message,
+                "No investigations yet.\n"
+                "Agent only runs on *extreme isolated* dumps "
+                "(large drop + FAST/PANIC + low heat breadth) — async after the mover.",
+            )
+            return
+        lines = ["Recent isolated-dump checks:"]
+        for r in rows:
+            lines.append(
+                f"#{r['id']} {r['symbol']} {r.get('drop_pct')}% "
+                f"→ {r['verdict']} conf={r.get('confidence', 0):.0%}"
+            )
+        lines.append("\n/inv sources — learned source weights")
         _reply(message, "\n".join(lines))
 
     # Voice notes → STT → plain intent path

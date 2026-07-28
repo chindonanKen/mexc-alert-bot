@@ -101,6 +101,16 @@ class Settings:
     mexc_fill_sync_poll_seconds: float
     mexc_fill_notify: bool
 
+    # Isolated-dump specialist (async — never blocks mover fires)
+    feature_isolated_dump_agent: bool
+    isolated_min_drop_pct: float
+    isolated_threshold_multiplier: float
+    isolated_max_heat_breadth: int
+    isolated_require_fast_or_panic: bool
+    isolated_cooldown_seconds: float
+    isolated_notify_none: bool
+    delist_radar_poll_seconds: float
+
     @property
     def alerts_file_path(self) -> Path:
         return self.alerts_file
@@ -202,4 +212,16 @@ def load_settings() -> Settings:
             os.getenv("MEXC_FILL_SYNC_POLL_SECONDS", "120")
         ),
         mexc_fill_notify=_env_bool("MEXC_FILL_NOTIFY", False),
+        feature_isolated_dump_agent=_env_bool("FEATURE_ISOLATED_DUMP_AGENT", False),
+        isolated_min_drop_pct=float(os.getenv("ISOLATED_MIN_DROP_PCT", "8")),
+        isolated_threshold_multiplier=float(
+            os.getenv("ISOLATED_THRESHOLD_MULTIPLIER", "1.6")
+        ),
+        isolated_max_heat_breadth=int(os.getenv("ISOLATED_MAX_HEAT_BREADTH", "2")),
+        isolated_require_fast_or_panic=_env_bool(
+            "ISOLATED_REQUIRE_FAST_OR_PANIC", True
+        ),
+        isolated_cooldown_seconds=float(os.getenv("ISOLATED_COOLDOWN_SECONDS", "900")),
+        isolated_notify_none=_env_bool("ISOLATED_NOTIFY_NONE", True),
+        delist_radar_poll_seconds=float(os.getenv("DELIST_RADAR_POLL_SECONDS", "180")),
     )

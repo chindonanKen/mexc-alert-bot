@@ -75,6 +75,8 @@ class MoverScanner:
         self.futures_provider = futures_provider
         # Optional learning EventStore — log fires only; never touch alerts
         self.event_store = event_store
+        # Optional IsolatedDumpAgent — enqueue only after successful fire (never blocks)
+        self.isolated_agent = None
 
         max_age = max(
             float(settings.mover_lookback_seconds) * 1.5,
@@ -370,6 +372,26 @@ class MoverScanner:
             except Exception as e:
                 logger.warning(f"Heat board error user={user_id}: {e}")
 
+            # Snapshot heat breadth once per user for isolated-dump filter (cheap)
+            heat_dumping_count = None
+            watchlist_count = len(watchlist)
+            try:
+                breadth_pct = float(settings["threshold_percent"]) * 0.6
+                if getattr(self.settings, "mover_heat_breadth_pct", None) is not None:
+                    breadth_pct = float(self.settings.mover_heat_breadth_pct)
+                board = heat_snapshot(
+                    self.history,
+                    watchlist,
+                    lookback,
+                    now=now,
+                    panic_per_min=panic_v,
+                    fast_per_min=fast_v,
+                    breadth_pct=breadth_pct,
+                )
+                heat_dumping_count = int(board.dumping_count)
+            except Exception:
+                heat_dumping_count = None
+
             for item in watchlist:
                 market = str(item.get("market", "futures")).lower()
                 symbol = str(item["symbol"]).upper()
@@ -538,6 +560,23 @@ class MoverScanner:
                         f"pct={pct:.2f}% ref={ref_price} now={price_now} lookback={lookback}s"
                         f" event_id={event_id or '-'}"
                     )
+                    # Async isolated-dump specialist — NEVER awaits news I/O
+                    if self.isolated_agent is not None:
+                        try:
+                            self.isolated_agent.maybe_enqueue(
+                                user_id=user_id,
+                                symbol=symbol,
+                                market=market,
+                                drop_pct=float(pct),
+                                user_threshold_pct=float(settings["threshold_percent"]),
+                                velocity_band=vel_band,
+                                heat_breadth=heat_dumping_count,
+                                watchlist_count=watchlist_count,
+                                event_id=event_id or None,
+                                price=float(price_now),
+                            )
+                        except Exception as ie:
+                            logger.error("isolated agent enqueue failed: %s", ie)
                 except Exception as e:
                     logger.error(f"Mover notify failed user={user_id} {symbol}: {e}")
 

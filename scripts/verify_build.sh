@@ -29,6 +29,7 @@ $PY tests/test_mover_enrichment.py
 $PY tests/test_learning_events.py
 $PY tests/test_assistant_ux.py
 $PY tests/test_v1_complete.py
+$PY tests/test_isolated_agent.py
 echo "All unit tests OK"
 echo
 
@@ -48,7 +49,7 @@ echo "Safety greps OK"
 echo
 
 echo "=== 4. Flags default OFF in .env.example ==="
-for flag in FEATURE_LEARNING FEATURE_NEWS_MONITOR FEATURE_VOICE FEATURE_FUTURES_ALERTS FEATURE_MOVER_SCANNER; do
+for flag in FEATURE_LEARNING FEATURE_NEWS_MONITOR FEATURE_VOICE FEATURE_FUTURES_ALERTS FEATURE_MOVER_SCANNER FEATURE_ISOLATED_DUMP_AGENT FEATURE_MEXC_PRIVATE_READ; do
   if ! grep -q "^${flag}=false" .env.example; then
     echo "WARN: $flag not explicitly false in .env.example"
   fi

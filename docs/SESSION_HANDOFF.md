@@ -101,9 +101,10 @@ Smoke: `/s` · `/l` · `/p f TSLA` · `/mw`.
 | **Shipped (code)** | V1.0 learning: EventStore, mover **and target** fire log, `/j` `/events` `/trade` `/brief` `/coach`, outcome poller, integrity helpers |
 | **Staging** | **Droplet-first** — [DROPLET_OPS.md](DROPLET_OPS.md). Local Mac staging torn down (no long-running local bot; no local `.env.staging`). |
 | **Ops model** | Prefer **Grok on the droplet** for docker/logs/staging; laptop Grok + `scripts/droplet.sh` if SSH host `mexc-droplet` is set. |
-| **V1** | **COMPLETE** — see [V1_COMPLETE.md](V1_COMPLETE.md): learning, buttons, desk, news, voice (opt), MEXC fill sync (opt) |
+| **V1** | **COMPLETE** — see [V1_COMPLETE.md](V1_COMPLETE.md) |
+| **Isolated agent** | [ISOLATED_DUMP_AGENT.md](ISOLATED_DUMP_AGENT.md) — async multi-CEX delist/hack check on *extreme isolated* dumps; source expertise learning |
 | **UX** | [ASSISTANT_UX.md](ASSISTANT_UX.md) |
-| **Next** | **V2 planning** — multi-device UI; promote flags carefully on prod after staging soak |
+| **Next** | Staging: enable `FEATURE_ISOLATED_DUMP_AGENT`; soak; then V2 planning |
 | **Playbook** | [TRADING_STRATEGY.md](TRADING_STRATEGY.md) |
 | Later | Voice (V1.2), MEXC read-only fills (V1.3), `MOVER_ENRICH_KLINES=true` |
 | Backlog | Named mover buckets, bounce/reclaim, layer planner, TG buttons |

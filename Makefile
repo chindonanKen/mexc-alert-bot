@@ -14,6 +14,7 @@ test:
 	python3 tests/test_learning_events.py
 	python3 tests/test_assistant_ux.py
 	python3 tests/test_v1_complete.py
+	python3 tests/test_isolated_agent.py
 
 verify:
 	bash scripts/verify_build.sh
