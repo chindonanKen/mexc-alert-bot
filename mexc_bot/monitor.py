@@ -178,48 +178,65 @@ class PriceMonitor:
                     import html as _html
                     tag = "F" if market == "futures" else "S"
                     sym_e = _html.escape(symbol)
+                    trigger_reason = "band" if within_band else "crossed"
                     msg = (
                         f"🚨 <b>{sym_e}</b> [{tag}]\n"
                         f"Target: ${_html.escape(str(target))}\n"
                         f"<code>{current:.8f}</code>"
                     )
+                    reply_markup = None
+                    event_id = 0
+                    if self.event_store is not None and getattr(
+                        self.settings, "feature_learning", False
+                    ):
+                        try:
+                            drop_pct = None
+                            if target and target != 0:
+                                drop_pct = ((current - target) / target) * 100.0
+                            event_id = self.event_store.log_event(
+                                user_id,
+                                "target",
+                                symbol,
+                                market,
+                                price=float(current),
+                                ref_price=float(target),
+                                drop_pct=drop_pct,
+                                mode=trigger_reason,
+                                payload={
+                                    "stable_id": a["stable_id"],
+                                    "visual_id": a["id"],
+                                    "reason": trigger_reason,
+                                },
+                            )
+                            if event_id:
+                                try:
+                                    from .assistant.ux import fire_action_keyboard
+
+                                    reply_markup = fire_action_keyboard(event_id)
+                                    msg += (
+                                        "\n\n<i>Tap Took / Skip / Later — no typing</i>"
+                                    )
+                                except Exception as ke:
+                                    logger.error("target fire keyboard failed: %s", ke)
+                        except Exception as le:
+                            logger.error(
+                                "learning log failed before target notify: %s", le
+                            )
                     try:
-                        self.notifier(user_id, msg, parse_mode="HTML")
-                        trigger_reason = "band" if within_band else "crossed"
+                        if reply_markup is not None:
+                            self.notifier(
+                                user_id, msg, parse_mode="HTML", reply_markup=reply_markup
+                            )
+                        else:
+                            self.notifier(user_id, msg, parse_mode="HTML")
                         logger.info(
                             f"Alert #{a['id']} (stable={a['stable_id']}) FIRED user={user_id} "
-                            f"{market}:{symbol} target={target} current={current} (reason: {trigger_reason})"
+                            f"{market}:{symbol} target={target} current={current} "
+                            f"(reason: {trigger_reason}) event_id={event_id or '-'}"
                         )
                         fired += 1
                         fired_visuals.append(a["id"])
                         fired_stables.append(a["stable_id"])
-                        # Learning log after successful notify (soft-fail; does not affect remove path)
-                        if self.event_store is not None and getattr(
-                            self.settings, "feature_learning", False
-                        ):
-                            try:
-                                drop_pct = None
-                                if target and target != 0:
-                                    drop_pct = ((current - target) / target) * 100.0
-                                self.event_store.log_event(
-                                    user_id,
-                                    "target",
-                                    symbol,
-                                    market,
-                                    price=float(current),
-                                    ref_price=float(target),
-                                    drop_pct=drop_pct,
-                                    mode=trigger_reason,
-                                    payload={
-                                        "stable_id": a["stable_id"],
-                                        "visual_id": a["id"],
-                                        "reason": trigger_reason,
-                                    },
-                                )
-                            except Exception as le:
-                                logger.error(
-                                    "learning log failed after target fire: %s", le
-                                )
                     except Exception as e:
                         logger.error(f"Failed sending alert #{a['id']}: {e}")
                         # Do not remove if we couldn't notify — will retry next cycle

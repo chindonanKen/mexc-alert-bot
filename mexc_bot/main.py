@@ -1,7 +1,7 @@
 """Application entrypoint. Wires everything together and starts the bot + monitor.
 
-V3 features (futures target alerts, downside movers) are opt-in via env flags
-defaulting to OFF so production V1 behavior is preserved until you enable them.
+V3/V4 features are opt-in via env flags defaulting to OFF so production V1
+spot path is preserved until explicitly enabled.
 """
 
 from __future__ import annotations
@@ -36,10 +36,14 @@ def main() -> None:
     logger.info("Loading settings...")
     settings = load_settings()
     logger.info(
-        "Feature flags: futures_alerts=%s mover_scanner=%s learning=%s",
+        "Feature flags: futures_alerts=%s mover_scanner=%s learning=%s "
+        "news=%s voice=%s mexc_private=%s",
         settings.feature_futures_alerts,
         settings.feature_mover_scanner,
         settings.feature_learning,
+        settings.feature_news_monitor,
+        settings.feature_voice,
+        settings.feature_mexc_private_read,
     )
 
     logger.info(f"Using alerts file: {settings.alerts_file_path}")
@@ -48,14 +52,17 @@ def main() -> None:
     price_provider: PriceProvider = MexcClient(base_url=settings.mexc_api_base)
 
     futures_provider: PriceProvider | None = None
-    if settings.feature_futures_alerts or settings.feature_mover_scanner:
-        # Always attach futures client when either V3 feature is on so mixed
-        # mover watchlists (spot + futures) and /p f /af work without env surprises.
+    if (
+        settings.feature_futures_alerts
+        or settings.feature_mover_scanner
+        or settings.feature_learning
+    ):
         futures_provider = MexcFuturesClient(base_url=settings.mexc_futures_api_base)
         logger.info("Futures price client ready (%s)", settings.mexc_futures_api_base)
 
     event_store = None
     outcome_poller = None
+    fill_sync = None
     if settings.feature_learning:
         from .learning import EventStore, OutcomePoller
 
@@ -85,10 +92,15 @@ def main() -> None:
         mover_store = MoverStore(settings.alerts_file_path)
         logger.info("Mover store ready (tables in same DB file, separate from alerts)")
 
-    # Create bot first (with price_provider for /price). Attach monitor after.
-    # Pass futures client whenever it exists so /mw add f TSLA can resolve stock
-    # perps even if FEATURE_FUTURES_ALERTS is off (movers-only). /af still gated
-    # by the feature flag inside bot handlers.
+    news_store = None
+    news_watcher = None
+    if settings.feature_news_monitor:
+        from .news import NewsWatcher
+        from .news.store import NewsStore
+
+        news_store = NewsStore(settings.alerts_file_path)
+        logger.info("News store ready")
+
     tg_bot = create_bot(
         settings,
         store,
@@ -98,6 +110,7 @@ def main() -> None:
         mover_store=mover_store,
         mover_scanner=None,
         event_store=event_store,
+        news_store=news_store,
     )
 
     def send_telegram_notification(
@@ -134,12 +147,101 @@ def main() -> None:
             settings=settings,
             mover_store=mover_store,
             notifier=send_telegram_notification,
-            # Always attach both books — scanner only fetches markets present on watchlists.
             spot_provider=price_provider,
             futures_provider=futures_provider,
             event_store=event_store,
         )
         tg_bot._mover_scanner_ref = mover_scanner  # type: ignore[attr-defined]
+
+    if settings.feature_news_monitor and news_store is not None:
+        from .news import NewsWatcher
+
+        def _watch_bases():
+            bases = set()
+            if mover_store is not None:
+                try:
+                    # all watchlist symbols across users
+                    for uid in store.get_all_user_ids():
+                        for row in mover_store.get_watchlist(uid):
+                            s = str(row.get("symbol") or "").upper()
+                            base = s.replace("_USDT", "").replace("USDT", "").replace("_", "")
+                            if base:
+                                bases.add(base)
+                except Exception:
+                    pass
+            if event_store is not None:
+                try:
+                    for uid in store.get_all_user_ids():
+                        for e in event_store.recent_events(uid, limit=30):
+                            s = str(e.get("symbol") or "").upper()
+                            base = s.replace("_USDT", "").replace("USDT", "").replace("_", "")
+                            if base:
+                                bases.add(base)
+                except Exception:
+                    pass
+            return bases
+
+        def _news_users():
+            try:
+                return list(store.get_all_user_ids())
+            except Exception:
+                return []
+
+        news_watcher = NewsWatcher(
+            news_store,
+            notifier=send_telegram_notification,
+            get_watch_bases=_watch_bases,
+            poll_seconds=settings.news_poll_seconds,
+            push_unconfirmed=settings.news_push_unconfirmed,
+            get_notify_user_ids=_news_users,
+        )
+
+    if (
+        settings.feature_mexc_private_read
+        and settings.feature_learning
+        and event_store is not None
+        and settings.mexc_api_key
+        and settings.mexc_api_secret
+        and settings.mexc_private_telegram_user_id
+    ):
+        from .exchange_private import MexcPrivateSpotClient
+        from .learning.fills import FillSyncPoller
+
+        priv = MexcPrivateSpotClient(
+            settings.mexc_api_key,
+            settings.mexc_api_secret,
+            base_url=settings.mexc_api_base.replace("/api/v3", ""),
+        )
+        # base_url for private is https://api.mexc.com — fix if mexc_api_base includes path
+        if "/api/v3" in settings.mexc_api_base:
+            priv = MexcPrivateSpotClient(
+                settings.mexc_api_key,
+                settings.mexc_api_secret,
+                base_url=settings.mexc_api_base.split("/api/v3")[0] or "https://api.mexc.com",
+            )
+        uid = int(settings.mexc_private_telegram_user_id)
+
+        def _fill_syms():
+            try:
+                return set(event_store.symbols_for_fill_sync(uid))
+            except Exception:
+                return set()
+
+        fill_sync = FillSyncPoller(
+            event_store,
+            priv,
+            uid,
+            get_symbols=_fill_syms,
+            poll_seconds=settings.mexc_fill_sync_poll_seconds,
+            notifier=send_telegram_notification,
+            notify_on_new=settings.mexc_fill_notify,
+        )
+        logger.info("MEXC private fill sync configured for user_id=%s", uid)
+    elif settings.feature_mexc_private_read:
+        logger.warning(
+            "FEATURE_MEXC_PRIVATE_READ on but missing keys, learning, or "
+            "MEXC_PRIVATE_TELEGRAM_USER_ID — fill sync not started"
+        )
 
     # Start background workers
     monitor.start()
@@ -150,6 +252,12 @@ def main() -> None:
     if outcome_poller is not None:
         outcome_poller.start()
         logger.info("Learning outcome poller started")
+    if news_watcher is not None:
+        news_watcher.start()
+        logger.info("News watcher started")
+    if fill_sync is not None:
+        fill_sync.start()
+        logger.info("Fill sync poller started")
 
     def _shutdown(signum=None, frame=None):
         logger.info("Shutdown signal received. Stopping workers...")
@@ -158,6 +266,10 @@ def main() -> None:
             mover_scanner.stop()
         if outcome_poller is not None:
             outcome_poller.stop()
+        if news_watcher is not None:
+            news_watcher.stop()
+        if fill_sync is not None:
+            fill_sync.stop()
         try:
             price_provider.close()
         except Exception:
@@ -184,6 +296,10 @@ def main() -> None:
             mover_scanner.stop()
         if outcome_poller is not None:
             outcome_poller.stop()
+        if news_watcher is not None:
+            news_watcher.stop()
+        if fill_sync is not None:
+            fill_sync.stop()
 
 
 if __name__ == "__main__":

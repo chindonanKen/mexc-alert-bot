@@ -101,8 +101,9 @@ Smoke: `/s` · `/l` · `/p f TSLA` · `/mw`.
 | **Shipped (code)** | V1.0 learning: EventStore, mover **and target** fire log, `/j` `/events` `/trade` `/brief` `/coach`, outcome poller, integrity helpers |
 | **Staging** | **Droplet-first** — [DROPLET_OPS.md](DROPLET_OPS.md). Local Mac staging torn down (no long-running local bot; no local `.env.staging`). |
 | **Ops model** | Prefer **Grok on the droplet** for docker/logs/staging; laptop Grok + `scripts/droplet.sh` if SSH host `mexc-droplet` is set. |
-| **UX** | [ASSISTANT_UX.md](ASSISTANT_UX.md) — buttons Took/Skip/Later on fires, `/desk`, plain language (took/skip/brief). `/j` is power-tool only. |
-| **Next** | Staging rebuild with UX; MEXC read-only journal; V1.1 news; V2 web desk later |
+| **V1** | **COMPLETE** — see [V1_COMPLETE.md](V1_COMPLETE.md): learning, buttons, desk, news, voice (opt), MEXC fill sync (opt) |
+| **UX** | [ASSISTANT_UX.md](ASSISTANT_UX.md) |
+| **Next** | **V2 planning** — multi-device UI; promote flags carefully on prod after staging soak |
 | **Playbook** | [TRADING_STRATEGY.md](TRADING_STRATEGY.md) |
 | Later | Voice (V1.2), MEXC read-only fills (V1.3), `MOVER_ENRICH_KLINES=true` |
 | Backlog | Named mover buckets, bounce/reclaim, layer planner, TG buttons |

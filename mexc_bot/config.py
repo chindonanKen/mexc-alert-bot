@@ -88,9 +88,18 @@ class Settings:
     feature_learning: bool
     learning_outcome_horizons_seconds: tuple  # e.g. (900, 3600, 14400)
     learning_outcome_poll_seconds: float
-    # Placeholders for later phases (wired false until implemented)
     feature_news_monitor: bool
+    news_poll_seconds: float
+    news_push_unconfirmed: bool
     feature_voice: bool
+    voice_stt_api_key: Optional[str]
+    voice_stt_api_base: Optional[str]
+    feature_mexc_private_read: bool
+    mexc_api_key: Optional[str]
+    mexc_api_secret: Optional[str]
+    mexc_private_telegram_user_id: Optional[int]
+    mexc_fill_sync_poll_seconds: float
+    mexc_fill_notify: bool
 
     @property
     def alerts_file_path(self) -> Path:
@@ -176,5 +185,21 @@ def load_settings() -> Settings:
             os.getenv("LEARNING_OUTCOME_POLL_SECONDS", "60")
         ),
         feature_news_monitor=_env_bool("FEATURE_NEWS_MONITOR", False),
+        news_poll_seconds=float(os.getenv("NEWS_POLL_SECONDS", "90")),
+        news_push_unconfirmed=_env_bool("NEWS_PUSH_UNCONFIRMED", False),
         feature_voice=_env_bool("FEATURE_VOICE", False),
+        voice_stt_api_key=os.getenv("VOICE_STT_API_KEY") or os.getenv("OPENAI_API_KEY"),
+        voice_stt_api_base=os.getenv("VOICE_STT_API_BASE"),
+        feature_mexc_private_read=_env_bool("FEATURE_MEXC_PRIVATE_READ", False),
+        mexc_api_key=os.getenv("MEXC_API_KEY"),
+        mexc_api_secret=os.getenv("MEXC_API_SECRET"),
+        mexc_private_telegram_user_id=(
+            int(os.getenv("MEXC_PRIVATE_TELEGRAM_USER_ID"))
+            if (os.getenv("MEXC_PRIVATE_TELEGRAM_USER_ID") or "").strip().isdigit()
+            else None
+        ),
+        mexc_fill_sync_poll_seconds=float(
+            os.getenv("MEXC_FILL_SYNC_POLL_SECONDS", "120")
+        ),
+        mexc_fill_notify=_env_bool("MEXC_FILL_NOTIFY", False),
     )

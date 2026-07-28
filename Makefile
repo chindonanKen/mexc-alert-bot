@@ -13,6 +13,7 @@ test:
 	python3 tests/test_mover_enrichment.py
 	python3 tests/test_learning_events.py
 	python3 tests/test_assistant_ux.py
+	python3 tests/test_v1_complete.py
 
 verify:
 	bash scripts/verify_build.sh

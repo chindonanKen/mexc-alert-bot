@@ -24,7 +24,7 @@ Related: [V4_TRADING_ASSISTANT.md](V4_TRADING_ASSISTANT.md) · [TRADING_STRATEGY
 | Layer | When | Examples |
 |-------|------|----------|
 | **A. Fire actions** | Dump/target just fired | Buttons: Took · Skip · Later · (bounce later) |
-| **B. Desk home** | Between trades | `/desk` or “desk” — short menu + status |
+| **B. Desk home** | Between trades | `/desk` — short menu + status (`brief` for session brief) |
 | **C. Chat** | Hands free-ish | “skip”, “took”, “brief”, “what’s open” |
 | **D. Power commands** | Rare / precise | `/a`, `/mw add f …`, `/movers set` |
 | **E. Web desk (V2)** | Overview on any device | Heat, journal, chat, labels — same backend |
@@ -42,13 +42,18 @@ Related: [V4_TRADING_ASSISTANT.md](V4_TRADING_ASSISTANT.md) · [TRADING_STRATEGY
 - Plain-text intents when learning is on (see bot handler)  
 - `/help` shortened: sensors vs assistant; power commands secondary  
 
-## Next (priority)
+## Shipped later in V1
 
-1. Same buttons on **target** fires  
-2. **MEXC read-only** journal sync (stop typing trades)  
-3. Reply keyboard sticky “Desk” row (optional)  
-4. Fluent multi-turn coach (LLM + tools)  
-5. **V2 web/PWA** — overview + chat; Telegram remains panic push  
+- Buttons on **target** fires  
+- **MEXC read-only** journal fill sync (flagged)  
+- Fatal **news** monitor (flagged)  
+- **Voice** → STT → intents (flagged)  
+
+## Next (V2+)
+
+1. Reply keyboard sticky “Desk” row (optional)  
+2. Fluent multi-turn coach (LLM + tools) as default  
+3. **V2 web/PWA** — overview + chat; Telegram remains panic push  
 
 ---
 

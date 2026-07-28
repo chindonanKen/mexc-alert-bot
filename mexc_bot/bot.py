@@ -248,6 +248,7 @@ def create_bot(
     mover_store=None,
     mover_scanner=None,
     event_store=None,
+    news_store=None,
 ) -> telebot.TeleBot:
     """Create and configure the Telegram bot with all handlers."""
 
@@ -287,9 +288,14 @@ def create_bot(
                 [
                     "",
                     "Assistant memory is ON.",
-                    "Power tools (optional): /events /brief /coach /j /trade",
+                    "After dumps: tap Took/Skip on the alert, or type took/skip.",
+                    "Home: /desk · optional: /events /brief /coach /j /trade /fills",
                 ]
             )
+        if getattr(settings, "feature_news_monitor", False):
+            lines.append("Fatal news monitor ON — /news")
+        if getattr(settings, "feature_voice", False):
+            lines.append("Voice ON — send a voice note (took/skip/brief…)")
         lines.extend(
             [
                 "",
@@ -523,7 +529,10 @@ def create_bot(
         flags = (
             f"\nFlags: futures={settings.feature_futures_alerts} "
             f"movers={settings.feature_mover_scanner} "
-            f"learning={getattr(settings, 'feature_learning', False)}"
+            f"learning={getattr(settings, 'feature_learning', False)} "
+            f"news={getattr(settings, 'feature_news_monitor', False)} "
+            f"voice={getattr(settings, 'feature_voice', False)} "
+            f"mexc_read={getattr(settings, 'feature_mexc_private_read', False)}"
         )
 
         mover_line = ""
@@ -909,6 +918,115 @@ def create_bot(
             message,
             format_coach_reply(question, recent_events=recent, stats=stats),
         )
+
+    @bot.message_handler(commands=["fills", "myfills"])
+    def cmd_fills(message):
+        if not _learning_enabled():
+            _reply(message, "Learning is off.")
+            return
+        if not getattr(settings, "feature_mexc_private_read", False):
+            _reply(
+                message,
+                "MEXC fill sync is off.\n"
+                "Set FEATURE_MEXC_PRIVATE_READ=true + read-only MEXC_API_KEY/SECRET "
+                "+ MEXC_PRIVATE_TELEGRAM_USER_ID on the server.",
+            )
+            return
+        rows = event_store.recent_fills(message.from_user.id, limit=15)
+        if not rows:
+            _reply(message, "No synced fills yet. Wait for poll cycle or check keys/symbols.")
+            return
+        lines = ["Recent MEXC fills (synced):"]
+        for r in rows:
+            lines.append(
+                f"{r.get('side', '?').upper()} {r['symbol']} "
+                f"qty={r.get('qty')} @ {r.get('price')}"
+            )
+        _reply(message, "\n".join(lines))
+
+    @bot.message_handler(commands=["news"])
+    def cmd_news(message):
+        if not getattr(settings, "feature_news_monitor", False) or news_store is None:
+            _reply(message, "News monitor is off (FEATURE_NEWS_MONITOR).")
+            return
+        rows = news_store.recent(limit=10)
+        if not rows:
+            _reply(message, "No fatal-class news stored yet.")
+            return
+        lines = ["Recent fatal-class news (stored):"]
+        for r in rows:
+            lines.append(
+                f"[{r.get('severity')}] {r.get('class')} "
+                f"{r.get('symbol') or '—'} · {r.get('title', '')[:80]}"
+            )
+        _reply(message, "\n".join(lines))
+
+    # Voice notes → STT → plain intent path
+    @bot.message_handler(content_types=["voice"])
+    def cmd_voice(message):
+        if not getattr(settings, "feature_voice", False):
+            _reply(
+                message,
+                "Voice is off. Set FEATURE_VOICE=true and VOICE_STT_API_KEY on the server.",
+            )
+            return
+        if not _learning_enabled():
+            _reply(message, "Enable FEATURE_LEARNING for voice → assistant intents.")
+            return
+        from .voice import transcribe_ogg_bytes
+        from .assistant.ux import parse_plain_intent
+        from .coach import format_brief, format_coach_reply
+
+        try:
+            fi = bot.get_file(message.voice.file_id)
+            raw = bot.download_file(fi.file_path)
+        except Exception as e:
+            logger.warning("voice download failed: %s", e)
+            _reply(message, "Could not download voice note.")
+            return
+        text = transcribe_ogg_bytes(
+            raw,
+            api_key=getattr(settings, "voice_stt_api_key", None),
+            api_base=getattr(settings, "voice_stt_api_base", None),
+        )
+        if not text:
+            _reply(
+                message,
+                "Could not transcribe. Set VOICE_STT_API_KEY (OpenAI Whisper-compatible).",
+            )
+            return
+        _reply(message, f"Heard: {text}")
+        intent = parse_plain_intent(text)
+        if not intent:
+            _reply(message, "Try saying: took, skip, brief, coach, later.")
+            return
+        # Reuse plain path logic via fake-style call
+        user_id = message.from_user.id
+        kind = intent["intent"]
+        if kind in ("took", "skip", "watch"):
+            eid = event_store.label_latest(user_id, action=kind)
+            _reply(
+                message,
+                f"OK — {kind} on #{eid}" if eid else "No recent fire to label.",
+            )
+        elif kind == "brief":
+            recent = event_store.recent_events(user_id, limit=12)
+            opens = event_store.journal_list(user_id, open_only=True)
+            _reply(
+                message,
+                format_brief(recent_events=recent, open_trades=opens, learning_on=True),
+            )
+        elif kind == "coach":
+            _reply(
+                message,
+                format_coach_reply(
+                    intent.get("question") or "checklist",
+                    recent_events=event_store.recent_events(user_id, limit=5),
+                ),
+            )
+        elif kind == "pride":
+            eid = event_store.label_latest(user_id, behavior="pride")
+            _reply(message, f"Pride flag on #{eid}" if eid else "No event.")
 
     # ====================== DIAG / DEBUG ======================
     @bot.message_handler(commands=["diag", "debug", "d"])
@@ -1317,6 +1435,18 @@ def create_bot(
                 _reply(message, "No recent event for pride flag.")
                 return
             _reply(message, f"Pride flag on event #{eid}. Stick to the plan if structure is still valid.")
+            return
+        if kind == "desk":
+            from .assistant.ux import desk_text
+
+            recent_n = len(event_store.recent_events(user_id, limit=12))
+            open_n = len(event_store.journal_list(user_id, open_only=True))
+            _reply(
+                message,
+                desk_text(
+                    learning_on=True, recent_n=recent_n, open_trades_n=open_n
+                ),
+            )
             return
         if kind == "brief":
             recent = event_store.recent_events(user_id, limit=12)

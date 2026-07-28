@@ -128,8 +128,9 @@ _LATER = re.compile(
     r"^(later|watch|watching|hold)\b", re.I
 )
 _BRIEF = re.compile(
-    r"^(brief|desk|status|summary|what.?s hot|hot)\b", re.I
+    r"^(brief|status|summary|what.?s hot|hot)\b", re.I
 )
+_DESK = re.compile(r"^(desk|home|menu)\b", re.I)
 _COACH = re.compile(
     r"^(coach|help me|what do you think|advice)\b", re.I
 )
@@ -161,6 +162,8 @@ def parse_plain_intent(text: str) -> Optional[Dict[str, Any]]:
         return {"intent": "watch", "raw": t}
     if _PRIDE.search(t):
         return {"intent": "pride", "raw": t}
+    if _DESK.search(t):
+        return {"intent": "desk", "raw": t}
     if _BRIEF.search(t):
         return {"intent": "brief", "raw": t}
     if _COACH.search(t):

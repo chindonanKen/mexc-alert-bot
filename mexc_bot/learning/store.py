@@ -122,6 +122,28 @@ class EventStore:
             "CREATE INDEX IF NOT EXISTS idx_journal_user_status "
             "ON journal_trades (user_id, status)"
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS journal_fills (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                exchange_trade_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                market TEXT NOT NULL DEFAULT 'spot',
+                side TEXT NOT NULL,
+                price REAL NOT NULL,
+                qty REAL NOT NULL,
+                quote_qty REAL,
+                ts REAL NOT NULL,
+                raw_json TEXT,
+                UNIQUE(user_id, exchange_trade_id, market)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_journal_fills_user_ts "
+            "ON journal_fills (user_id, ts DESC)"
+        )
 
     def log_event(
         self,
@@ -538,3 +560,107 @@ class EventStore:
                     (user_id,),
                 ).fetchall()
             return [dict(r) for r in rows]
+
+    def insert_fill(
+        self,
+        *,
+        user_id: int,
+        exchange_trade_id: str,
+        symbol: str,
+        market: str,
+        side: str,
+        price: float,
+        qty: float,
+        quote_qty: Optional[float] = None,
+        ts: float,
+        raw: Optional[dict] = None,
+    ) -> bool:
+        """Insert fill if new. Returns True if inserted."""
+        try:
+            with self._lock:
+                conn = self._get_conn()
+                cur = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO journal_fills (
+                        user_id, exchange_trade_id, symbol, market, side,
+                        price, qty, quote_qty, ts, raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        str(exchange_trade_id),
+                        symbol,
+                        market,
+                        side,
+                        price,
+                        qty,
+                        quote_qty,
+                        ts,
+                        json.dumps(raw) if raw else None,
+                    ),
+                )
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error("insert_fill failed: %s", e)
+            return False
+
+    def recent_fills(self, user_id: int, limit: int = 20) -> List[dict]:
+        with self._lock:
+            rows = self._get_conn().execute(
+                """
+                SELECT * FROM journal_fills
+                WHERE user_id = ?
+                ORDER BY ts DESC LIMIT ?
+                """,
+                (user_id, max(1, min(limit, 100))),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def symbols_for_fill_sync(self, user_id: int) -> List[str]:
+        """Symbols from open journal + recent events (spot-ish form)."""
+        with self._lock:
+            conn = self._get_conn()
+            syms = set()
+            for row in conn.execute(
+                "SELECT symbol FROM journal_trades WHERE user_id = ? AND status = 'open'",
+                (user_id,),
+            ):
+                syms.add(str(row["symbol"]).upper().replace("_", ""))
+            for row in conn.execute(
+                """
+                SELECT symbol, market FROM learning_events
+                WHERE user_id = ? ORDER BY ts DESC LIMIT 50
+                """,
+                (user_id,),
+            ):
+                s = str(row["symbol"]).upper().replace("_", "")
+                if row["market"] == "spot" or "USDT" in s:
+                    syms.add(s)
+            return sorted(syms)
+
+    def upsert_journal_from_fill(self, fill: dict) -> None:
+        """Open journal on buy; close on sell if open exists (heuristic)."""
+        user_id = int(fill["user_id"])
+        symbol = fill["symbol"]
+        market = fill.get("market") or "spot"
+        side = (fill.get("side") or "").lower()
+        price = float(fill["price"])
+        if side == "buy":
+            opens = self.journal_list(user_id, open_only=True)
+            for t in opens:
+                if str(t["symbol"]).upper().replace("_", "") == symbol.replace("_", ""):
+                    return  # already open
+            self.journal_open(
+                user_id,
+                symbol,
+                market,
+                entry_avg=price,
+                notes="auto from MEXC fill",
+            )
+        elif side == "sell":
+            self.journal_close(
+                user_id,
+                symbol=symbol,
+                exit_avg=price,
+                notes="auto close from MEXC fill",
+            )
