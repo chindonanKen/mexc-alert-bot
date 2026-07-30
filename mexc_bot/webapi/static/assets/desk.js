@@ -552,11 +552,22 @@
         },
       });
       state.chunks = [];
-      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : MediaRecorder.isTypeSupported("audio/webm")
-          ? "audio/webm"
-          : "";
+      // Prefer containers xAI/ffmpeg handle cleanly; WebM still OK (server → WAV)
+      const mimeCandidates = [
+        "audio/mp4",
+        "audio/mp4;codecs=mp4a.40.2",
+        "audio/ogg;codecs=opus",
+        "audio/ogg",
+        "audio/webm;codecs=opus",
+        "audio/webm",
+      ];
+      let mime = "";
+      for (const c of mimeCandidates) {
+        if (MediaRecorder.isTypeSupported(c)) {
+          mime = c;
+          break;
+        }
+      }
       recorder = mime
         ? new MediaRecorder(mediaStream, { mimeType: mime })
         : new MediaRecorder(mediaStream);
@@ -571,13 +582,18 @@
         try {
           if (mediaStream) mediaStream.getTracks().forEach((t) => t.stop());
           mediaStream = null;
-          const type = recorder?.mimeType || "audio/webm";
+          const type = recorder?.mimeType || mime || "audio/webm";
           const blob = new Blob(state.chunks, { type });
           if (!blob.size) {
             toast("Empty recording — try again");
             return;
           }
-          await sendAudioBlob(blob, "voice.webm");
+          const fname = type.includes("mp4")
+            ? "voice.mp4"
+            : type.includes("ogg")
+              ? "voice.ogg"
+              : "voice.webm";
+          await sendAudioBlob(blob, fname);
         } catch (e) {
           $("#voiceStatus").textContent = "Voice failed";
           toast(String(e.message || e).slice(0, 140));

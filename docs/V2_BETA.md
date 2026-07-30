@@ -57,6 +57,10 @@ Realtime `wss://api.x.ai/v1/realtime?model=grok-voice-latest` is the next voice 
 Browsers **block the mic on `http://IP:…`**. There is **no sound-file upload** path.  
 Use **HTTPS** so you can fully explore the desk including voice.
 
+**Voice pipeline:** mic (WebM/mp4/ogg) → desk **ffmpeg** → 16 kHz mono **WAV** → xAI STT → grok tools → reply.  
+Raw WebM is rejected by xAI STT (`Unsupported or corrupt audio format: webm`); conversion is mandatory.  
+Text agent (`/api/agent`) does not need ffmpeg and works even if STT is broken.
+
 ```bash
 # On droplet (full desk including mic)
 ./scripts/desk_https_up.sh

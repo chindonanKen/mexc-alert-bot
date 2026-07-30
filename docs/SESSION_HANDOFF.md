@@ -13,6 +13,9 @@ This file is a **dated snapshot** so the next human/agent (including a **new Mac
 - Accept self-signed cert once; allow microphone.
 - Requires `.env`: `DESK_API_TOKEN`, `DESK_USER_ID`, `XAI_API_KEY`
 - Do **not** use `http://IP:8080` for voice.
+- **Voice bug (fixed on GitHub):** xAI STT rejects WebM. Desk converts mic audio → **16 kHz mono WAV** via **ffmpeg** in `Dockerfile.desk` (`audio_convert.py`). Rebuild desk image after pull.
+- Text agent was already OK; only `/api/voice` needed convert.
+- Droplet-only edits must be **committed/pushed** or re-applied from GitHub — laptop cannot SSH as root without your key.
 
 ---
 

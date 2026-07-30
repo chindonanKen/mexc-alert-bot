@@ -482,7 +482,8 @@ def create_app() -> FastAPI:
         if not raw:
             raise HTTPException(400, "Empty audio")
         name = file.filename or "audio.webm"
-        out = handle_voice_audio(raw, filename=name)
+        ctype = file.content_type or ""
+        out = handle_voice_audio(raw, filename=name, content_type=ctype)
         if not out.get("ok"):
             raise HTTPException(502, out.get("error") or "voice failed")
         return out

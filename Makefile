@@ -16,6 +16,7 @@ test:
 	python3 tests/test_v1_complete.py
 	python3 tests/test_isolated_agent.py
 	python3 tests/test_webapi.py
+	python3 tests/test_audio_convert.py
 
 verify:
 	bash scripts/verify_build.sh
@@ -31,6 +32,7 @@ desk-https:
 
 test-web:
 	python3 tests/test_webapi.py
+	python3 tests/test_audio_convert.py
 
 # Staging: prefer droplet (see docs/DROPLET_OPS.md). Local scripts still work if needed.
 staging-up:

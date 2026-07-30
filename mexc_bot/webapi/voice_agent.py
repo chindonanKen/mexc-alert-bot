@@ -1,9 +1,12 @@
 """Grok / xAI voice + tool agent for the desk.
 
 Uses:
-- STT: POST https://api.x.ai/v1/stt (or OpenAI-compatible fallback)
+- STT: convert mic audio → 16 kHz mono WAV, then POST https://api.x.ai/v1/stt
 - LLM tools: POST https://api.x.ai/v1/chat/completions with grok model
 - Optional TTS: POST https://api.x.ai/v1/tts
+
+Browser MediaRecorder often sends WebM/Opus; xAI STT rejects WebM. We always
+ffmpeg-normalize to WAV before STT (see audio_convert.py).
 
 Live exchange orders are NOT enabled here — tools mutate desk/journal/alerts only.
 """
@@ -26,6 +29,7 @@ except Exception:
     _CA = True
 
 from .actions import TOOL_DEFS, run_tool
+from .audio_convert import to_wav_16k_mono
 
 logger = logging.getLogger(__name__)
 
@@ -63,15 +67,21 @@ def _base() -> str:
     return (os.getenv("XAI_API_BASE") or "https://api.x.ai/v1").rstrip("/")
 
 
-def stt_transcribe(audio_bytes: bytes, filename: str = "audio.webm") -> Optional[str]:
+def _stt_post_wav(wav_bytes: bytes) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Send WAV to xAI STT. Returns (transcript, error).
+    Empty transcript with 200 is treated as soft failure (silence / pure tone).
+    """
     key = _api_key()
     if not key:
-        return None
+        return None, "XAI_API_KEY not set"
+
     url = f"{_base()}/stt"
-    # Try xAI STT; fallback OpenAI whisper path if xAI base is openai
+    model = os.getenv("XAI_STT_MODEL", "grok-stt")
+    files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
+    data = {"model": model}
+
     try:
-        files = {"file": (filename, audio_bytes, "application/octet-stream")}
-        data = {"model": os.getenv("XAI_STT_MODEL", "grok-stt")}
         r = requests.post(
             url,
             headers={"Authorization": f"Bearer {key}"},
@@ -80,25 +90,68 @@ def stt_transcribe(audio_bytes: bytes, filename: str = "audio.webm") -> Optional
             timeout=90,
             verify=_CA,
         )
-        if r.status_code == 200:
+    except Exception as e:
+        logger.warning("STT request error: %s", e)
+        return None, f"STT request failed: {e}"
+
+    if r.status_code == 200:
+        try:
             j = r.json()
-            return (j.get("text") or j.get("transcript") or "").strip() or None
-        # OpenAI-compatible whisper
-        url2 = f"{_base()}/audio/transcriptions"
+        except Exception:
+            return None, "STT returned non-JSON body"
+        text = (j.get("text") or j.get("transcript") or "").strip()
+        if text:
+            return text, None
+        # 200 but empty — often silence / pure tone / no speech
+        return None, (
+            "STT returned empty text (speak a short phrase — silence/tone yields nothing)"
+        )
+
+    body = (r.text or "")[:400]
+    # OpenAI-compatible whisper fallback (if base is not xAI)
+    url2 = f"{_base()}/audio/transcriptions"
+    try:
         r2 = requests.post(
             url2,
             headers={"Authorization": f"Bearer {key}"},
-            files={"file": (filename, audio_bytes)},
+            files={"file": ("audio.wav", wav_bytes, "audio/wav")},
             data={"model": os.getenv("VOICE_STT_MODEL", "whisper-1")},
             timeout=90,
             verify=_CA,
         )
         if r2.status_code == 200:
-            return (r2.json().get("text") or "").strip() or None
-        logger.warning("STT failed %s %s / %s %s", r.status_code, r.text[:200], r2.status_code, r2.text[:200])
+            text = (r2.json().get("text") or "").strip()
+            if text:
+                return text, None
+            return None, "Whisper returned empty text"
+        logger.warning(
+            "STT failed %s %s / %s %s",
+            r.status_code,
+            body[:200],
+            r2.status_code,
+            r2.text[:200],
+        )
+        return None, f"STT HTTP {r.status_code}: {body}"
     except Exception as e:
-        logger.warning("STT error: %s", e)
-    return None
+        logger.warning("STT failed %s %s (fallback err %s)", r.status_code, body[:200], e)
+        return None, f"STT HTTP {r.status_code}: {body}"
+
+
+def stt_transcribe(
+    audio_bytes: bytes,
+    filename: str = "audio.webm",
+    content_type: str = "",
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Convert browser audio → WAV → xAI STT.
+    Returns (transcript, error_detail). Exactly one of them is set on failure paths.
+    """
+    wav, conv_err = to_wav_16k_mono(
+        audio_bytes, filename=filename, content_type=content_type
+    )
+    if conv_err or not wav:
+        return None, conv_err or "Audio conversion failed"
+    return _stt_post_wav(wav)
 
 
 def tts_speak(text: str) -> Optional[bytes]:
@@ -121,7 +174,6 @@ def tts_speak(text: str) -> Optional[bytes]:
             verify=_CA,
         )
         if r.status_code == 200:
-            # may be audio bytes or json with b64
             ct = r.headers.get("content-type", "")
             if "json" in ct:
                 j = r.json()
@@ -139,7 +191,7 @@ def chat_with_tools(user_text: str, history: Optional[List[dict]] = None) -> Dic
     One-shot tool loop (max 4 rounds). Returns {reply, tools_run, transcript}.
     """
     key = _api_key()
-    model = os.getenv("XAI_CHAT_MODEL") or os.getenv("DESK_AGENT_MODEL") or "grok-3"
+    model = os.getenv("XAI_CHAT_MODEL") or os.getenv("DESK_AGENT_MODEL") or "grok-4.5"
     messages: List[dict] = [{"role": "system", "content": SYSTEM}]
     if history:
         messages.extend(history[-12:])
@@ -147,7 +199,6 @@ def chat_with_tools(user_text: str, history: Optional[List[dict]] = None) -> Dic
 
     tools_run: List[dict] = []
     if not key:
-        # offline rule path
         from ..coach.engine import format_coach_reply
 
         return {
@@ -194,7 +245,7 @@ def chat_with_tools(user_text: str, history: Optional[List[dict]] = None) -> Dic
             }
         messages.append(msg)
         for tc in tool_calls:
-            fn = (tc.get("function") or {})
+            fn = tc.get("function") or {}
             name = fn.get("name") or ""
             try:
                 args = json.loads(fn.get("arguments") or "{}")
@@ -216,12 +267,19 @@ def chat_with_tools(user_text: str, history: Optional[List[dict]] = None) -> Dic
     }
 
 
-def handle_voice_audio(audio_bytes: bytes, filename: str = "audio.webm") -> Dict[str, Any]:
-    text = stt_transcribe(audio_bytes, filename=filename)
+def handle_voice_audio(
+    audio_bytes: bytes,
+    filename: str = "audio.webm",
+    content_type: str = "",
+) -> Dict[str, Any]:
+    text, stt_err = stt_transcribe(
+        audio_bytes, filename=filename, content_type=content_type
+    )
     if not text:
         return {
             "ok": False,
-            "error": "STT failed — set XAI_API_KEY and ensure /v1/stt is available",
+            "error": stt_err
+            or "STT failed — set XAI_API_KEY; mic audio is converted to WAV before STT",
             "transcript": None,
             "reply": None,
             "tools_run": [],
