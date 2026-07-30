@@ -104,7 +104,8 @@ Smoke: `/s` · `/l` · `/p f TSLA` · `/mw`.
 | **V1** | **COMPLETE** — see [V1_COMPLETE.md](V1_COMPLETE.md) |
 | **Isolated agent** | [ISOLATED_DUMP_AGENT.md](ISOLATED_DUMP_AGENT.md) — async multi-CEX delist/hack check on *extreme isolated* dumps; source expertise learning |
 | **UX** | [ASSISTANT_UX.md](ASSISTANT_UX.md) |
-| **Next** | Staging: enable `FEATURE_ISOLATED_DUMP_AGENT`; soak; then V2 planning |
+| **V2 beta** | **AD Desk** web UI — [V2_BETA.md](V2_BETA.md) · `python -m mexc_bot.webapi` · docker profile `desk` |
+| **Next** | Deploy desk on droplet; soak; V2.1 voice/fills + LLM coach |
 | **Playbook** | [TRADING_STRATEGY.md](TRADING_STRATEGY.md) |
 | Later | Voice (V1.2), MEXC read-only fills (V1.3), `MOVER_ENRICH_KLINES=true` |
 | Backlog | Named mover buckets, bounce/reclaim, layer planner, TG buttons |

@@ -1,0 +1,25 @@
+# V2 AD Desk web UI (read-only against shared SQLite volume)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY mexc_bot/ ./mexc_bot/
+
+RUN useradd --create-home --shell /bin/bash appuser \
+    && mkdir -p /app/data \
+    && chown -R appuser:appuser /app
+USER appuser
+
+ENV ALERTS_FILE=/app/data/alerts.json
+ENV DESK_HOST=0.0.0.0
+ENV DESK_PORT=8080
+
+EXPOSE 8080
+CMD ["python", "-m", "mexc_bot.webapi"]

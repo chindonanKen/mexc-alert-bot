@@ -30,6 +30,7 @@ $PY tests/test_learning_events.py
 $PY tests/test_assistant_ux.py
 $PY tests/test_v1_complete.py
 $PY tests/test_isolated_agent.py
+$PY tests/test_webapi.py
 echo "All unit tests OK"
 echo
 

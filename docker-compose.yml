@@ -39,3 +39,36 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  # V2 AD Desk web UI — reads same SQLite as prod (or staging if remapped)
+  # Start: docker compose --profile desk up -d --build mexc-desk
+  # Open:  http://DROPLET_IP:8080  (set DESK_API_TOKEN in .env)
+  mexc-desk:
+    profiles: ["desk"]
+    build:
+      context: .
+      dockerfile: Dockerfile.desk
+    container_name: mexc-ad-desk
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ALERTS_FILE: /app/data/alerts.json
+      DESK_HOST: 0.0.0.0
+      DESK_PORT: "8080"
+    ports:
+      - "${DESK_PORT:-8080}:8080"
+    volumes:
+      - ./data:/app/data:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=5)",
+        ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

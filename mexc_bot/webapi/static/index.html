@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AD Desk — Agent Trading Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/desk.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◈</text></svg>" />
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <div class="app">
+    <aside class="rail">
+      <div class="brand">
+        <div class="brand-mark">◈</div>
+        <div>
+          <div class="brand-name">AD Desk</div>
+          <div class="brand-sub">v2 beta · agent platform</div>
+        </div>
+      </div>
+      <nav class="nav" id="nav">
+        <button type="button" data-view="overview" class="nav-item active">
+          <span class="nav-ico">◎</span> Overview
+        </button>
+        <button type="button" data-view="tape" class="nav-item">
+          <span class="nav-ico">↯</span> Tape & Heat
+        </button>
+        <button type="button" data-view="alerts" class="nav-item">
+          <span class="nav-ico">⊕</span> Targets
+        </button>
+        <button type="button" data-view="memory" class="nav-item">
+          <span class="nav-ico">◈</span> Memory
+        </button>
+        <button type="button" data-view="intel" class="nav-item">
+          <span class="nav-ico">⚑</span> Intel
+        </button>
+        <button type="button" data-view="agent" class="nav-item">
+          <span class="nav-ico">⬡</span> Agent
+        </button>
+        <button type="button" data-view="playbook" class="nav-item">
+          <span class="nav-ico">▣</span> Playbook
+        </button>
+      </nav>
+      <div class="rail-foot">
+        <div class="status-pill" id="connStatus">connecting…</div>
+        <div class="rail-hint">Telegram remains panic push.<br/>Desk = overview + agent.</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="viewTitle">Overview</h1>
+          <p class="view-sub" id="viewSub">Market pulse for AD scale-ins</p>
+        </div>
+        <div class="topbar-right">
+          <div class="majors" id="majors"></div>
+          <button type="button" class="btn ghost" id="btnRefresh">Refresh</button>
+        </div>
+      </header>
+
+      <!-- OVERVIEW -->
+      <section class="view active" id="view-overview">
+        <div class="grid-3">
+          <article class="card pulse-card">
+            <div class="card-label">Regime</div>
+            <div class="pulse-value" id="regimeValue">—</div>
+            <div class="pulse-bias" id="regimeBias">Loading market context…</div>
+          </article>
+          <article class="card">
+            <div class="card-label">Desk counters</div>
+            <div class="stat-grid" id="counters"></div>
+          </article>
+          <article class="card accent-border">
+            <div class="card-label">AD rule of thumb</div>
+            <p class="body-text" id="ruleText">Panic + breadth + volume. Isolated + news → no-trade bias.</p>
+            <div class="chips">
+              <span class="chip good">PANIC OK</span>
+              <span class="chip warn">ISOLATED CHECK</span>
+              <span class="chip bad">NEWS RISK</span>
+            </div>
+          </article>
+        </div>
+        <div class="grid-2 mt">
+          <article class="card">
+            <div class="card-head">
+              <h2>Recent fires</h2>
+              <span class="tag">learning</span>
+            </div>
+            <div class="table-wrap" id="ovEvents"></div>
+          </article>
+          <article class="card">
+            <div class="card-head">
+              <h2>Isolated checks</h2>
+              <span class="tag">agent</span>
+            </div>
+            <div class="table-wrap" id="ovInv"></div>
+          </article>
+        </div>
+      </section>
+
+      <!-- TAPE -->
+      <section class="view" id="view-tape">
+        <div class="grid-2">
+          <article class="card wide">
+            <div class="card-head">
+              <h2>Watchlist tape</h2>
+              <span class="tag" id="mwSettings">movers</span>
+            </div>
+            <div class="table-wrap" id="tapeTable"></div>
+          </article>
+          <article class="card">
+            <div class="card-head"><h2>How to read this</h2></div>
+            <ul class="checklist">
+              <li><strong>Heat breadth</strong> — many names dumping = market panic (prefer)</li>
+              <li><strong>Single name nuke</strong> — wait for Isolated Dump Check</li>
+              <li><strong>Velocity</strong> — PANIC/FAST &gt; GRIND for AD entries</li>
+              <li>Telegram still owns live fire push; desk is command overview</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <!-- ALERTS -->
+      <section class="view" id="view-alerts">
+        <article class="card">
+          <div class="card-head">
+            <h2>Target alerts</h2>
+            <span class="tag">one-shot</span>
+          </div>
+          <div class="table-wrap" id="alertsTable"></div>
+        </article>
+      </section>
+
+      <!-- MEMORY -->
+      <section class="view" id="view-memory">
+        <div class="card-head-row">
+          <h2>Event memory</h2>
+          <div class="btn-row">
+            <button type="button" class="btn small" data-label="took">Mark latest TOOK</button>
+            <button type="button" class="btn small ghost" data-label="skip">Mark latest SKIP</button>
+          </div>
+        </div>
+        <article class="card">
+          <div class="table-wrap" id="memoryTable"></div>
+        </article>
+      </section>
+
+      <!-- INTEL -->
+      <section class="view" id="view-intel">
+        <div class="grid-2">
+          <article class="card">
+            <div class="card-head"><h2>Fatal news</h2><span class="tag bad">delist · hack</span></div>
+            <div class="table-wrap" id="newsTable"></div>
+          </article>
+          <article class="card">
+            <div class="card-head"><h2>CEX delist cache</h2><span class="tag">radar</span></div>
+            <div class="table-wrap" id="delistTable"></div>
+          </article>
+        </div>
+        <article class="card mt">
+          <div class="card-head"><h2>Source expertise</h2><span class="tag">learning</span></div>
+          <div class="table-wrap" id="sourcesTable"></div>
+        </article>
+      </section>
+
+      <!-- AGENT -->
+      <section class="view" id="view-agent">
+        <div class="agent-layout">
+          <article class="card agent-chat">
+            <div class="card-head"><h2>Coach</h2><span class="tag">rule-based · V2 LLM later</span></div>
+            <div class="chat-log" id="chatLog"></div>
+            <form class="chat-form" id="chatForm">
+              <input type="text" id="chatInput" placeholder="Ask: panic checklist · grind · layers · pride · brief…" autocomplete="off" />
+              <button type="submit" class="btn">Send</button>
+            </form>
+            <div class="quick-asks">
+              <button type="button" class="chip-btn" data-q="brief">Brief</button>
+              <button type="button" class="chip-btn" data-q="panic">Panic AD</button>
+              <button type="button" class="chip-btn" data-q="grind">Grind risk</button>
+              <button type="button" class="chip-btn" data-q="layers">Layers</button>
+              <button type="button" class="chip-btn" data-q="pride">Pride</button>
+              <button type="button" class="chip-btn" data-q="news">News / isolated</button>
+            </div>
+          </article>
+          <article class="card">
+            <div class="card-head"><h2>Session brief</h2></div>
+            <pre class="mono-block" id="briefBox">Open Agent and tap Brief, or type brief.</pre>
+          </article>
+        </div>
+      </section>
+
+      <!-- PLAYBOOK -->
+      <section class="view" id="view-playbook">
+        <div class="grid-2">
+          <article class="card">
+            <div class="card-head"><h2>Prefer</h2></div>
+            <ul class="checklist good-list" id="preferList"></ul>
+          </article>
+          <article class="card">
+            <div class="card-head"><h2>Avoid</h2></div>
+            <ul class="checklist bad-list" id="avoidList"></ul>
+          </article>
+        </div>
+        <article class="card mt">
+          <div class="card-head"><h2>Core sentence</h2></div>
+          <p class="lead" id="coreSentence"></p>
+          <p class="body-text" id="workflowLine"></p>
+          <div class="module-grid" id="moduleGrid"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+  <script src="/assets/desk.js"></script>
+</body>
+</html>
