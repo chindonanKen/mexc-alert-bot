@@ -32,6 +32,9 @@ env/
 .env.staging
 *.pem
 *.key
+# Desk TLS (generated on droplet by scripts/desk_gen_certs.sh)
+deploy/caddy/certs/*
+!deploy/caddy/certs/.gitkeep
 
 # Data / runtime (alerts contain user-specific state)
 # We want the directory to exist on clone but not the actual alerts.json

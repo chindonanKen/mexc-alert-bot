@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Bring up AD Desk behind HTTPS so the browser microphone works (no file upload).
-# Usage on droplet (or any Docker host):
+# Bring up AD Desk with dual entry:
+#   https://IP/        → mic works (self-signed openssl cert + Caddy)
+#   http://IP:8080/    → UI + text agent (mic blocked by browser)
+#
+# Usage on droplet:
 #   ./scripts/desk_https_up.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,8 +21,22 @@ if ! grep -qE '^XAI_API_KEY=.+' .env 2>/dev/null && ! grep -qE '^GROK_API_KEY=.+
   echo "WARN: XAI_API_KEY missing — voice STT/tools will fail until set"
 fi
 
-# Recreate so port maps match compose (old desk had public :8080 only)
-echo "==> Stopping old desk containers (if any)"
+if ! command -v openssl >/dev/null 2>&1; then
+  echo "ERROR: openssl required to generate desk TLS certs"
+  exit 1
+fi
+
+IP="$(curl -s --max-time 3 ifconfig.me 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo 127.0.0.1)"
+
+echo "==> TLS certs (IP SAN for ${IP})"
+bash "${ROOT}/scripts/desk_gen_certs.sh" "$IP"
+
+if [[ ! -f deploy/caddy/certs/desk.crt || ! -f deploy/caddy/certs/desk.key ]]; then
+  echo "ERROR: cert generation failed"
+  exit 1
+fi
+
+echo "==> Stopping old desk / https containers"
 docker compose --profile desk --profile desk-https stop mexc-desk mexc-desk-https 2>/dev/null || true
 docker rm -f mexc-ad-desk mexc-desk-https 2>/dev/null || true
 
@@ -28,44 +45,60 @@ docker compose --profile desk --profile desk-https up -d --build --force-recreat
 
 echo ""
 echo "==> Waiting for health"
-sleep 3
+sleep 4
 docker ps --filter name=mexc-ad-desk --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 docker ps --filter name=mexc-desk-https --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
-IP="$(curl -s --max-time 3 ifconfig.me 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo YOUR_DROPLET_IP)"
-
 echo ""
-echo "==> HTTPS smoke (self-signed ok)"
-if curl -sk --max-time 10 "https://127.0.0.1/api/health" | head -c 200; then
+echo "==> Smoke checks"
+HTTP_OK=0
+HTTPS_OK=0
+if curl -s --max-time 8 "http://127.0.0.1:8080/api/health" | head -c 200; then
   echo ""
-  echo "Local HTTPS health: OK"
+  echo "HTTP  :8080 health: OK"
+  HTTP_OK=1
 else
-  echo "WARN: https://127.0.0.1/api/health failed — check: docker logs mexc-desk-https"
+  echo "WARN: http://127.0.0.1:8080/api/health failed"
+fi
+if curl -sk --max-time 8 "https://127.0.0.1/api/health" | head -c 200; then
+  echo ""
+  echo "HTTPS :443 health: OK"
+  HTTPS_OK=1
+else
+  echo "WARN: https://127.0.0.1/api/health failed — docker logs mexc-desk-https"
+  docker logs --tail 30 mexc-desk-https 2>&1 || true
 fi
 
-# DigitalOcean / ufw tip
-if command -v ufw >/dev/null 2>&1; then
-  if ufw status 2>/dev/null | grep -qi active; then
-    echo ""
-    echo "If external browser fails, open firewall:"
-    echo "  sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw reload"
-  fi
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi active; then
+  echo ""
+  echo "UFW active — ensure:"
+  echo "  sudo ufw allow 8080/tcp   # HTTP desk"
+  echo "  sudo ufw allow 443/tcp    # HTTPS mic"
 fi
 
 TOKEN_HINT="YOUR_DESK_API_TOKEN"
-if grep -qE '^DESK_API_TOKEN=.+' .env 2>/dev/null; then
-  TOKEN_HINT="(from .env DESK_API_TOKEN)"
-fi
-
 echo ""
 echo "=============================================="
-echo "  Open the FULL desk (mic works here):"
+echo "  How to open AD Desk"
+echo ""
+echo "  FULL (mic + voice):"
 echo "    https://${IP}/?token=${TOKEN_HINT}"
+echo "    Browser: Advanced → Proceed to site (self-signed)"
+echo "    Then allow microphone."
 echo ""
-echo "  1) Browser warns about certificate → Advanced → Proceed"
-echo "  2) Allow microphone when prompted"
-echo "  3) Voice tab → Tap to record → speak a command"
+echo "  UI + text agent only (mic blocked by browser):"
+echo "    http://${IP}:8080/?token=${TOKEN_HINT}"
+echo "    Same as droplet Grok HTTP guide — fine for CRUD/text."
 echo ""
-echo "  Do NOT use http://${IP}:8080 for voice."
-echo "  Mic requires https:// (secure context)."
+echo "  Token (on droplet, do not paste into shared chats):"
+echo "    grep '^DESK_API_TOKEN=' ~/mexc-alert-bot/.env"
+echo ""
+if [[ "$HTTPS_OK" -ne 1 ]]; then
+  echo "  HTTPS smoke FAILED on this host — use :8080 for text;"
+  echo "  check: docker logs mexc-desk-https"
+  echo "  and DigitalOcean cloud firewall allows TCP 443."
+fi
+if [[ "$HTTP_OK" -ne 1 ]]; then
+  echo "  HTTP :8080 smoke FAILED — check: docker logs mexc-ad-desk"
+fi
 echo "=============================================="

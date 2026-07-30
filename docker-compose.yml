@@ -40,8 +40,9 @@ services:
       retries: 3
       start_period: 15s
 
-  # V2 AD Desk app (internal :8080). Public entry = HTTPS (mexc-desk-https).
-  # Full stack (mic works): ./scripts/desk_https_up.sh
+  # V2 AD Desk app
+  # HTTP guide (droplet Grok):  ./scripts/desk_up.sh        → http://IP:8080  (no mic)
+  # Full + mic:                 ./scripts/desk_https_up.sh  → https://IP/ + :8080
   mexc-desk:
     profiles: ["desk", "desk-https"]
     build:
@@ -55,11 +56,11 @@ services:
       ALERTS_FILE: /app/data/alerts.json
       DESK_HOST: 0.0.0.0
       DESK_PORT: "8080"
-    # Not published on host — use https://IP/ via Caddy so mic is a secure context.
-    # Local-only alternative without Docker: make desk → http://localhost:8080
-    expose:
-      - "8080"
+    # Public HTTP for UI + text agent (mic blocked on http://IP — browser secure context)
+    ports:
+      - "8080:8080"
     volumes:
+      # RW: desk CRUD (alerts, journal, watchlist). Does not poll Telegram or place orders.
       - ./data:/app/data
     healthcheck:
       test:
@@ -74,9 +75,9 @@ services:
       retries: 3
       start_period: 15s
 
-  # HTTPS reverse proxy — required for browser microphone (no sound-file upload path)
+  # HTTPS reverse proxy for microphone (openssl self-signed IP SAN — see desk_gen_certs.sh)
   # Start: ./scripts/desk_https_up.sh
-  # Open: https://DROPLET_IP/?token=DESK_API_TOKEN  (accept self-signed cert once)
+  # Open: https://DROPLET_IP/?token=DESK_API_TOKEN  (Advanced → Proceed)
   mexc-desk-https:
     profiles: ["desk-https"]
     image: caddy:2-alpine
@@ -86,9 +87,9 @@ services:
       - mexc-desk
     ports:
       - "443:443"
-      - "80:80"
     volumes:
       - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/caddy/certs:/certs:ro
       - caddy_data:/data
       - caddy_config:/config
 

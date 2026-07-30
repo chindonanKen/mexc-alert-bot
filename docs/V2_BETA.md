@@ -61,20 +61,33 @@ Use **HTTPS** so you can fully explore the desk including voice.
 Raw WebM is rejected by xAI STT (`Unsupported or corrupt audio format: webm`); conversion is mandatory.  
 Text agent (`/api/agent`) does not need ffmpeg and works even if STT is broken.
 
+### Two ways to open (same token)
+
+| URL | Mic | When to use |
+|-----|-----|-------------|
+| `http://IP:8080/?token=…` | No | Droplet HTTP guide — overview, CRUD, **text** agent |
+| `https://IP/?token=…` | Yes | Voice / mic (self-signed cert → Advanced → Proceed) |
+| `http://localhost:8080` | Yes* | Local `make desk` only |
+
 ```bash
-# On droplet (full desk including mic)
+# HTTP only (matches droplet Grok guide — no mic)
+./scripts/desk_up.sh
+# Open: http://DROPLET_IP:8080/?token=…
+
+# Full stack: HTTP :8080 + HTTPS :443 for mic
 ./scripts/desk_https_up.sh
-# Open: https://DROPLET_IP/?token=DESK_API_TOKEN
-# Accept self-signed cert once → allow mic → Voice tab
+# Mic:  https://DROPLET_IP/?token=…
+# Text: http://DROPLET_IP:8080/?token=…
 ```
 
-Stack: `mexc-desk` (app, internal) + `mexc-desk-https` (Caddy TLS on **443** / redirect **80**).
+HTTPS uses **openssl self-signed cert with IP SAN** (not Caddy `tls internal`, which is flaky on bare IPs).  
+No HSTS — you can always fall back to `:8080` if TLS misbehaves.
 
-| URL | Mic | Notes |
-|-----|-----|--------|
-| `https://IP/?token=…` | Yes | Correct full-desk URL |
-| `http://IP:8080/…` | No | Not published by default; do not use for voice |
-| `http://localhost:8080` | Yes* | Local `make desk` only (localhost is a secure context) |
+Token (on droplet, do not paste into shared chats):
+
+```bash
+grep '^DESK_API_TOKEN=' ~/mexc-alert-bot/.env
+```
 
 ---
 
@@ -82,13 +95,12 @@ Stack: `mexc-desk` (app, internal) + `mexc-desk-https` (Caddy TLS on **443** / r
 
 ```bash
 cd ~/mexc-alert-bot && git pull origin main
-# .env must include DESK_API_TOKEN, DESK_USER_ID, XAI_API_KEY
-./scripts/desk_https_up.sh
+# .env: DESK_API_TOKEN, DESK_USER_ID, XAI_API_KEY
+./scripts/desk_https_up.sh   # preferred
+# or HTTP-only: ./scripts/desk_up.sh
 ```
 
-Open **`https://DROPLET_IP/?token=…`** (not `:8080`).  
-Desk volume is **read-write** for CRUD (same `./data` as bot).  
-Text agent + quick chips always work over HTTPS; mic needs the secure URL + browser permission.
+Desk volume is **read-write** for CRUD (same `./data` as bot). Does not poll Telegram or place orders.
 
 ---
 

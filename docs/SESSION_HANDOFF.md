@@ -9,13 +9,14 @@ This file is a **dated snapshot** so the next human/agent (including a **new Mac
 ### AD Desk (explore fully)
 
 - **No sound-file upload.** Mic needs HTTPS secure context.
-- Droplet: `./scripts/desk_https_up.sh` → open **`https://DROPLET_IP/?token=DESK_API_TOKEN`**
-- Accept self-signed cert once; allow microphone.
+- **Dual entry (aligned with droplet Grok HTTP guide):**
+  - `./scripts/desk_up.sh` → `http://IP:8080/?token=…` — UI + text agent (mic blocked)
+  - `./scripts/desk_https_up.sh` → same + `https://IP/` for mic (openssl IP-SAN cert + Caddy)
+- Accept self-signed cert once (Advanced → Proceed); allow microphone.
 - Requires `.env`: `DESK_API_TOKEN`, `DESK_USER_ID`, `XAI_API_KEY`
-- Do **not** use `http://IP:8080` for voice.
-- **Voice bug (fixed on GitHub):** xAI STT rejects WebM. Desk converts mic audio → **16 kHz mono WAV** via **ffmpeg** in `Dockerfile.desk` (`audio_convert.py`). Rebuild desk image after pull.
-- Text agent was already OK; only `/api/voice` needed convert.
-- Droplet-only edits must be **committed/pushed** or re-applied from GitHub — laptop cannot SSH as root without your key.
+- HTTPS fix: dropped flaky Caddy `tls internal`; use `scripts/desk_gen_certs.sh` + mount `deploy/caddy/certs`.
+- **Voice:** mic → ffmpeg WAV → xAI STT → grok tools. Rebuild desk after pull.
+- DO cloud firewall must allow **8080** (HTTP) and **443** (HTTPS mic).
 
 ---
 

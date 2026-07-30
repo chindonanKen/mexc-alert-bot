@@ -469,17 +469,20 @@
     if (!secure) {
       box.hidden = false;
       box.innerHTML =
-        "<strong>Open the desk on HTTPS to use the mic.</strong><br/>" +
+        "<strong>Mic needs HTTPS</strong> (browser rule on plain http://IP).<br/>" +
         "You are on <code>" +
         location.protocol +
         "//" +
         location.host +
         "</code>. " +
-        "Use <code>https://YOUR_DROPLET_IP/</code> (Caddy). " +
-        "Accept the certificate warning once, then reload this page.";
+        "Text agent and the rest of the desk work here. " +
+        "For voice: run <code>./scripts/desk_https_up.sh</code> on the droplet, open " +
+        "<code>https://YOUR_DROPLET_IP/</code> with the same token, " +
+        "Advanced → Proceed (self-signed), then allow microphone.";
       micBtn.disabled = true;
       micBtn.textContent = "Need HTTPS";
-      $("#voiceStatus").textContent = "Switch to https:// — then tap to record";
+      $("#voiceStatus").textContent =
+        "UI/text OK on HTTP · voice needs https:// same IP";
     } else if (!micSupported()) {
       box.hidden = false;
       box.innerHTML = "This browser cannot record audio. Try Chrome or Safari.";

@@ -30,6 +30,9 @@ desk:
 desk-https:
 	bash scripts/desk_https_up.sh
 
+desk-docker:
+	bash scripts/desk_up.sh
+
 test-web:
 	python3 tests/test_webapi.py
 	python3 tests/test_audio_convert.py
