@@ -8,9 +8,23 @@
     view: "overview",
     chunks: [],
     recording: false,
-    continuous: localStorage.getItem("desk_voice_cont") !== "0",
+    inCall: false,
+    muteMic: false,
+    muteSpk: false,
     agentHistory: [],
     busy: false,
+    speakingHeard: false,
+    silenceMs: 0,
+  };
+
+  // Grok-app style VAD: end turn after this much silence once user has spoken
+  const VAD = {
+    speakRms: 0.02,
+    silenceRms: 0.012,
+    endSilenceMs: 1100,
+    minSpeechMs: 450,
+    maxTurnMs: 28000,
+    pollMs: 80,
   };
 
   const qp = new URLSearchParams(location.search);
@@ -432,7 +446,8 @@
     if (state.busy) return;
     state.busy = true;
     agentMsg("user", text);
-    $("#voiceStatus").textContent = "Agent thinking…";
+    $("#voiceStatus").textContent = "Grok thinking…";
+    updateMicUi();
     try {
       const out = await api("/api/agent", {
         method: "POST",
@@ -462,19 +477,37 @@
         );
       }
       agentMsg("bot", out.reply || "—");
-      $("#voiceStatus").textContent = state.continuous
-        ? "Listening continuum — tap Stop when done"
-        : "Ready";
       refreshAll();
+      // Prefer spoken reply when in a call
+      if (state.inCall && out.reply && !state.muteSpk) {
+        try {
+          const tts = await api("/api/tts", {
+            method: "POST",
+            body: JSON.stringify({ text: out.reply }),
+          });
+          if (tts.audio_b64) await playTts(tts.audio_b64);
+        } catch (_) {
+          /* text still shown */
+        }
+      }
+      $("#voiceStatus").textContent = state.inCall
+        ? state.muteMic
+          ? "Call live · mic muted"
+          : "Listening…"
+        : "Ready";
     } catch (e) {
       agentMsg("bot", "Error: " + e.message);
       $("#voiceStatus").textContent = "Error";
     } finally {
       state.busy = false;
+      updateMicUi();
+      if (state.inCall && !state.muteMic && !state.recording) {
+        setTimeout(() => listenTurn(), 300);
+      }
     }
   }
 
-  // ---- Mic: localhost OK; convert to WAV client-side (no local ffmpeg needed) ----
+  // ---- Grok-app style voice call: VAD + speak-back + mute controls ----
   function isSecureForMic() {
     if (window.isSecureContext) return true;
     const h = location.hostname;
@@ -492,50 +525,75 @@
   function updateMicUi() {
     const box = $("#secureBox");
     const micBtn = $("#btnMic");
-    const cont = $("#btnCont");
-    if (cont) {
-      cont.classList.toggle("on", state.continuous);
-      cont.textContent = state.continuous
-        ? "Continuous: ON"
-        : "Continuous: OFF";
+    const endBtn = $("#btnEndCall");
+    const muteMic = $("#btnMuteMic");
+    const muteSpk = $("#btnMuteSpk");
+    const level = $("#voiceLevel");
+    const panel = $(".voice-panel");
+    if (panel) panel.classList.toggle("in-call", state.inCall);
+    if (endBtn) endBtn.hidden = !state.inCall;
+    if (muteMic) {
+      muteMic.hidden = !state.inCall;
+      muteMic.textContent = state.muteMic ? "Mic muted" : "Mic on";
+      muteMic.classList.toggle("muted-on", state.muteMic);
     }
+    if (muteSpk) {
+      muteSpk.hidden = !state.inCall;
+      muteSpk.textContent = state.muteSpk ? "Speaker muted" : "Speaker on";
+      muteSpk.classList.toggle("muted-on", state.muteSpk);
+    }
+    if (level) level.hidden = !(state.inCall && state.recording && !state.muteMic);
+
     if (!box || !micBtn) return;
     const secure = isSecureForMic();
     if (!secure) {
       box.hidden = false;
       box.innerHTML =
         "<strong>Mic needs HTTPS</strong> on plain http://IP.<br/>" +
-        "Local: use <code>http://127.0.0.1:8080</code>. Droplet: " +
-        "<code>https://IP/</code> after desk_https_up.sh.";
+        "Local: <code>http://127.0.0.1:8080</code>. Droplet: <code>https://IP/</code>.";
       micBtn.disabled = true;
       micBtn.textContent = "Need HTTPS";
-      $("#voiceStatus").textContent = "Text agent works · voice needs secure context";
-    } else if (!micSupported()) {
+      return;
+    }
+    if (!micSupported()) {
       box.hidden = false;
       box.innerHTML = "This browser cannot record audio. Try Chrome or Safari.";
       micBtn.disabled = true;
       micBtn.textContent = "Mic N/A";
-    } else {
-      box.hidden = true;
-      micBtn.disabled = state.busy && !state.recording;
-      if (state.recording) {
-        micBtn.textContent = "Stop · send";
-        $("#voiceStatus").textContent = "Recording… tap to send turn";
-      } else if (state.busy) {
-        micBtn.textContent = "Working…";
-        $("#voiceStatus").textContent = "Transcribing + tools…";
-      } else {
-        micBtn.textContent = state.continuous
-          ? "Talk (continuous)"
-          : "Tap to record";
-        $("#voiceStatus").textContent = state.continuous
-          ? "Continuous conversation — tap to speak each turn"
-          : "Ready — tap mic, speak, tap again to send";
+      return;
+    }
+    box.hidden = true;
+    micBtn.classList.toggle("rec", state.recording);
+
+    if (!state.inCall) {
+      micBtn.disabled = false;
+      micBtn.textContent = "Start call";
+      if (!$("#voiceStatus").textContent.startsWith("Error")) {
+        $("#voiceStatus").textContent = "Ready — Start call to talk with Grok";
       }
+      return;
+    }
+
+    // In call — primary button shows state; End ends call
+    micBtn.disabled = true;
+    if (state.busy) {
+      micBtn.textContent = "Grok speaking…";
+      $("#voiceStatus").textContent = "Working · STT + tools + voice reply";
+    } else if (state.muteMic) {
+      micBtn.textContent = "Mic muted";
+      $("#voiceStatus").textContent = "Call live · your mic is muted";
+    } else if (state.recording) {
+      micBtn.textContent = state.speakingHeard ? "Listening…" : "Listening…";
+      $("#voiceStatus").textContent = state.speakingHeard
+        ? "Hearing you — pause when finished"
+        : "Listening — start talking";
+    } else {
+      micBtn.textContent = "In call";
+      $("#voiceStatus").textContent = "Call live";
     }
   }
 
-  /** Decode MediaRecorder blob → 16 kHz mono PCM WAV (works without ffmpeg). */
+  /** Decode MediaRecorder blob → 16 kHz mono PCM WAV (no ffmpeg needed). */
   async function blobToWav16k(blob) {
     const ab = await blob.arrayBuffer();
     const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -555,7 +613,6 @@
       targetRate
     );
     const src = offline.createBufferSource();
-    // mixdown to mono
     const mono = offline.createBuffer(1, decoded.length, decoded.sampleRate);
     const ch0 = mono.getChannelData(0);
     const nCh = decoded.numberOfChannels;
@@ -598,14 +655,20 @@
     return new Blob([buf], { type: "audio/wav" });
   }
 
-  async function playTtsAndMaybeContinue(audioB64) {
+  function setLevelBar(rms) {
+    const el = $("#voiceLevel span");
+    if (!el) return;
+    const pct = Math.min(100, Math.round(rms * 900));
+    el.style.width = pct + "%";
+  }
+
+  async function playTts(audioB64) {
+    if (state.muteSpk || !audioB64) return;
     const audio = $("#voiceAudio");
-    if (!audioB64 || !audio) {
-      if (state.continuous && !state.busy) setTimeout(() => startRec(), 400);
-      return;
-    }
+    if (!audio) return;
+    // pause listening while Grok speaks (echo)
+    stopListenOnly();
     audio.src = "data:audio/mpeg;base64," + audioB64;
-    audio.hidden = false;
     try {
       await audio.play();
       await new Promise((resolve) => {
@@ -616,34 +679,24 @@
         };
         audio.addEventListener("ended", done);
         audio.addEventListener("error", done);
-        // safety if play hangs
-        setTimeout(done, 60000);
+        setTimeout(done, 90000);
       });
     } catch (_) {
-      /* autoplay blocked — still continue */
-    }
-    if (state.continuous && !state.busy && !state.recording) {
-      setTimeout(() => startRec(), 350);
+      /* autoplay */
     }
   }
 
   async function sendAudioBlob(blob) {
+    if (!state.inCall) return;
     state.busy = true;
     updateMicUi();
-    $("#voiceStatus").textContent = "Encoding WAV + STT + tools…";
+    $("#voiceStatus").textContent = "Grok is thinking…";
     let wavBlob = blob;
     let fname = "voice.wav";
     try {
-      if (!blob.type.includes("wav")) {
-        wavBlob = await blobToWav16k(blob);
-      }
+      if (!blob.type.includes("wav")) wavBlob = await blobToWav16k(blob);
     } catch (e) {
-      // fall back to original; server may convert if ffmpeg present
-      fname = blob.type.includes("mp4")
-        ? "voice.mp4"
-        : blob.type.includes("ogg")
-          ? "voice.ogg"
-          : "voice.webm";
+      fname = "voice.webm";
       wavBlob = blob;
       console.warn("client WAV convert failed", e);
     }
@@ -658,8 +711,7 @@
     if (!res.ok) {
       let msg = await res.text();
       try {
-        const j = JSON.parse(msg);
-        msg = j.detail || msg;
+        msg = JSON.parse(msg).detail || msg;
       } catch (_) {}
       throw new Error(msg || res.statusText);
     }
@@ -674,22 +726,105 @@
           .join("\n")
       );
     }
-    agentMsg("bot", out.reply || "—");
+    // Text is secondary transcript; voice is primary
+    if (out.reply) agentMsg("bot", "🔊 " + out.reply);
     refreshAll();
     state.busy = false;
     updateMicUi();
-    await playTtsAndMaybeContinue(out.audio_b64);
-    updateMicUi();
+    if (out.audio_b64) {
+      $("#voiceStatus").textContent = "Grok speaking…";
+      await playTts(out.audio_b64);
+    } else if (out.reply && !state.muteSpk) {
+      // TTS missing — try dedicated endpoint
+      try {
+        const tts = await api("/api/tts", {
+          method: "POST",
+          body: JSON.stringify({ text: out.reply }),
+        });
+        if (tts.audio_b64) {
+          $("#voiceStatus").textContent = "Grok speaking…";
+          await playTts(tts.audio_b64);
+        }
+      } catch (_) {}
+    }
+    if (state.inCall && !state.muteMic) {
+      setTimeout(() => listenTurn(), 250);
+    } else {
+      updateMicUi();
+    }
   }
 
   let recorder = null;
   let mediaStream = null;
+  let audioCtx = null;
+  let analyser = null;
+  let vadTimer = null;
+  let turnStartedAt = 0;
+  let speechStartedAt = 0;
 
-  async function startRec() {
-    if (state.recording || state.busy) return;
+  function clearVad() {
+    if (vadTimer) {
+      clearInterval(vadTimer);
+      vadTimer = null;
+    }
+    setLevelBar(0);
+  }
+
+  function stopListenOnly() {
+    clearVad();
+    if (recorder && state.recording) {
+      try {
+        recorder.onstop = null;
+        if (recorder.state !== "inactive") recorder.stop();
+      } catch (_) {}
+    }
+    state.recording = false;
+    if (mediaStream) {
+      mediaStream.getTracks().forEach((t) => t.stop());
+      mediaStream = null;
+    }
+    if (audioCtx) {
+      audioCtx.close().catch(() => {});
+      audioCtx = null;
+      analyser = null;
+    }
+    recorder = null;
+    $("#btnMic")?.classList.remove("rec");
+  }
+
+  function endCall() {
+    state.inCall = false;
+    state.busy = false;
+    stopListenOnly();
+    const audio = $("#voiceAudio");
+    if (audio) {
+      try {
+        audio.pause();
+        audio.removeAttribute("src");
+      } catch (_) {}
+    }
+    $("#voiceStatus").textContent = "Call ended";
+    updateMicUi();
+  }
+
+  async function startCall() {
+    if (state.inCall) return;
     if (!isSecureForMic() || !micSupported()) {
       updateMicUi();
       toast("Mic needs secure context (localhost or HTTPS)");
+      return;
+    }
+    state.inCall = true;
+    state.muteMic = false;
+    updateMicUi();
+    $("#voiceStatus").textContent = "Call started — start talking";
+    agentMsg("bot", "🔊 Call live. Just talk — I'll reply by voice.");
+    await listenTurn();
+  }
+
+  async function listenTurn() {
+    if (!state.inCall || state.busy || state.muteMic || state.recording) {
+      updateMicUi();
       return;
     }
     try {
@@ -697,16 +832,33 @@
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
+          autoGainControl: true,
           channelCount: 1,
         },
       });
+      // Apply mute if toggled mid-acquire
+      mediaStream.getAudioTracks().forEach((t) => {
+        t.enabled = !state.muteMic;
+      });
+
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new Ctx();
+      const source = audioCtx.createMediaStreamSource(mediaStream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+
       state.chunks = [];
+      state.speakingHeard = false;
+      state.silenceMs = 0;
+      turnStartedAt = Date.now();
+      speechStartedAt = 0;
+
       const mimeCandidates = [
         "audio/webm;codecs=opus",
         "audio/webm",
         "audio/mp4",
         "audio/ogg;codecs=opus",
-        "audio/ogg",
       ];
       let mime = "";
       for (const c of mimeCandidates) {
@@ -718,84 +870,163 @@
       recorder = mime
         ? new MediaRecorder(mediaStream, { mimeType: mime })
         : new MediaRecorder(mediaStream);
+
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size) state.chunks.push(e.data);
       };
-      recorder.onerror = () => {
-        toast("Recorder error");
-        stopRec();
-      };
-      recorder.onstop = async () => {
-        try {
-          if (mediaStream) mediaStream.getTracks().forEach((t) => t.stop());
+
+      const finishTurn = async () => {
+        clearVad();
+        const type = recorder?.mimeType || mime || "audio/webm";
+        const blob = new Blob(state.chunks, { type });
+        if (mediaStream) {
+          mediaStream.getTracks().forEach((t) => t.stop());
           mediaStream = null;
-          const type = recorder?.mimeType || mime || "audio/webm";
-          const blob = new Blob(state.chunks, { type });
-          if (!blob.size) {
-            toast("Empty recording — try again");
-            return;
-          }
+        }
+        if (audioCtx) {
+          audioCtx.close().catch(() => {});
+          audioCtx = null;
+          analyser = null;
+        }
+        state.recording = false;
+        $("#btnMic")?.classList.remove("rec");
+        if (!state.inCall) return;
+        if (!blob.size || !state.speakingHeard) {
+          // no speech — keep listening
+          setTimeout(() => listenTurn(), 200);
+          return;
+        }
+        try {
           await sendAudioBlob(blob);
         } catch (e) {
           $("#voiceStatus").textContent = "Voice failed";
           toast(String(e.message || e).slice(0, 160));
           state.busy = false;
-        } finally {
-          state.recording = false;
-          $("#btnMic").classList.remove("rec");
-          updateMicUi();
+          if (state.inCall && !state.muteMic) setTimeout(() => listenTurn(), 600);
         }
       };
-      recorder.start(250);
+
+      recorder.onerror = () => {
+        toast("Recorder error");
+        endCall();
+      };
+
+      recorder.onstop = () => {
+        /* finishTurn called from VAD / max timer */
+      };
+
+      recorder.start(200);
       state.recording = true;
-      $("#btnMic").classList.add("rec");
+      $("#btnMic")?.classList.add("rec");
       updateMicUi();
+
+      const timeData = new Uint8Array(analyser.fftSize);
+      vadTimer = setInterval(() => {
+        if (!state.inCall || !analyser || !state.recording) return;
+        if (state.muteMic) return;
+
+        analyser.getByteTimeDomainData(timeData);
+        let sum = 0;
+        for (let i = 0; i < timeData.length; i++) {
+          const v = (timeData[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / timeData.length);
+        setLevelBar(rms);
+
+        const now = Date.now();
+        if (rms >= VAD.speakRms) {
+          if (!state.speakingHeard) {
+            state.speakingHeard = true;
+            speechStartedAt = now;
+            updateMicUi();
+          }
+          state.silenceMs = 0;
+        } else if (state.speakingHeard) {
+          state.silenceMs += VAD.pollMs;
+        }
+
+        const spokenLongEnough =
+          state.speakingHeard &&
+          speechStartedAt &&
+          now - speechStartedAt >= VAD.minSpeechMs;
+        const silenceDone = state.silenceMs >= VAD.endSilenceMs;
+        const maxed = now - turnStartedAt >= VAD.maxTurnMs;
+
+        if ((spokenLongEnough && silenceDone) || maxed) {
+          clearVad();
+          try {
+            if (recorder && recorder.state !== "inactive") {
+              recorder.onstop = finishTurn;
+              recorder.stop();
+            } else {
+              finishTurn();
+            }
+          } catch (_) {
+            finishTurn();
+          }
+        }
+      }, VAD.pollMs);
     } catch (e) {
       const name = e && e.name;
       let msg = "Mic failed";
       if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-        msg = "Allow microphone for this site in browser settings";
+        msg = "Allow microphone for this site";
       } else if (name === "NotFoundError") {
         msg = "No microphone found";
-      } else if (!window.isSecureContext) {
-        msg = "Need HTTPS or localhost";
       }
       toast(msg);
       $("#voiceStatus").textContent = msg;
-      updateMicUi();
-    }
-  }
-
-  function stopRec() {
-    if (recorder && state.recording) {
-      try {
-        if (recorder.state !== "inactive") recorder.stop();
-      } catch (_) {
-        state.recording = false;
-        updateMicUi();
-      }
+      endCall();
     }
   }
 
   const mic = $("#btnMic");
   if (mic) {
     mic.addEventListener("click", () => {
-      if (state.recording) stopRec();
-      else startRec();
+      if (!state.inCall) startCall();
     });
   }
 
-  const contBtn = $("#btnCont");
-  if (contBtn) {
-    contBtn.addEventListener("click", () => {
-      state.continuous = !state.continuous;
-      localStorage.setItem("desk_voice_cont", state.continuous ? "1" : "0");
+  const endBtn = $("#btnEndCall");
+  if (endBtn) {
+    endBtn.addEventListener("click", () => endCall());
+  }
+
+  const muteMicBtn = $("#btnMuteMic");
+  if (muteMicBtn) {
+    muteMicBtn.addEventListener("click", () => {
+      if (!state.inCall) return;
+      state.muteMic = !state.muteMic;
+      if (mediaStream) {
+        mediaStream.getAudioTracks().forEach((t) => {
+          t.enabled = !state.muteMic;
+        });
+      }
+      if (state.muteMic) {
+        // stop current capture turn; stay in call
+        stopListenOnly();
+        $("#voiceStatus").textContent = "Mic muted — unmute to talk";
+      } else if (!state.busy) {
+        listenTurn();
+      }
       updateMicUi();
-      toast(
-        state.continuous
-          ? "Continuous conversation ON — after each reply, mic re-opens"
-          : "Continuous OFF — one shot per tap"
-      );
+    });
+  }
+
+  const muteSpkBtn = $("#btnMuteSpk");
+  if (muteSpkBtn) {
+    muteSpkBtn.addEventListener("click", () => {
+      if (!state.inCall) return;
+      state.muteSpk = !state.muteSpk;
+      const audio = $("#voiceAudio");
+      if (state.muteSpk && audio) {
+        try {
+          audio.pause();
+        } catch (_) {}
+      }
+      updateMicUi();
+      toast(state.muteSpk ? "Speaker muted" : "Speaker on");
     });
   }
 
@@ -805,7 +1036,7 @@
       state.agentHistory = [];
       const log = $("#agentLog");
       if (log) log.innerHTML = "";
-      agentMsg("bot", "Conversation cleared — new continuous session.");
+      agentMsg("bot", "Conversation cleared.");
       toast("History cleared");
     });
   }

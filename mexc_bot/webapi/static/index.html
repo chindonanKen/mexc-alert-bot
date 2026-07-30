@@ -176,18 +176,22 @@
             </div>
             <div id="secureBox" class="secure-box" hidden></div>
             <p class="hint">
-              Continuous conversation with Grok: speak → tools edit the desk →
-              reply → mic re-opens. Localhost mic works; droplet needs HTTPS.
+              Like the Grok app: press <strong>Start call</strong>, then just talk.
+              Pause when done — Grok hears the silence, acts on the desk, and speaks back.
+              Mute mic or speaker anytime; End ends the call.
             </p>
             <div class="voice-controls">
-              <button type="button" id="btnMic" class="mic">Talk (continuous)</button>
-              <button type="button" id="btnCont" class="btn soft on">Continuous: ON</button>
+              <button type="button" id="btnMic" class="mic">Start call</button>
+              <button type="button" id="btnMuteMic" class="btn soft" hidden>Mic on</button>
+              <button type="button" id="btnMuteSpk" class="btn soft" hidden>Speaker on</button>
+              <button type="button" id="btnEndCall" class="btn soft danger" hidden>End</button>
               <button type="button" id="btnClearHist" class="btn soft">Clear chat</button>
             </div>
-            <div id="voiceStatus" class="voice-status">Ready</div>
-            <audio id="voiceAudio" controls hidden></audio>
+            <div id="voiceLevel" class="voice-level" hidden><span></span></div>
+            <div id="voiceStatus" class="voice-status">Ready — Start call to talk with Grok</div>
+            <audio id="voiceAudio" playsinline></audio>
             <form id="agentForm" class="chat-line">
-              <input id="agentInput" placeholder="Type in the same conversation…" autocomplete="off" />
+              <input id="agentInput" placeholder="Or type in the same conversation…" autocomplete="off" />
               <button class="btn" type="submit">Run</button>
             </form>
             <div class="quick-asks" id="voiceQuick">

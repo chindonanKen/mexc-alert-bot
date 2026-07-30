@@ -48,11 +48,12 @@ Strategy:
 - Isolated single-name dumps: bias no-trade until intel is clean.
 - Scale in layers; never all-in. Journal before ego.
 
-Conversation style:
-- This is a continuous multi-turn conversation — use prior turns.
-- When the user asks to change the desk, CALL TOOLS immediately (do not only describe).
-- After tools run, confirm briefly what changed.
-- Keep spoken replies short (1–3 sentences) unless asked for detail.
+Conversation style (spoken aloud via TTS):
+- Continuous multi-turn voice dialogue — use prior turns.
+- When the user asks to change the desk, CALL TOOLS immediately.
+- After tools, confirm briefly what changed in natural speech.
+- Keep replies SHORT for voice: 1–2 sentences, plain spoken English.
+- No markdown, bullets, or long lists when answering voice — summarize.
 - No live exchange order placement. Journal / propose only.
 - Not financial advice.
 """
@@ -150,9 +151,29 @@ def stt_transcribe(
 
 
 def tts_speak(text: str) -> Optional[bytes]:
+    """xAI TTS: POST /v1/tts with text + voice_id + language → audio/mpeg bytes."""
     key = _api_key()
     if not key or not text:
         return None
+    # Prefer short spoken replies
+    spoken = " ".join(text.strip().split())
+    if len(spoken) > 1200:
+        spoken = spoken[:1197] + "…"
+    voice_id = (
+        os.getenv("XAI_TTS_VOICE_ID")
+        or os.getenv("XAI_TTS_VOICE")
+        or "eve"
+    ).strip()
+    # legacy env used "ara" / model field — map common aliases
+    alias = {
+        "ara": "ara",
+        "eve": "eve",
+        "leo": "leo",
+        "rex": "rex",
+        "sal": "sal",
+    }
+    voice_id = alias.get(voice_id.lower(), voice_id)
+    language = (os.getenv("XAI_TTS_LANGUAGE") or "en").strip() or "en"
     try:
         r = requests.post(
             f"{_base()}/tts",
@@ -161,23 +182,25 @@ def tts_speak(text: str) -> Optional[bytes]:
                 "Content-Type": "application/json",
             },
             json={
-                "text": text[:4000],
-                "voice": os.getenv("XAI_TTS_VOICE", "ara"),
-                "model": os.getenv("XAI_TTS_MODEL", "grok-tts"),
+                "text": spoken,
+                "voice_id": voice_id,
+                "language": language,
             },
             timeout=60,
             verify=_CA,
         )
-        if r.status_code == 200:
-            ct = r.headers.get("content-type", "")
+        if r.status_code == 200 and r.content:
+            ct = (r.headers.get("content-type") or "").lower()
             if "json" in ct:
                 j = r.json()
                 b64 = j.get("audio") or j.get("data")
                 if b64:
                     return base64.b64decode(b64)
+                return None
             return r.content
+        logger.warning("TTS HTTP %s %s", r.status_code, (r.text or "")[:200])
     except Exception as e:
-        logger.debug("TTS skip: %s", e)
+        logger.warning("TTS failed: %s", e)
     return None
 
 

@@ -282,10 +282,38 @@ table.data tr:hover td { background: rgba(56,189,248,.04); }
   margin: 1rem 0;
   flex-wrap: wrap;
 }
-#btnCont.on {
-  border-color: rgba(52, 211, 153, 0.55);
-  color: #6ee7b7;
-  background: rgba(16, 185, 129, 0.12);
+.voice-level {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.15);
+  overflow: hidden;
+  margin: 0.35rem 0 0.75rem;
+  max-width: 320px;
+}
+.voice-level span {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #34d399, #38bdf8);
+  transition: width 0.08s linear;
+}
+.voice-panel.in-call .mic {
+  box-shadow: 0 0 0 6px rgba(52, 211, 153, 0.18);
+}
+.voice-panel.in-call .mic.rec {
+  animation: pulse 1.2s infinite;
+}
+.btn.soft.danger {
+  border-color: rgba(251, 113, 133, 0.45);
+  color: #fda4af;
+}
+.btn.soft.muted-on {
+  border-color: rgba(251, 191, 36, 0.5);
+  color: #fde68a;
+  background: rgba(251, 191, 36, 0.1);
+}
+#voiceAudio {
+  display: none;
 }
 .secure-box {
   padding: 0.75rem 0.9rem;

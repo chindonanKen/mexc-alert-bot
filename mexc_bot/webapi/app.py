@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -17,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from . import actions, db
 from .prices import market_context, watchlist_tickers
-from .voice_agent import chat_with_tools, handle_voice_audio
+from .voice_agent import chat_with_tools, handle_voice_audio, tts_speak
 
 logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -96,6 +97,10 @@ class PositionClose(BaseModel):
 class AgentBody(BaseModel):
     message: str
     history: Optional[List[dict]] = None
+
+
+class TtsBody(BaseModel):
+    text: str = ""
 
 
 def create_app() -> FastAPI:
@@ -473,13 +478,28 @@ def create_app() -> FastAPI:
         out = chat_with_tools(body.message, history=body.history)
         return out
 
+    @app.post("/api/tts")
+    def agent_tts(body: TtsBody, _: bool = Depends(require_auth)):
+        """Speak text via xAI TTS (mp3 base64). Used for call replies."""
+        text = (body.text or "").strip()
+        if not text:
+            raise HTTPException(400, "Empty text")
+        raw = tts_speak(text)
+        if not raw:
+            raise HTTPException(502, "TTS failed — check XAI_API_KEY / voice_id")
+        return {
+            "ok": True,
+            "audio_b64": base64.b64encode(raw).decode("ascii"),
+            "format": "mp3",
+        }
+
     @app.post("/api/voice")
     async def agent_voice(
         file: UploadFile = File(...),
         history: Optional[str] = Form(None),
         _: bool = Depends(require_auth),
     ):
-        """Continuous voice turn: STT → tools → optional TTS. Pass history JSON for multi-turn."""
+        """Voice call turn: STT → tools → TTS reply. Pass history JSON for multi-turn."""
         raw = await file.read()
         if not raw:
             raise HTTPException(400, "Empty audio")
