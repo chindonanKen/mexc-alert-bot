@@ -109,6 +109,11 @@ make desk-dev          # or: ./scripts/desk_dev.sh
 | Static UI | Edit `desk.js` / `desk.css` → **Cmd+Shift+R** in Xplor |
 | Secrets | First run creates `.env` — add `XAI_API_KEY` for voice |
 | Data | Local `./data` only — not prod droplet DB |
+| Dummy data | `make desk-seed` — alerts, movers, fires, journal, intel |
+
+```bash
+make desk-seed    # (re)load sandbox alarms + movers for DESK_USER_ID
+```
 
 When ready for prod:
 

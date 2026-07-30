@@ -31,6 +31,10 @@ desk:
 desk-dev:
 	bash scripts/desk_dev.sh
 
+# Dummy alarms / movers / memory for local desk (never touches droplet)
+desk-seed:
+	.venv/bin/python scripts/seed_desk_local.py --force
+
 desk-https:
 	bash scripts/desk_https_up.sh
 

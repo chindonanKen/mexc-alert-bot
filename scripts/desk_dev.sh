@@ -77,6 +77,44 @@ fi
 
 mkdir -p data
 
+# Seed dummy alarms/movers if DB is empty (local sandbox only)
+DB_FILE="${ALERTS_FILE:-data/alerts.json}"
+DB_FILE="${DB_FILE%.json}.db"
+if [[ ! -f "$DB_FILE" ]] || [[ ! -s "$DB_FILE" ]]; then
+  echo "==> Seeding local dummy alerts + movers"
+  python scripts/seed_desk_local.py || true
+else
+  # Also seed if tables exist but user has zero alerts
+  EMPTY="$(python - <<'PY' 2>/dev/null || echo 0
+import os, sqlite3
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv()
+raw = os.getenv("ALERTS_FILE", "data/alerts.json")
+p = Path(raw)
+if not p.is_absolute():
+    p = Path(".") / p
+if str(p).endswith(".json"):
+    p = p.with_suffix(".db")
+uid = int(os.getenv("DESK_USER_ID") or "1")
+if not p.exists() or p.stat().st_size == 0:
+    print(1)
+else:
+    c = sqlite3.connect(str(p))
+    try:
+        n = c.execute("SELECT COUNT(*) FROM alerts WHERE user_id=?", (uid,)).fetchone()[0]
+    except Exception:
+        n = 0
+    c.close()
+    print(1 if n == 0 else 0)
+PY
+)"
+  if [[ "$EMPTY" == "1" ]]; then
+    echo "==> Seeding local dummy alerts + movers (empty user)"
+    python scripts/seed_desk_local.py || true
+  fi
+fi
+
 # Free port if a stale desk is listening
 if command -v lsof >/dev/null 2>&1; then
   PIDS="$(lsof -ti tcp:"${PORT}" -sTCP:LISTEN 2>/dev/null || true)"
