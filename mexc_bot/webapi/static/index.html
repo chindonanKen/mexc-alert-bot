@@ -6,216 +6,242 @@
   <title>AD Desk — Agent Trading Platform</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/assets/desk.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◈</text></svg>" />
 </head>
 <body>
-  <div class="noise" aria-hidden="true"></div>
+  <div class="bg-orb orb-a"></div>
+  <div class="bg-orb orb-b"></div>
   <div class="app">
     <aside class="rail">
       <div class="brand">
-        <div class="brand-mark">◈</div>
+        <div class="logo">AD</div>
         <div>
-          <div class="brand-name">AD Desk</div>
-          <div class="brand-sub">v2 beta · agent platform</div>
+          <div class="brand-title">Command Desk</div>
+          <div class="brand-ver">v2.1 · agent platform</div>
         </div>
       </div>
-      <nav class="nav" id="nav">
-        <button type="button" data-view="overview" class="nav-item active">
-          <span class="nav-ico">◎</span> Overview
-        </button>
-        <button type="button" data-view="tape" class="nav-item">
-          <span class="nav-ico">↯</span> Tape & Heat
-        </button>
-        <button type="button" data-view="alerts" class="nav-item">
-          <span class="nav-ico">⊕</span> Targets
-        </button>
-        <button type="button" data-view="memory" class="nav-item">
-          <span class="nav-ico">◈</span> Memory
-        </button>
-        <button type="button" data-view="intel" class="nav-item">
-          <span class="nav-ico">⚑</span> Intel
-        </button>
-        <button type="button" data-view="agent" class="nav-item">
-          <span class="nav-ico">⬡</span> Agent
-        </button>
-        <button type="button" data-view="playbook" class="nav-item">
-          <span class="nav-ico">▣</span> Playbook
-        </button>
+      <nav id="nav" class="nav">
+        <button data-view="overview" class="active"><i></i>Overview</button>
+        <button data-view="positions"><i></i>Positions</button>
+        <button data-view="tape"><i></i>Tape</button>
+        <button data-view="targets"><i></i>Targets</button>
+        <button data-view="memory"><i></i>Memory</button>
+        <button data-view="intel"><i></i>Intel</button>
+        <button data-view="voice"><i></i>Voice Agent</button>
+        <button data-view="roadmap"><i></i>Roadmap</button>
+        <button data-view="playbook"><i></i>Playbook</button>
       </nav>
-      <div class="rail-foot">
-        <div class="status-pill" id="connStatus">connecting…</div>
-        <div class="rail-hint">Telegram remains panic push.<br/>Desk = overview + agent.</div>
+      <div class="rail-meta">
+        <div id="connStatus" class="pill">…</div>
+        <p>Telegram = push · Desk = control</p>
       </div>
     </aside>
 
-    <main class="main">
-      <header class="topbar">
+    <div class="stage">
+      <header class="top">
         <div>
-          <h1 id="viewTitle">Overview</h1>
-          <p class="view-sub" id="viewSub">Market pulse for AD scale-ins</p>
+          <h1 id="title">Overview</h1>
+          <p id="subtitle" class="sub">Regime · heat · memory</p>
         </div>
-        <div class="topbar-right">
-          <div class="majors" id="majors"></div>
-          <button type="button" class="btn ghost" id="btnRefresh">Refresh</button>
+        <div class="top-actions">
+          <div id="majors" class="majors"></div>
+          <button type="button" class="btn soft" id="btnRefresh">Refresh</button>
         </div>
       </header>
 
       <!-- OVERVIEW -->
-      <section class="view active" id="view-overview">
-        <div class="grid-3">
-          <article class="card pulse-card">
-            <div class="card-label">Regime</div>
-            <div class="pulse-value" id="regimeValue">—</div>
-            <div class="pulse-bias" id="regimeBias">Loading market context…</div>
-          </article>
-          <article class="card">
-            <div class="card-label">Desk counters</div>
-            <div class="stat-grid" id="counters"></div>
-          </article>
-          <article class="card accent-border">
-            <div class="card-label">AD rule of thumb</div>
-            <p class="body-text" id="ruleText">Panic + breadth + volume. Isolated + news → no-trade bias.</p>
-            <div class="chips">
-              <span class="chip good">PANIC OK</span>
-              <span class="chip warn">ISOLATED CHECK</span>
-              <span class="chip bad">NEWS RISK</span>
-            </div>
-          </article>
+      <section class="view on" id="view-overview">
+        <div class="bento">
+          <div class="tile hero">
+            <span class="lbl">Market regime</span>
+            <div class="hero-val" id="regimeValue">—</div>
+            <p id="regimeBias" class="muted"></p>
+          </div>
+          <div class="tile">
+            <span class="lbl">Pulse</span>
+            <div id="counters" class="metrics"></div>
+          </div>
+          <div class="tile glass">
+            <span class="lbl">Open positions</span>
+            <div id="ovPos" class="mini-list"></div>
+          </div>
+          <div class="tile span2">
+            <div class="tile-h"><h3>Recent fires</h3></div>
+            <div id="ovEvents" class="scroll"></div>
+          </div>
+          <div class="tile span2">
+            <div class="tile-h"><h3>Isolated intel</h3></div>
+            <div id="ovInv" class="scroll"></div>
+          </div>
         </div>
-        <div class="grid-2 mt">
-          <article class="card">
-            <div class="card-head">
-              <h2>Recent fires</h2>
-              <span class="tag">learning</span>
-            </div>
-            <div class="table-wrap" id="ovEvents"></div>
-          </article>
-          <article class="card">
-            <div class="card-head">
-              <h2>Isolated checks</h2>
-              <span class="tag">agent</span>
-            </div>
-            <div class="table-wrap" id="ovInv"></div>
-          </article>
+      </section>
+
+      <!-- POSITIONS -->
+      <section class="view" id="view-positions">
+        <div class="panel">
+          <div class="panel-h">
+            <h3>Open trades (journal)</h3>
+            <span class="badge" id="posMode">paper journal</span>
+          </div>
+          <p class="hint">Track AD layers here. Live MEXC fills &amp; gated orders land in V2.1+ — voice can open/close journal rows now.</p>
+          <form id="posForm" class="form-row">
+            <input name="symbol" placeholder="Symbol e.g. SIREN" required />
+            <select name="market"><option value="futures">Futures</option><option value="spot">Spot</option></select>
+            <input name="entry_avg" type="number" step="any" placeholder="Entry" />
+            <input name="notes" placeholder="Notes / thesis" />
+            <button class="btn" type="submit">Open</button>
+          </form>
+          <div id="posTable" class="scroll"></div>
         </div>
       </section>
 
       <!-- TAPE -->
       <section class="view" id="view-tape">
-        <div class="grid-2">
-          <article class="card wide">
-            <div class="card-head">
-              <h2>Watchlist tape</h2>
-              <span class="tag" id="mwSettings">movers</span>
+        <div class="split">
+          <div class="panel grow">
+            <div class="panel-h">
+              <h3>Watchlist</h3>
+              <span class="badge" id="mwBadge">movers</span>
             </div>
-            <div class="table-wrap" id="tapeTable"></div>
-          </article>
-          <article class="card">
-            <div class="card-head"><h2>How to read this</h2></div>
-            <ul class="checklist">
-              <li><strong>Heat breadth</strong> — many names dumping = market panic (prefer)</li>
-              <li><strong>Single name nuke</strong> — wait for Isolated Dump Check</li>
-              <li><strong>Velocity</strong> — PANIC/FAST &gt; GRIND for AD entries</li>
-              <li>Telegram still owns live fire push; desk is command overview</li>
-            </ul>
-          </article>
+            <form id="watchForm" class="form-row">
+              <input name="symbol" placeholder="BTC / SIREN" required />
+              <select name="market"><option value="futures">Futures</option><option value="spot">Spot</option></select>
+              <button class="btn" type="submit">Add</button>
+            </form>
+            <form id="moversForm" class="form-row tight">
+              <label class="chk"><input type="checkbox" name="enabled" /> Movers on</label>
+              <input name="threshold_percent" type="number" step="0.1" placeholder="Thr %" />
+              <input name="lookback_minutes" type="number" step="1" placeholder="Lookback m" />
+              <button class="btn soft" type="submit">Save</button>
+            </form>
+            <div id="tapeTable" class="scroll"></div>
+          </div>
         </div>
       </section>
 
-      <!-- ALERTS -->
-      <section class="view" id="view-alerts">
-        <article class="card">
-          <div class="card-head">
-            <h2>Target alerts</h2>
-            <span class="tag">one-shot</span>
-          </div>
-          <div class="table-wrap" id="alertsTable"></div>
-        </article>
+      <!-- TARGETS -->
+      <section class="view" id="view-targets">
+        <div class="panel">
+          <div class="panel-h"><h3>Target alerts</h3><span class="badge">one-shot</span></div>
+          <form id="alertForm" class="form-row">
+            <input name="symbol" placeholder="BTC" required />
+            <input name="price" type="number" step="any" placeholder="Target price" required />
+            <select name="market"><option value="spot">Spot</option><option value="futures">Futures</option></select>
+            <button class="btn" type="submit">Add alert</button>
+          </form>
+          <div id="alertsTable" class="scroll"></div>
+        </div>
       </section>
 
       <!-- MEMORY -->
       <section class="view" id="view-memory">
-        <div class="card-head-row">
-          <h2>Event memory</h2>
-          <div class="btn-row">
-            <button type="button" class="btn small" data-label="took">Mark latest TOOK</button>
-            <button type="button" class="btn small ghost" data-label="skip">Mark latest SKIP</button>
+        <div class="panel">
+          <div class="panel-h">
+            <h3>Learning events</h3>
+            <div class="row-gap">
+              <button type="button" class="btn soft sm" data-label="took">Took latest</button>
+              <button type="button" class="btn soft sm" data-label="skip">Skip latest</button>
+            </div>
           </div>
+          <div id="memoryTable" class="scroll"></div>
         </div>
-        <article class="card">
-          <div class="table-wrap" id="memoryTable"></div>
-        </article>
       </section>
 
       <!-- INTEL -->
       <section class="view" id="view-intel">
-        <div class="grid-2">
-          <article class="card">
-            <div class="card-head"><h2>Fatal news</h2><span class="tag bad">delist · hack</span></div>
-            <div class="table-wrap" id="newsTable"></div>
-          </article>
-          <article class="card">
-            <div class="card-head"><h2>CEX delist cache</h2><span class="tag">radar</span></div>
-            <div class="table-wrap" id="delistTable"></div>
-          </article>
+        <div class="split">
+          <div class="panel">
+            <div class="panel-h"><h3>Fatal news</h3></div>
+            <div id="newsTable" class="scroll"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-h"><h3>Delist radar</h3></div>
+            <div id="delistTable" class="scroll"></div>
+          </div>
         </div>
-        <article class="card mt">
-          <div class="card-head"><h2>Source expertise</h2><span class="tag">learning</span></div>
-          <div class="table-wrap" id="sourcesTable"></div>
-        </article>
+        <div class="panel mt">
+          <div class="panel-h"><h3>Source expertise</h3></div>
+          <div id="sourcesTable" class="scroll"></div>
+        </div>
       </section>
 
-      <!-- AGENT -->
-      <section class="view" id="view-agent">
-        <div class="agent-layout">
-          <article class="card agent-chat">
-            <div class="card-head"><h2>Coach</h2><span class="tag">rule-based · V2 LLM later</span></div>
-            <div class="chat-log" id="chatLog"></div>
-            <form class="chat-form" id="chatForm">
-              <input type="text" id="chatInput" placeholder="Ask: panic checklist · grind · layers · pride · brief…" autocomplete="off" />
-              <button type="submit" class="btn">Send</button>
-            </form>
-            <div class="quick-asks">
-              <button type="button" class="chip-btn" data-q="brief">Brief</button>
-              <button type="button" class="chip-btn" data-q="panic">Panic AD</button>
-              <button type="button" class="chip-btn" data-q="grind">Grind risk</button>
-              <button type="button" class="chip-btn" data-q="layers">Layers</button>
-              <button type="button" class="chip-btn" data-q="pride">Pride</button>
-              <button type="button" class="chip-btn" data-q="news">News / isolated</button>
+      <!-- VOICE -->
+      <section class="view" id="view-voice">
+        <div class="split">
+          <div class="panel voice-panel">
+            <div class="panel-h">
+              <h3>Grok voice co-pilot</h3>
+              <span class="badge" id="xaiBadge">XAI key?</span>
             </div>
-          </article>
-          <article class="card">
-            <div class="card-head"><h2>Session brief</h2></div>
-            <pre class="mono-block" id="briefBox">Open Agent and tap Brief, or type brief.</pre>
-          </article>
+            <p class="hint">Hold to talk — STT via xAI / Grok, then tool agent edits desk (alerts, watch, positions, labels). Live exchange orders stay off unless DESK_ALLOW_LIVE_ORDERS.</p>
+            <div class="voice-controls">
+              <button type="button" id="btnMic" class="mic">Hold to speak</button>
+              <button type="button" id="btnStopMic" class="btn soft" hidden>Stop</button>
+            </div>
+            <div id="voiceStatus" class="voice-status">Ready</div>
+            <audio id="voiceAudio" controls hidden></audio>
+            <form id="agentForm" class="chat-line">
+              <input id="agentInput" placeholder="Or type a command: add watch SIREN futures, open position…" />
+              <button class="btn" type="submit">Run</button>
+            </form>
+            <div id="agentLog" class="agent-log"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-h"><h3>Tools the agent can use</h3></div>
+            <ul class="tool-list">
+              <li>add / delete / list target alerts</li>
+              <li>add / remove mover watchlist</li>
+              <li>enable movers · set threshold / lookback</li>
+              <li>open / close journal positions</li>
+              <li>label latest fire took/skip</li>
+              <li>propose AD trade plan (paper)</li>
+            </ul>
+            <p class="hint mt">Realtime Speech-to-Speech WebSocket is next — this beta uses STT + tool loop + optional TTS.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ROADMAP -->
+      <section class="view" id="view-roadmap">
+        <div class="panel">
+          <div class="panel-h"><h3>Platform vision</h3></div>
+          <p id="visionText" class="lead"></p>
+          <div class="road-grid">
+            <div>
+              <h4 class="lbl">Live now</h4>
+              <div id="roadNow" class="road-cards"></div>
+            </div>
+            <div>
+              <h4 class="lbl">Building toward</h4>
+              <div id="roadNext" class="road-cards"></div>
+            </div>
+          </div>
+          <ul id="roadPrinciples" class="principles"></ul>
         </div>
       </section>
 
       <!-- PLAYBOOK -->
       <section class="view" id="view-playbook">
-        <div class="grid-2">
-          <article class="card">
-            <div class="card-head"><h2>Prefer</h2></div>
-            <ul class="checklist good-list" id="preferList"></ul>
-          </article>
-          <article class="card">
-            <div class="card-head"><h2>Avoid</h2></div>
-            <ul class="checklist bad-list" id="avoidList"></ul>
-          </article>
+        <div class="split">
+          <div class="panel">
+            <div class="panel-h"><h3>Prefer</h3></div>
+            <ul id="preferList" class="bul good"></ul>
+          </div>
+          <div class="panel">
+            <div class="panel-h"><h3>Avoid</h3></div>
+            <ul id="avoidList" class="bul bad"></ul>
+          </div>
         </div>
-        <article class="card mt">
-          <div class="card-head"><h2>Core sentence</h2></div>
-          <p class="lead" id="coreSentence"></p>
-          <p class="body-text" id="workflowLine"></p>
-          <div class="module-grid" id="moduleGrid"></div>
-        </article>
+        <div class="panel mt">
+          <p id="coreSentence" class="lead"></p>
+          <p id="workflowLine" class="hint"></p>
+          <div id="moduleGrid" class="mod-grid"></div>
+        </div>
       </section>
-    </main>
+    </div>
   </div>
-
-  <div class="toast" id="toast" hidden></div>
+  <div id="toast" class="toast" hidden></div>
   <script src="/assets/desk.js"></script>
 </body>
 </html>

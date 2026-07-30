@@ -1,111 +1,77 @@
-# V2 Beta — AD Desk (agent trading platform)
+# V2.1 Beta — AD Command Desk
 
-**Status:** Beta shippable  
-**Commit series:** V2 desk UI + API  
-**Telegram:** still primary for live panic push  
-**Desk:** overview + memory + intel + coach for decision support  
-
----
-
-## What this beta is
-
-A **futuristic command desk** for Kenneth’s AD / panic strategy:
-
-| Surface | Purpose |
-|---------|---------|
-| **Overview** | Regime (BTC/ETH/SOL), counters, recent fires, isolated checks |
-| **Tape & Heat** | Mover watchlist + live marks |
-| **Targets** | One-shot alert list |
-| **Memory** | Events + one-click label latest took/skip |
-| **Intel** | Fatal news, CEX delist cache, source expertise weights |
-| **Agent** | Rule-based coach + brief (LLM fluent coach later) |
-| **Playbook** | Encoded AD prefer/avoid from strategy |
-
-**Planned in UI, not wired yet:** voice notes, MEXC fill journal (V2.1 when UX is ready).
+**Status:** Beta 2.1 (CRUD + positions + Grok voice tools + roadmap)  
+**Telegram:** panic push stays primary  
+**Desk:** control surface for overview, book, intel, agent  
 
 ---
 
-## Design principles (your sessions)
+## Vision (finished V2)
 
-1. **Glance regime first** — risk-off / range / risk-on from majors  
-2. **Panic vs isolated** — heat + isolated agent verdicts  
-3. **News as veto** — delist/hack intel, not FOMO feed  
-4. **Memory without slash soup** — labels from desk buttons  
-5. **Telegram keeps the siren** — desk does not replace push  
+A **futuristic agent trading platform** that co-pilots AD panic scale-ins:
+
+1. Sensors fire instantly (Telegram)  
+2. Desk shows regime, heat, positions, memory, intel  
+3. **Grok voice co-pilot** manipulates the terminal (alerts, watch, journal, labels, trade *plans*)  
+4. Specialist agents (isolated dump / delist) learn source reliability  
+5. Next: realtime speech-to-speech, MEXC fills, layer planner, optional gated live orders, PWA  
+
+**Principle:** Journal and plan first. Live exchange orders only if explicitly enabled later (`DESK_ALLOW_LIVE_ORDERS`, placement not shipped yet).
 
 ---
 
-## Run locally
+## What's in this beta
+
+| Area | Capability |
+|------|------------|
+| **UI** | Modern dark glass · Instrument Sans · IBM Plex Mono · mobile rail |
+| **Overview** | Regime, metrics, open positions, fires, isolated checks |
+| **Positions** | Open / close AD journal trades |
+| **Tape** | Watchlist add/remove · mover on/off · threshold |
+| **Targets** | Add / enable / disable / delete alerts |
+| **Memory** | Events + Took/Skip |
+| **Intel** | News, delist radar, source expertise |
+| **Voice Agent** | Hold-to-talk → xAI STT → tool loop → optional TTS |
+| **Roadmap** | Live product map now vs next |
+| **Playbook** | Encoded AD prefer/avoid |
+
+---
+
+## Grok / xAI voice
 
 ```bash
-cd ~/mexc-bot
-pip install -r requirements.txt
-export ALERTS_FILE=data/alerts.json   # or path to prod/staging db copy
-export DESK_API_TOKEN=dev-token       # optional; empty = open local
-python -m mexc_bot.webapi
-# open http://127.0.0.1:8080
-# if token set: http://127.0.0.1:8080/?token=dev-token
+XAI_API_KEY=xai-...
+XAI_API_BASE=https://api.x.ai/v1
+XAI_CHAT_MODEL=grok-3
+DESK_VOICE_TTS=true
+DESK_USER_ID=<telegram id>
+DESK_API_TOKEN=<long random>
 ```
 
+Tools: add/delete/list alerts, watchlist, movers settings, positions, label_fire, overview, propose_trade.
+
+Realtime `wss://api.x.ai/v1/realtime?model=grok-voice-latest` is the next voice upgrade.
+
 ---
 
-## Run on droplet (alongside bot)
+## Deploy
 
 ```bash
-cd ~/mexc-alert-bot
-git pull origin main
-
-# in .env:
-# DESK_API_TOKEN=<long random>
-# DESK_USER_ID=<your telegram id>   # if multi-user db
-# DESK_PORT=8080
-
+cd ~/mexc-alert-bot && git pull
+# set DESK_* and XAI_API_KEY in .env
 docker compose --profile desk up -d --build mexc-desk
-docker logs --tail 40 mexc-ad-desk
 ```
 
-Open: `http://YOUR_DROPLET_IP:8080/?token=YOUR_DESK_API_TOKEN`  
-Firewall: allow **8080** only from your IP if possible.
-
-Desk mounts **prod `./data` read-only** — does not write alerts via UI except labels into learning tables (label POST).
-
----
-
-## API (for agents / future apps)
-
-| Method | Path | Role |
-|--------|------|------|
-| GET | `/api/health` | liveness |
-| GET | `/api/overview` | regime + counters + recent |
-| GET | `/api/alerts` | targets |
-| GET | `/api/watchlist` | mw + tickers |
-| GET | `/api/events` | learning fires |
-| POST | `/api/events/label` | took/skip |
-| GET | `/api/investigations` | isolated agent + sources |
-| GET | `/api/news` | news + delist cache |
-| GET | `/api/prices` | majors |
-| POST | `/api/coach` | brief / coach text |
-| GET | `/api/strategy` | playbook JSON |
-
-Auth: header `X-Desk-Token: …` or `Authorization: Bearer …` when `DESK_API_TOKEN` set.
-
----
-
-## Recommended next (after beta soak)
-
-1. Fluent LLM coach with tools (read-only)  
-2. Voice + MEXC fills **in desk UX** (not Telegram slash)  
-3. Live WS price stream  
-4. Mobile PWA install + dark widgets  
-5. Optional write actions (mw add) behind confirm  
+Open `http://IP:8080/?token=…`  
+Desk volume is **read-write** for CRUD (same `./data` as bot).
 
 ---
 
 ## Safety
 
-- Does not run Telegram polling  
-- Does not place orders  
-- Label writes only to `learning_labels`  
-- Prod bot process stays independent  
+- Does not replace Telegram polling  
+- Does not place MEXC orders by default  
+- Destructive deletes require UI confirm; voice confirms in reply  
+- Prefer journal `open_position` / `propose_trade` over live risk  
 
-<!-- agents: search V2_BETA AD Desk -->
+<!-- agents: search V2_BETA -->

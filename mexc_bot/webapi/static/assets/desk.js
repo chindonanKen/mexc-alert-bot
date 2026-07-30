@@ -1,23 +1,26 @@
-/* AD Desk v2 beta client */
+/* AD Desk v2.1 — dynamic command surface */
 (function () {
-  const $ = (sel, el = document) => el.querySelector(sel);
-  const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
+  const $ = (s, el = document) => el.querySelector(s);
+  const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
   const state = {
     token: localStorage.getItem("desk_token") || "",
     view: "overview",
+    media: null,
+    chunks: [],
+    recording: false,
   };
 
-  // Allow ?token= for first login
-  const params = new URLSearchParams(location.search);
-  if (params.get("token")) {
-    state.token = params.get("token");
+  const qp = new URLSearchParams(location.search);
+  if (qp.get("token")) {
+    state.token = qp.get("token");
     localStorage.setItem("desk_token", state.token);
     history.replaceState({}, "", location.pathname);
   }
 
-  function headers() {
-    const h = { "Content-Type": "application/json" };
+  function headers(json = true) {
+    const h = {};
+    if (json) h["Content-Type"] = "application/json";
     if (state.token) h["X-Desk-Token"] = state.token;
     return h;
   }
@@ -25,7 +28,7 @@
   async function api(path, opts = {}) {
     const res = await fetch(path, {
       ...opts,
-      headers: { ...headers(), ...(opts.headers || {}) },
+      headers: { ...headers(!(opts.body instanceof FormData)), ...(opts.headers || {}) },
     });
     if (res.status === 401) {
       const t = prompt("Desk API token (DESK_API_TOKEN):");
@@ -36,8 +39,16 @@
       }
       throw new Error("Unauthorized");
     }
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
+    if (!res.ok) {
+      let msg = await res.text();
+      try {
+        msg = JSON.parse(msg).detail || msg;
+      } catch (_) {}
+      throw new Error(msg || res.statusText);
+    }
+    const ct = res.headers.get("content-type") || "";
+    if (ct.includes("application/json")) return res.json();
+    return res.text();
   }
 
   function toast(msg) {
@@ -45,77 +56,74 @@
     el.textContent = msg;
     el.hidden = false;
     clearTimeout(toast._t);
-    toast._t = setTimeout(() => {
-      el.hidden = true;
-    }, 2800);
+    toast._t = setTimeout(() => (el.hidden = true), 2800);
   }
 
-  function fmtPx(n) {
-    if (n == null || Number.isNaN(n)) return "—";
-    const x = Number(n);
+  const fmtPx = (n) => {
+    if (n == null || Number.isNaN(+n)) return "—";
+    const x = +n;
     if (x >= 1000) return x.toLocaleString(undefined, { maximumFractionDigits: 2 });
     if (x >= 1) return x.toFixed(4);
     return x.toPrecision(4);
-  }
+  };
+  const fmtChg = (n) =>
+    n == null ? "—" : (Number(n) >= 0 ? "+" : "") + Number(n).toFixed(2) + "%";
+  const fmtTime = (ts) =>
+    ts
+      ? new Date(ts * 1000).toLocaleString(undefined, {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "—";
 
-  function fmtChg(n) {
-    if (n == null) return "—";
-    const x = Number(n);
-    const s = (x >= 0 ? "+" : "") + x.toFixed(2) + "%";
-    return s;
-  }
-
-  function fmtTime(ts) {
-    if (!ts) return "—";
-    const d = new Date(ts * 1000);
-    return d.toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-
-  function table(headers, rowsHtml) {
-    if (!rowsHtml) return '<div class="empty">No data yet — run the bot so SQLite fills.</div>';
-    return `<table class="data"><thead><tr>${headers
+  function table(heads, body) {
+    if (!body)
+      return '<div class="empty">No data yet — bot writes SQLite as you trade.</div>';
+    return `<table class="data"><thead><tr>${heads
       .map((h) => `<th>${h}</th>`)
-      .join("")}</tr></thead><tbody>${rowsHtml}</tbody></table>`;
+      .join("")}</tr></thead><tbody>${body}</tbody></table>`;
   }
 
   function setView(name) {
     state.view = name;
-    $$(".view").forEach((v) => v.classList.remove("active"));
-    $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
-    const view = $(`#view-${name}`);
-    if (view) view.classList.add("active");
-    const titles = {
-      overview: ["Overview", "Market pulse for AD scale-ins"],
-      tape: ["Tape & Heat", "Watchlist + live marks"],
-      alerts: ["Targets", "One-shot price alerts"],
-      memory: ["Memory", "Fires, labels, learning loop"],
-      intel: ["Intel", "Fatal news · delist radar · source expertise"],
-      agent: ["Agent", "Coach + session brief"],
-      playbook: ["Playbook", "Your AD strategy, encoded"],
-    };
-    const t = titles[name] || ["Desk", ""];
-    $("#viewTitle").textContent = t[0];
-    $("#viewSub").textContent = t[1];
+    $$(".view").forEach((v) => v.classList.remove("on"));
+    $$(".nav button").forEach((b) =>
+      b.classList.toggle("active", b.dataset.view === name)
+    );
+    const el = $(`#view-${name}`);
+    if (el) el.classList.add("on");
+    const meta = {
+      overview: ["Overview", "Regime · fires · positions"],
+      positions: ["Positions", "Journal of open AD trades"],
+      tape: ["Tape", "Watchlist · live marks · mover settings"],
+      targets: ["Targets", "Add · edit · delete one-shot alerts"],
+      memory: ["Memory", "Fires + labels"],
+      intel: ["Intel", "News · delist radar · source weights"],
+      voice: ["Voice Agent", "Grok STT + tools · control the desk"],
+      roadmap: ["Roadmap", "Where the platform is going"],
+      playbook: ["Playbook", "AD strategy encoded"],
+    }[name] || ["Desk", ""];
+    $("#title").textContent = meta[0];
+    $("#subtitle").textContent = meta[1];
   }
 
   function renderMajors(majors) {
     const el = $("#majors");
-    if (!majors || !majors.length) {
-      el.innerHTML = '<div class="major"><span class="sym">—</span></div>';
+    if (!majors?.length) {
+      el.innerHTML = "";
       return;
     }
     el.innerHTML = majors
       .map((m) => {
         const up = Number(m.changePercent) >= 0;
-        const sym = m.symbol.replace("USDT", "");
-        return `<div class="major"><span class="sym">${sym}</span><span class="px">${fmtPx(
-          m.price
-        )}</span><span class="${up ? "up" : "dn"}">${fmtChg(m.changePercent)}</span></div>`;
+        return `<div class="major"><span>${m.symbol.replace(
+          "USDT",
+          ""
+        )}</span> <b>${fmtPx(m.price)}</b> <span class="${up ? "up" : "dn"}">${fmtChg(
+          m.changePercent
+        )}</span></div>`;
       })
       .join("");
   }
@@ -123,126 +131,225 @@
   async function loadOverview() {
     const d = await api("/api/overview");
     renderMajors(d.market?.majors || []);
-    $("#regimeValue").textContent = d.pulse?.regime || d.market?.regime || "—";
+    $("#regimeValue").textContent = d.pulse?.regime || "—";
     $("#regimeBias").textContent = d.pulse?.ad_bias || "";
-    $("#ruleText").textContent = d.pulse?.rule || "";
     const c = d.counts || {};
     $("#counters").innerHTML = [
       ["Targets", c.alerts_enabled],
-      ["Watchlist", c.watchlist],
+      ["Watch", c.watchlist],
       ["Events", c.events],
-      ["Investigations", c.investigations],
+      ["Open", c.open_positions],
+      ["Intel", c.investigations],
       ["News", c.news],
     ]
       .map(
         ([k, v]) =>
-          `<div class="stat"><div class="k">${k}</div><div class="v">${v ?? 0}</div></div>`
+          `<div class="metric"><span>${k}</span><b>${v ?? 0}</b></div>`
       )
       .join("");
+    const pos = d.positions || [];
+    $("#ovPos").innerHTML = pos.length
+      ? pos
+          .map(
+            (p) =>
+              `<div>#${p.id} ${p.symbol} ${p.market} @ ${
+                p.entry_avg != null ? fmtPx(p.entry_avg) : "—"
+              }</div>`
+          )
+          .join("")
+      : "<div>No open journal trades</div>";
 
-    const evRows = (d.recent_events || [])
-      .map((e) => {
-        const band = e.velocity_band || "—";
-        const drop = e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—";
-        return `<tr>
-          <td>#${e.id}</td>
-          <td>${e.symbol || ""}</td>
-          <td class="dn">${drop}</td>
-          <td class="band-${band}">${band}</td>
-          <td>${e.mode || e.source || ""}</td>
-          <td>${fmtTime(e.ts)}</td>
-        </tr>`;
-      })
-      .join("");
     $("#ovEvents").innerHTML = table(
-      ["ID", "Symbol", "Drop", "Band", "Mode", "When"],
-      evRows
+      ["ID", "Sym", "Drop", "Band", "When"],
+      (d.recent_events || [])
+        .map(
+          (e) => `<tr>
+          <td>#${e.id}</td><td>${e.symbol}</td>
+          <td class="dn">${e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—"}</td>
+          <td>${e.velocity_band || "—"}</td><td>${fmtTime(e.ts)}</td></tr>`
+        )
+        .join("")
     );
-
-    const invRows = (d.recent_investigations || [])
-      .map((i) => {
-        const conf = i.confidence != null ? Math.round(i.confidence * 100) + "%" : "—";
-        return `<tr>
-          <td>#${i.id}</td>
-          <td>${i.symbol || ""}</td>
-          <td class="dn">${i.drop_pct != null ? Number(i.drop_pct).toFixed(1) + "%" : "—"}</td>
-          <td>${i.verdict || ""}</td>
-          <td>${conf}</td>
-          <td>${fmtTime(i.ts)}</td>
-        </tr>`;
-      })
-      .join("");
     $("#ovInv").innerHTML = table(
-      ["ID", "Symbol", "Drop", "Verdict", "Conf", "When"],
-      invRows
+      ["ID", "Sym", "Verdict", "Conf", "When"],
+      (d.recent_investigations || [])
+        .map(
+          (i) => `<tr>
+          <td>#${i.id}</td><td>${i.symbol}</td><td>${i.verdict}</td>
+          <td>${i.confidence != null ? Math.round(i.confidence * 100) + "%" : "—"}</td>
+          <td>${fmtTime(i.ts)}</td></tr>`
+        )
+        .join("")
+    );
+  }
+
+  async function loadPositions() {
+    const d = await api("/api/positions");
+    $("#posMode").textContent = d.mode || "journal";
+    const rows = (d.positions || [])
+      .map(
+        (p) => `<tr>
+        <td>#${p.id}</td>
+        <td>${p.market?.[0]?.toUpperCase() || "?"}</td>
+        <td>${p.symbol}</td>
+        <td>${p.entry_avg != null ? fmtPx(p.entry_avg) : "—"}</td>
+        <td>${(p.notes || "").slice(0, 40)}</td>
+        <td>${fmtTime(p.opened_at)}</td>
+        <td><button type="button" class="btn soft sm" data-close="${p.id}">Close</button></td>
+      </tr>`
+      )
+      .join("");
+    $("#posTable").innerHTML = table(
+      ["ID", "M", "Symbol", "Entry", "Notes", "Opened", ""],
+      rows
+    );
+    $$("[data-close]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        try {
+          await api("/api/positions/close", {
+            method: "POST",
+            body: JSON.stringify({ trade_id: +b.dataset.close }),
+          });
+          toast("Position closed");
+          loadPositions();
+        } catch (e) {
+          toast(e.message);
+        }
+      })
     );
   }
 
   async function loadTape() {
     const d = await api("/api/watchlist");
     const s = d.settings;
-    $("#mwSettings").textContent = s
-      ? `thr ${s.threshold_percent}% · ${Math.round((s.lookback_seconds || 0) / 60)}m · ${
-          s.enabled ? "ON" : "OFF"
-        }`
+    $("#mwBadge").textContent = s
+      ? `${s.enabled ? "ON" : "OFF"} · ${s.threshold_percent}% · ${Math.round(
+          (s.lookback_seconds || 0) / 60
+        )}m`
       : "movers";
-    const bySym = {};
-    (d.tickers || []).forEach((t) => {
-      bySym[t.symbol] = t;
-    });
+    if (s) {
+      const f = $("#moversForm");
+      f.enabled.checked = !!s.enabled;
+      f.threshold_percent.value = s.threshold_percent ?? "";
+      f.lookback_minutes.value = s.lookback_seconds
+        ? Math.round(s.lookback_seconds / 60)
+        : "";
+    }
+    const by = {};
+    (d.tickers || []).forEach((t) => (by[t.symbol] = t));
     const rows = (d.watchlist || [])
       .map((w) => {
-        const key = String(w.symbol || "")
-          .toUpperCase()
-          .replace(/_/g, "");
-        const t = bySym[key] || bySym[key + "USDT"];
-        const chg = t ? Number(t.changePercent) : null;
+        const key = String(w.symbol).toUpperCase().replace(/_/g, "");
+        const t = by[key] || by[key.replace("USDT", "") + "USDT"];
+        const chg = t ? +t.changePercent : null;
         return `<tr>
           <td>${w.market === "futures" ? "F" : "S"}</td>
           <td>${w.symbol}</td>
           <td>${t ? fmtPx(t.price) : "—"}</td>
           <td class="${chg != null && chg < 0 ? "dn" : "up"}">${fmtChg(chg)}</td>
+          <td><button type="button" class="btn soft sm" data-unwatch="${w.symbol}" data-m="${w.market}">✕</button></td>
         </tr>`;
       })
       .join("");
-    $("#tapeTable").innerHTML = table(["Mkt", "Symbol", "Mark", "24h"], rows);
+    $("#tapeTable").innerHTML = table(["M", "Symbol", "Mark", "24h", ""], rows);
+    $$("[data-unwatch]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        try {
+          await api(
+            `/api/watchlist?symbol=${encodeURIComponent(b.dataset.unwatch)}&market=${b.dataset.m}`,
+            { method: "DELETE" }
+          );
+          toast("Removed from watchlist");
+          loadTape();
+        } catch (e) {
+          toast(e.message);
+        }
+      })
+    );
   }
 
-  async function loadAlerts() {
+  async function loadTargets() {
     const d = await api("/api/alerts");
     const rows = (d.alerts || [])
       .map(
         (a) => `<tr>
-        <td>#${a.visual_id || a.id}</td>
+        <td>#${a.visual_id}</td>
         <td>${a.market === "futures" ? "F" : "S"}</td>
         <td>${a.symbol}</td>
         <td>${fmtPx(a.price)}</td>
         <td>${a.enabled ? "on" : "off"}</td>
+        <td>
+          <button type="button" class="btn soft sm" data-tog="${a.stable_id}" data-en="${a.enabled ? 0 : 1}">${a.enabled ? "Disable" : "Enable"}</button>
+          <button type="button" class="btn soft sm" data-del="${a.stable_id}">Delete</button>
+        </td>
       </tr>`
       )
       .join("");
-    $("#alertsTable").innerHTML = table(["#", "Mkt", "Symbol", "Target", ""], rows);
+    $("#alertsTable").innerHTML = table(
+      ["#", "M", "Symbol", "Target", "State", ""],
+      rows
+    );
+    $$("[data-del]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        if (!confirm("Delete this alert?")) return;
+        try {
+          await api(`/api/alerts/${b.dataset.del}`, { method: "DELETE" });
+          toast("Deleted");
+          loadTargets();
+        } catch (e) {
+          toast(e.message);
+        }
+      })
+    );
+    $$("[data-tog]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        try {
+          await api(`/api/alerts/${b.dataset.tog}`, {
+            method: "PATCH",
+            body: JSON.stringify({ enabled: b.dataset.en === "1" }),
+          });
+          loadTargets();
+        } catch (e) {
+          toast(e.message);
+        }
+      })
+    );
   }
 
   async function loadMemory() {
-    const d = await api("/api/events?limit=50");
+    const d = await api("/api/events?limit=60");
     const rows = (d.events || [])
-      .map((e) => {
-        const band = e.velocity_band || "—";
-        return `<tr>
-          <td>#${e.id}</td>
-          <td>${e.symbol}</td>
-          <td class="dn">${e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—"}</td>
-          <td class="band-${band}">${band}</td>
-          <td>${e.last_action || "unlabeled"}</td>
-          <td>${e.last_bounce || "—"}</td>
-          <td>${fmtTime(e.ts)}</td>
-        </tr>`;
-      })
+      .map(
+        (e) => `<tr>
+        <td>#${e.id}</td><td>${e.symbol}</td>
+        <td class="dn">${e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—"}</td>
+        <td>${e.velocity_band || "—"}</td>
+        <td>${e.last_action || "unlabeled"}</td>
+        <td>${fmtTime(e.ts)}</td>
+        <td>
+          <button type="button" class="btn soft sm" data-eid="${e.id}" data-a="took">Took</button>
+          <button type="button" class="btn soft sm" data-eid="${e.id}" data-a="skip">Skip</button>
+        </td>
+      </tr>`
+      )
       .join("");
     $("#memoryTable").innerHTML = table(
-      ["ID", "Symbol", "Drop", "Band", "Action", "Bounce", "When"],
+      ["ID", "Sym", "Drop", "Band", "Label", "When", ""],
       rows
+    );
+    $$("[data-eid]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        try {
+          await api("/api/events/label", {
+            method: "POST",
+            body: JSON.stringify({ event_id: +b.dataset.eid, action: b.dataset.a }),
+          });
+          toast("Labeled " + b.dataset.a);
+          loadMemory();
+        } catch (e) {
+          toast(e.message);
+        }
+      })
     );
   }
 
@@ -251,54 +358,45 @@
       api("/api/news"),
       api("/api/investigations"),
     ]);
-    const nRows = (news.news || [])
-      .map(
-        (n) => `<tr>
-        <td>${n.class || n.severity || ""}</td>
-        <td>${n.symbol || "—"}</td>
-        <td>${(n.title || "").slice(0, 80)}</td>
-        <td>${n.source || ""}</td>
-        <td>${fmtTime(n.ts)}</td>
-      </tr>`
-      )
-      .join("");
     $("#newsTable").innerHTML = table(
-      ["Class", "Sym", "Title", "Source", "When"],
-      nRows
+      ["Class", "Sym", "Title", "Src", "When"],
+      (news.news || [])
+        .map(
+          (n) =>
+            `<tr><td>${n.class || ""}</td><td>${n.symbol || "—"}</td><td>${(n.title || "").slice(0, 70)}</td><td>${n.source || ""}</td><td>${fmtTime(n.ts)}</td></tr>`
+        )
+        .join("")
     );
-
-    const dRows = (news.delist_cache || [])
-      .map(
-        (d) => `<tr>
-        <td>${d.exchange || ""}</td>
-        <td>${d.base || "—"}</td>
-        <td>${d.kind || ""}</td>
-        <td>${(d.title || "").slice(0, 70)}</td>
-        <td>${fmtTime(d.ts)}</td>
-      </tr>`
-      )
-      .join("");
     $("#delistTable").innerHTML = table(
       ["CEX", "Base", "Kind", "Title", "When"],
-      dRows
+      (news.delist_cache || [])
+        .map(
+          (d) =>
+            `<tr><td>${d.exchange}</td><td>${d.base || "—"}</td><td>${d.kind}</td><td>${(d.title || "").slice(0, 60)}</td><td>${fmtTime(d.ts)}</td></tr>`
+        )
+        .join("")
     );
-
-    const sRows = (inv.sources || [])
-      .map(
-        (s) => `<tr>
-        <td>${s.source}</td>
-        <td>${s.kind}</td>
-        <td>${Number(s.weight).toFixed(2)}</td>
-        <td>${s.hits}</td>
-        <td>${s.confirmed_moves}</td>
-        <td>${s.false_alarms}</td>
-      </tr>`
-      )
-      .join("");
     $("#sourcesTable").innerHTML = table(
-      ["Source", "Kind", "Weight", "Hits", "Confirmed", "False"],
-      sRows
+      ["Source", "Kind", "W", "Hits", "Conf", "False"],
+      (inv.sources || [])
+        .map(
+          (s) =>
+            `<tr><td>${s.source}</td><td>${s.kind}</td><td>${Number(s.weight).toFixed(2)}</td><td>${s.hits}</td><td>${s.confirmed_moves}</td><td>${s.false_alarms}</td></tr>`
+        )
+        .join("")
     );
+  }
+
+  async function loadRoadmap() {
+    const d = await api("/api/roadmap");
+    $("#visionText").textContent = d.vision || "";
+    const card = (x) =>
+      `<div class="road-card"><div class="st ${x.status}">${x.status}</div><div class="tt">${x.title}</div></div>`;
+    $("#roadNow").innerHTML = (d.now || []).map(card).join("");
+    $("#roadNext").innerHTML = (d.next || []).map(card).join("");
+    $("#roadPrinciples").innerHTML = (d.principles || [])
+      .map((p) => `<li>${p}</li>`)
+      .join("");
   }
 
   async function loadPlaybook() {
@@ -307,112 +405,276 @@
     $("#workflowLine").textContent = "Workflow: " + (d.workflow || "");
     $("#preferList").innerHTML = (d.prefer || []).map((x) => `<li>${x}</li>`).join("");
     $("#avoidList").innerHTML = (d.avoid || []).map((x) => `<li>${x}</li>`).join("");
-    const mods = d.modules || {};
-    $("#moduleGrid").innerHTML = Object.entries(mods)
+    $("#moduleGrid").innerHTML = Object.entries(d.modules || {})
       .map(
         ([k, v]) =>
-          `<div class="module"><div class="t">${k}</div><div class="d">${v}</div></div>`
+          `<div class="mod"><div class="t">${k}</div><div class="d">${v}</div></div>`
       )
       .join("");
   }
 
-  function appendChat(role, text) {
-    const log = $("#chatLog");
+  function agentMsg(cls, text) {
+    const log = $("#agentLog");
     const div = document.createElement("div");
-    div.className = "bubble " + role;
+    div.className = "msg " + cls;
     div.textContent = text;
     log.appendChild(div);
     log.scrollTop = log.scrollHeight;
   }
 
-  async function askCoach(q) {
-    appendChat("user", q);
+  async function runAgentText(text) {
+    agentMsg("user", text);
+    $("#voiceStatus").textContent = "Agent thinking…";
     try {
-      const d = await api("/api/coach", {
+      const out = await api("/api/agent", {
         method: "POST",
-        body: JSON.stringify({ message: q }),
+        body: JSON.stringify({ message: text }),
       });
-      appendChat("bot", d.reply || "—");
-      if (q.toLowerCase().includes("brief") || q.toLowerCase() === "brief") {
-        $("#briefBox").textContent = d.reply || "";
+      if (out.tools_run?.length) {
+        agentMsg(
+          "tools",
+          out.tools_run
+            .map((t) => `${t.name}(${JSON.stringify(t.args)}) → ${JSON.stringify(t.result)}`)
+            .join("\n")
+        );
       }
+      agentMsg("bot", out.reply || "—");
+      $("#voiceStatus").textContent = "Ready";
+      refreshAll();
     } catch (e) {
-      appendChat("bot", "Error: " + e.message);
+      agentMsg("bot", "Error: " + e.message);
+      $("#voiceStatus").textContent = "Error";
     }
   }
+
+  // mic
+  let recorder = null;
+  async function startRec() {
+    if (state.recording) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      state.chunks = [];
+      recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => {
+        if (e.data.size) state.chunks.push(e.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(state.chunks, { type: recorder.mimeType || "audio/webm" });
+        const fd = new FormData();
+        fd.append("file", blob, "voice.webm");
+        $("#voiceStatus").textContent = "Transcribing + tools…";
+        $("#btnMic").classList.remove("rec");
+        try {
+          const res = await fetch("/api/voice", {
+            method: "POST",
+            headers: headers(false),
+            body: fd,
+          });
+          if (!res.ok) throw new Error(await res.text());
+          const out = await res.json();
+          if (out.transcript) agentMsg("user", "🎤 " + out.transcript);
+          if (out.tools_run?.length) {
+            agentMsg(
+              "tools",
+              out.tools_run
+                .map((t) => `${t.name} → ${JSON.stringify(t.result)}`)
+                .join("\n")
+            );
+          }
+          agentMsg("bot", out.reply || "—");
+          if (out.audio_b64) {
+            const audio = $("#voiceAudio");
+            audio.src = "data:audio/mpeg;base64," + out.audio_b64;
+            audio.hidden = false;
+            audio.play().catch(() => {});
+          }
+          refreshAll();
+          $("#voiceStatus").textContent = "Ready";
+        } catch (e) {
+          $("#voiceStatus").textContent = "Voice failed";
+          toast(String(e.message || e).slice(0, 120));
+        }
+        state.recording = false;
+      };
+      recorder.start();
+      state.recording = true;
+      $("#btnMic").classList.add("rec");
+      $("#btnMic").textContent = "Listening…";
+      $("#voiceStatus").textContent = "Recording — release to send";
+    } catch (e) {
+      toast("Mic permission denied");
+    }
+  }
+  function stopRec() {
+    if (recorder && state.recording) {
+      recorder.stop();
+      $("#btnMic").textContent = "Hold to speak";
+    }
+  }
+
+  const mic = $("#btnMic");
+  mic.addEventListener("mousedown", startRec);
+  mic.addEventListener("mouseup", stopRec);
+  mic.addEventListener("mouseleave", stopRec);
+  mic.addEventListener("touchstart", (e) => {
+    e.preventDefault();
+    startRec();
+  });
+  mic.addEventListener("touchend", (e) => {
+    e.preventDefault();
+    stopRec();
+  });
+
+  $("#agentForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const v = $("#agentInput").value.trim();
+    if (!v) return;
+    $("#agentInput").value = "";
+    runAgentText(v);
+  });
+
+  $("#posForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api("/api/positions", {
+        method: "POST",
+        body: JSON.stringify({
+          symbol: f.symbol.value,
+          market: f.market.value,
+          entry_avg: f.entry_avg.value ? +f.entry_avg.value : null,
+          notes: f.notes.value || null,
+        }),
+      });
+      f.reset();
+      toast("Position opened");
+      loadPositions();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  $("#watchForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api("/api/watchlist", {
+        method: "POST",
+        body: JSON.stringify({ symbol: f.symbol.value, market: f.market.value }),
+      });
+      f.reset();
+      toast("Watch added");
+      loadTape();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  $("#moversForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api("/api/movers", {
+        method: "POST",
+        body: JSON.stringify({
+          enabled: f.enabled.checked,
+          threshold_percent: f.threshold_percent.value
+            ? +f.threshold_percent.value
+            : null,
+          lookback_minutes: f.lookback_minutes.value
+            ? +f.lookback_minutes.value
+            : null,
+        }),
+      });
+      toast("Movers settings saved");
+      loadTape();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  $("#alertForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api("/api/alerts", {
+        method: "POST",
+        body: JSON.stringify({
+          symbol: f.symbol.value,
+          price: +f.price.value,
+          market: f.market.value,
+        }),
+      });
+      f.reset();
+      toast("Alert added");
+      loadTargets();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  $$("[data-label]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      try {
+        const r = await api("/api/events/label", {
+          method: "POST",
+          body: JSON.stringify({ action: b.dataset.label }),
+        });
+        toast(`Labeled #${r.event_id}`);
+        loadMemory();
+      } catch (e) {
+        toast(e.message);
+      }
+    })
+  );
 
   async function refreshAll() {
     try {
       const h = await api("/api/health");
       const st = $("#connStatus");
-      st.textContent = h.db_exists ? "live · db ok" : "live · empty db";
-      st.className = "status-pill ok";
+      st.textContent = h.db_exists ? "live · db" : "live · empty db";
+      st.className = "pill ok";
+      $("#xaiBadge").textContent = h.xai_configured ? "XAI ready" : "set XAI_API_KEY";
     } catch (e) {
-      const st = $("#connStatus");
-      st.textContent = "offline";
-      st.className = "status-pill err";
+      $("#connStatus").textContent = "offline";
+      $("#connStatus").className = "pill err";
     }
-    const loaders = {
+    const map = {
       overview: loadOverview,
+      positions: loadPositions,
       tape: loadTape,
-      alerts: loadAlerts,
+      targets: loadTargets,
       memory: loadMemory,
       intel: loadIntel,
+      roadmap: loadRoadmap,
       playbook: loadPlaybook,
-      agent: async () => {
-        await loadOverview();
+      voice: async () => {
+        try {
+          const h = await api("/api/health");
+          $("#xaiBadge").textContent = h.xai_configured ? "XAI ready" : "set XAI_API_KEY";
+        } catch (_) {}
       },
     };
     try {
-      await (loaders[state.view] || loadOverview)();
-      // always refresh majors via prices
+      await (map[state.view] || loadOverview)();
       const p = await api("/api/prices");
       renderMajors(p.context?.majors || p.tickers || []);
     } catch (e) {
       console.error(e);
-      toast(String(e.message || e));
+      toast(String(e.message || e).slice(0, 140));
     }
   }
 
-  // nav
-  $$(".nav-item").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      setView(btn.dataset.view);
+  $$(".nav button").forEach((b) =>
+    b.addEventListener("click", () => {
+      setView(b.dataset.view);
       refreshAll();
-    });
-  });
-
-  $("#btnRefresh").addEventListener("click", () => refreshAll());
-
-  $$("[data-label]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      try {
-        const r = await api("/api/events/label", {
-          method: "POST",
-          body: JSON.stringify({ action: btn.dataset.label }),
-        });
-        toast(`Labeled event #${r.event_id} → ${btn.dataset.label}`);
-        loadMemory();
-      } catch (e) {
-        toast(e.message);
-      }
-    });
-  });
-
-  $("#chatForm").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const input = $("#chatInput");
-    const q = input.value.trim();
-    if (!q) return;
-    input.value = "";
-    askCoach(q);
-  });
-
-  $$(".chip-btn").forEach((b) => {
-    b.addEventListener("click", () => askCoach(b.dataset.q));
-  });
+    })
+  );
+  $("#btnRefresh").addEventListener("click", refreshAll);
 
   setView("overview");
   refreshAll();
-  setInterval(refreshAll, 45000);
+  setInterval(refreshAll, 40000);
 })();

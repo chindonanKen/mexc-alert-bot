@@ -96,6 +96,7 @@ class TestWebApi(unittest.TestCase):
         r = self.client.get("/api/health")
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.json()["ok"])
+        self.assertIn("2.", r.json()["version"])
 
     def test_overview(self):
         r = self.client.get("/api/overview")
@@ -104,15 +105,36 @@ class TestWebApi(unittest.TestCase):
         self.assertIn("counts", body)
         self.assertIn("pulse", body)
 
-    def test_alerts(self):
+    def test_alerts_crud(self):
         r = self.client.get("/api/alerts")
         self.assertEqual(r.status_code, 200)
         self.assertGreaterEqual(len(r.json()["alerts"]), 1)
+        r2 = self.client.post(
+            "/api/alerts",
+            json={"symbol": "ETH", "price": 2000, "market": "spot"},
+        )
+        self.assertEqual(r2.status_code, 200)
+        self.assertTrue(r2.json().get("ok"))
 
     def test_events(self):
         r = self.client.get("/api/events")
         self.assertEqual(r.status_code, 200)
         self.assertGreaterEqual(len(r.json()["events"]), 1)
+
+    def test_positions(self):
+        r = self.client.post(
+            "/api/positions",
+            json={"symbol": "TEST", "market": "futures", "entry_avg": 1.0},
+        )
+        self.assertEqual(r.status_code, 200)
+        r2 = self.client.get("/api/positions")
+        self.assertGreaterEqual(len(r2.json()["positions"]), 1)
+
+    def test_roadmap(self):
+        r = self.client.get("/api/roadmap")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("now", r.json())
+        self.assertIn("next", r.json())
 
     def test_strategy(self):
         r = self.client.get("/api/strategy")
@@ -124,10 +146,16 @@ class TestWebApi(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("reply", r.json())
 
+    def test_agent_offline(self):
+        # Without XAI key still returns a reply
+        r = self.client.post("/api/agent", json={"message": "list my overview"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("reply", r.json())
+
     def test_index(self):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
-        self.assertIn("AD Desk", r.text)
+        self.assertIn("Command Desk", r.text)
 
 
 if __name__ == "__main__":

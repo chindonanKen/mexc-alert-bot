@@ -59,7 +59,8 @@ services:
     ports:
       - "${DESK_PORT:-8080}:8080"
     volumes:
-      - ./data:/app/data:ro
+      # RW required for desk CRUD (alerts / watchlist / journal labels)
+      - ./data:/app/data
     healthcheck:
       test:
         [
