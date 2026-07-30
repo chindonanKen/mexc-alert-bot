@@ -1,10 +1,18 @@
 # Session handoff — pick up here
 
-**Last updated:** 2026-07-28 (V4 learning V1.0 scaffold)  
+**Last updated:** 2026-07-30 (V2.1 AD Desk HTTPS / mic — no upload)  
 **GitHub:** `chindonanKen/mexc-alert-bot` · branch `main`  
-**Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md) · [TRADING_STRATEGY.md](TRADING_STRATEGY.md) · [V4_TRADING_ASSISTANT.md](V4_TRADING_ASSISTANT.md)
+**Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md) · [TRADING_STRATEGY.md](TRADING_STRATEGY.md) · [V2_BETA.md](V2_BETA.md) · [V4_TRADING_ASSISTANT.md](V4_TRADING_ASSISTANT.md)
 
 This file is a **dated snapshot** so the next human/agent (including a **new MacBook + new Grok session**) does not rediscover the same ground.
+
+### AD Desk (explore fully)
+
+- **No sound-file upload.** Mic needs HTTPS secure context.
+- Droplet: `./scripts/desk_https_up.sh` → open **`https://DROPLET_IP/?token=DESK_API_TOKEN`**
+- Accept self-signed cert once; allow microphone.
+- Requires `.env`: `DESK_API_TOKEN`, `DESK_USER_ID`, `XAI_API_KEY`
+- Do **not** use `http://IP:8080` for voice.
 
 ---
 

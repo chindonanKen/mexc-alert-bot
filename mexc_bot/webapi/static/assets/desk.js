@@ -634,6 +634,16 @@
     runAgentText(v);
   });
 
+  const quick = $("#voiceQuick");
+  if (quick) {
+    quick.addEventListener("click", (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLElement)) return;
+      const msg = t.getAttribute("data-agent");
+      if (msg) runAgentText(msg);
+    });
+  }
+
   $("#posForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = e.target;

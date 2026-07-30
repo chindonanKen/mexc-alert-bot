@@ -40,9 +40,8 @@ services:
       retries: 3
       start_period: 15s
 
-  # V2 AD Desk app (internal :8080). Prefer HTTPS front (desk-https) for microphone.
-  # Start full stack: docker compose --profile desk --profile desk-https up -d --build
-  # Or: ./scripts/desk_https_up.sh
+  # V2 AD Desk app (internal :8080). Public entry = HTTPS (mexc-desk-https).
+  # Full stack (mic works): ./scripts/desk_https_up.sh
   mexc-desk:
     profiles: ["desk", "desk-https"]
     build:
@@ -56,7 +55,8 @@ services:
       ALERTS_FILE: /app/data/alerts.json
       DESK_HOST: 0.0.0.0
       DESK_PORT: "8080"
-    # App only on Docker network — public entry is HTTPS (mexc-desk-https :443)
+    # Not published on host — use https://IP/ via Caddy so mic is a secure context.
+    # Local-only alternative without Docker: make desk → http://localhost:8080
     expose:
       - "8080"
     volumes:
@@ -74,7 +74,7 @@ services:
       retries: 3
       start_period: 15s
 
-  # HTTPS reverse proxy — required for browser microphone (secure context)
+  # HTTPS reverse proxy — required for browser microphone (no sound-file upload path)
   # Start: ./scripts/desk_https_up.sh
   # Open: https://DROPLET_IP/?token=DESK_API_TOKEN  (accept self-signed cert once)
   mexc-desk-https:

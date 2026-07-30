@@ -282,21 +282,6 @@ table.data tr:hover td { background: rgba(56,189,248,.04); }
   margin: 1rem 0;
   flex-wrap: wrap;
 }
-.voice-alt { display: flex; flex-direction: column; gap: 0.35rem; max-width: 220px; }
-.upload-btn {
-  display: inline-block;
-  padding: 0.65rem 1rem;
-  border-radius: 12px;
-  border: 1px dashed rgba(56, 189, 248, 0.45);
-  color: var(--sky);
-  font-weight: 600;
-  font-size: 0.86rem;
-  cursor: pointer;
-  background: rgba(56, 189, 248, 0.08);
-  text-align: center;
-}
-.upload-btn:hover { border-style: solid; background: rgba(56, 189, 248, 0.14); }
-.hint.tight { margin: 0; font-size: 0.75rem; }
 .secure-box {
   padding: 0.75rem 0.9rem;
   border-radius: 12px;

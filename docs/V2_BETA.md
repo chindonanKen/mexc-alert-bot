@@ -52,31 +52,39 @@ Tools: add/delete/list alerts, watchlist, movers settings, positions, label_fire
 
 Realtime `wss://api.x.ai/v1/realtime?model=grok-voice-latest` is the next voice upgrade.
 
-### Microphone (required: HTTPS)
+### Microphone (required: HTTPS) — no file upload
 
-Browsers **block the mic on `http://IP:8080`**. The desk is meant to be opened on **HTTPS**.
+Browsers **block the mic on `http://IP:…`**. There is **no sound-file upload** path.  
+Use **HTTPS** so you can fully explore the desk including voice.
 
 ```bash
-# On droplet
+# On droplet (full desk including mic)
 ./scripts/desk_https_up.sh
 # Open: https://DROPLET_IP/?token=DESK_API_TOKEN
-# Accept self-signed cert warning once → mic works
+# Accept self-signed cert once → allow mic → Voice tab
 ```
 
-Stack: `mexc-desk` (app) + `mexc-desk-https` (Caddy TLS on 443).  
-Do **not** use plain `:8080` for voice.
+Stack: `mexc-desk` (app, internal) + `mexc-desk-https` (Caddy TLS on **443** / redirect **80**).
+
+| URL | Mic | Notes |
+|-----|-----|--------|
+| `https://IP/?token=…` | Yes | Correct full-desk URL |
+| `http://IP:8080/…` | No | Not published by default; do not use for voice |
+| `http://localhost:8080` | Yes* | Local `make desk` only (localhost is a secure context) |
+
 ---
 
-## Deploy
+## Deploy (full exploration)
 
 ```bash
-cd ~/mexc-alert-bot && git pull
-# set DESK_* and XAI_API_KEY in .env
-docker compose --profile desk up -d --build mexc-desk
+cd ~/mexc-alert-bot && git pull origin main
+# .env must include DESK_API_TOKEN, DESK_USER_ID, XAI_API_KEY
+./scripts/desk_https_up.sh
 ```
 
-Open `http://IP:8080/?token=…`  
-Desk volume is **read-write** for CRUD (same `./data` as bot).
+Open **`https://DROPLET_IP/?token=…`** (not `:8080`).  
+Desk volume is **read-write** for CRUD (same `./data` as bot).  
+Text agent + quick chips always work over HTTPS; mic needs the secure URL + browser permission.
 
 ---
 
