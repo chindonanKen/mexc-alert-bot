@@ -52,6 +52,18 @@ Tools: add/delete/list alerts, watchlist, movers settings, positions, label_fire
 
 Realtime `wss://api.x.ai/v1/realtime?model=grok-voice-latest` is the next voice upgrade.
 
+### Mic blocked in the browser?
+
+Modern browsers **block `getUserMedia` on plain `http://DROPLET_IP:8080`**. Only `https://` or `localhost` count as a secure context.
+
+**Workarounds (already in the desk):**
+
+1. **Upload voice note** — record in Voice Memos / phone, upload on Voice Agent tab  
+2. **Type** commands (same tools as voice)  
+3. Later: put desk behind **HTTPS** (Caddy / nginx / Cloudflare Tunnel) so the mic works live  
+
+The yellow banner on the Voice tab explains this when the page is not secure.
+
 ---
 
 ## Deploy

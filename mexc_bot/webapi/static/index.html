@@ -174,17 +174,33 @@
               <h3>Grok voice co-pilot</h3>
               <span class="badge" id="xaiBadge">XAI key?</span>
             </div>
-            <p class="hint">Hold to talk — STT via xAI / Grok, then tool agent edits desk (alerts, watch, positions, labels). Live exchange orders stay off unless DESK_ALLOW_LIVE_ORDERS.</p>
+            <div id="secureBox" class="secure-box" hidden></div>
+            <p class="hint">
+              Speak or upload audio → xAI STT → tool agent edits the desk
+              (alerts, watch, positions, labels). Type always works if mic is blocked.
+            </p>
             <div class="voice-controls">
-              <button type="button" id="btnMic" class="mic">Hold to speak</button>
-              <button type="button" id="btnStopMic" class="btn soft" hidden>Stop</button>
+              <button type="button" id="btnMic" class="mic">Tap to record</button>
+              <div class="voice-alt">
+                <label class="upload-btn">
+                  Upload voice note
+                  <input type="file" id="audioFile" accept="audio/*,.webm,.ogg,.mp3,.m4a,.wav" hidden />
+                </label>
+                <p class="hint tight">Works over plain HTTP when the browser blocks the mic.</p>
+              </div>
             </div>
-            <div id="voiceStatus" class="voice-status">Ready</div>
+            <div id="voiceStatus" class="voice-status">Checking microphone support…</div>
             <audio id="voiceAudio" controls hidden></audio>
             <form id="agentForm" class="chat-line">
-              <input id="agentInput" placeholder="Or type a command: add watch SIREN futures, open position…" />
+              <input id="agentInput" placeholder="Type a command: add watch SIREN futures · open position BTC 64000 · label took…" autocomplete="off" />
               <button class="btn" type="submit">Run</button>
             </form>
+            <div class="quick-asks" id="voiceQuick">
+              <button type="button" class="chip-btn" data-agent="list my open positions">Positions</button>
+              <button type="button" class="chip-btn" data-agent="get overview of the desk">Overview</button>
+              <button type="button" class="chip-btn" data-agent="label latest fire as took">Took last fire</button>
+              <button type="button" class="chip-btn" data-agent="label latest fire as skip">Skip last fire</button>
+            </div>
             <div id="agentLog" class="agent-log"></div>
           </div>
           <div class="panel">
@@ -197,7 +213,11 @@
               <li>label latest fire took/skip</li>
               <li>propose AD trade plan (paper)</li>
             </ul>
-            <p class="hint mt">Realtime Speech-to-Speech WebSocket is next — this beta uses STT + tool loop + optional TTS.</p>
+            <p class="hint mt">
+              <strong>Mic tip:</strong> Browsers block the microphone on
+              <code>http://IP:port</code> (not HTTPS). Use <em>Upload voice note</em>,
+              type commands, or put the desk behind HTTPS later.
+            </p>
           </div>
         </div>
       </section>
