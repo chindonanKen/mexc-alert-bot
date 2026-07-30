@@ -544,17 +544,36 @@ def create_app() -> FastAPI:
 
 def run():
     import uvicorn
+    from pathlib import Path
+
+    try:
+        from dotenv import load_dotenv
+
+        # Prefer project .env so local desk picks up DESK_* / XAI_* without export
+        root = Path(__file__).resolve().parents[2]
+        load_dotenv(root / ".env", override=False)
+        load_dotenv(override=False)
+    except Exception:
+        pass
 
     host = os.getenv("DESK_HOST", "0.0.0.0")
     port = int(os.getenv("DESK_PORT", "8080"))
+    reload = os.getenv("DESK_RELOAD", "").strip().lower() in ("1", "true", "yes")
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
-    uvicorn.run(
-        "mexc_bot.webapi.app:create_app",
-        factory=True,
-        host=host,
-        port=port,
-        log_level="info",
-    )
+    # reload=True: edit static JS/CSS or Python and refresh browser (fast local loop)
+    kwargs: Dict[str, Any] = {
+        "factory": True,
+        "host": host,
+        "port": port,
+        "log_level": "info",
+    }
+    if reload:
+        kwargs["reload"] = True
+        kwargs["reload_dirs"] = [
+            str(Path(__file__).resolve().parent),
+            str(Path(__file__).resolve().parents[1]),
+        ]
+    uvicorn.run("mexc_bot.webapi.app:create_app", **kwargs)
 
 
 if __name__ == "__main__":

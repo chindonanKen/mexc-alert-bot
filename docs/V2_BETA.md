@@ -91,6 +91,34 @@ grep '^DESK_API_TOKEN=' ~/mexc-alert-bot/.env
 
 ---
 
+## Local dev (fast edits — Mac + Xplor)
+
+Work on this machine before pushing to the droplet:
+
+```bash
+cd ~/mexc-bot
+make desk-dev          # or: ./scripts/desk_dev.sh
+```
+
+| Item | Detail |
+|------|--------|
+| URL | `http://127.0.0.1:8080/?token=…` (printed by the script) |
+| Browser | Opens **Xplor** when `/Applications/Xplor.app` exists |
+| Mic | Works on **localhost** (secure context — no Caddy) |
+| Reload | `DESK_RELOAD=true` — Python reloads on save |
+| Static UI | Edit `desk.js` / `desk.css` → **Cmd+Shift+R** in Xplor |
+| Secrets | First run creates `.env` — add `XAI_API_KEY` for voice |
+| Data | Local `./data` only — not prod droplet DB |
+
+When ready for prod:
+
+```bash
+git push origin main
+# droplet: git pull && ./scripts/desk_https_up.sh
+```
+
+---
+
 ## Deploy (full exploration)
 
 ```bash

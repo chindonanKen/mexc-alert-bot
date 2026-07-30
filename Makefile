@@ -27,6 +27,10 @@ stress:
 desk:
 	python3 -m mexc_bot.webapi
 
+# Fast local loop: venv + .env + reload + open Xplor (http://127.0.0.1:8080)
+desk-dev:
+	bash scripts/desk_dev.sh
+
 desk-https:
 	bash scripts/desk_https_up.sh
 
