@@ -176,31 +176,18 @@
             </div>
             <div id="secureBox" class="secure-box" hidden></div>
             <p class="hint">
-              Speak or upload audio → xAI STT → tool agent edits the desk
-              (alerts, watch, positions, labels). Type always works if mic is blocked.
+              Tap the mic — speak a command. Grok STT + tools edit the desk
+              (alerts, watch, positions, labels). Requires <strong>HTTPS</strong> desk URL.
             </p>
             <div class="voice-controls">
               <button type="button" id="btnMic" class="mic">Tap to record</button>
-              <div class="voice-alt">
-                <label class="upload-btn">
-                  Upload voice note
-                  <input type="file" id="audioFile" accept="audio/*,.webm,.ogg,.mp3,.m4a,.wav" hidden />
-                </label>
-                <p class="hint tight">Works over plain HTTP when the browser blocks the mic.</p>
-              </div>
             </div>
-            <div id="voiceStatus" class="voice-status">Checking microphone support…</div>
+            <div id="voiceStatus" class="voice-status">Ready</div>
             <audio id="voiceAudio" controls hidden></audio>
             <form id="agentForm" class="chat-line">
-              <input id="agentInput" placeholder="Type a command: add watch SIREN futures · open position BTC 64000 · label took…" autocomplete="off" />
+              <input id="agentInput" placeholder="Text fallback: add watch SIREN futures…" autocomplete="off" />
               <button class="btn" type="submit">Run</button>
             </form>
-            <div class="quick-asks" id="voiceQuick">
-              <button type="button" class="chip-btn" data-agent="list my open positions">Positions</button>
-              <button type="button" class="chip-btn" data-agent="get overview of the desk">Overview</button>
-              <button type="button" class="chip-btn" data-agent="label latest fire as took">Took last fire</button>
-              <button type="button" class="chip-btn" data-agent="label latest fire as skip">Skip last fire</button>
-            </div>
             <div id="agentLog" class="agent-log"></div>
           </div>
           <div class="panel">
@@ -214,9 +201,8 @@
               <li>propose AD trade plan (paper)</li>
             </ul>
             <p class="hint mt">
-              <strong>Mic tip:</strong> Browsers block the microphone on
-              <code>http://IP:port</code> (not HTTPS). Use <em>Upload voice note</em>,
-              type commands, or put the desk behind HTTPS later.
+              Open the desk via <code>https://YOUR_IP/</code> (Caddy TLS). Accept the
+              certificate warning once — then the microphone works.
             </p>
           </div>
         </div>

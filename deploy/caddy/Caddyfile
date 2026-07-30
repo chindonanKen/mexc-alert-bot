@@ -1,0 +1,36 @@
+# AD Desk HTTPS front door — mic requires secure context (https://)
+# Self-signed cert is fine for private beta (browser shows a one-time warning).
+
+{
+	# Internal CA so we don't need a public domain for mic to work
+	local_certs
+	auto_https disable_redirects
+}
+
+# Listen on all interfaces; use IP or hostname in the browser as https://IP/
+:443 {
+	tls internal
+
+	encode gzip
+
+	# Proxy to desk app (Docker network name)
+	reverse_proxy mexc-desk:8080
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		# Allow mic / camera for this origin after user grants permission
+		Permissions-Policy "microphone=(self), camera=()"
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
+
+# Optional: redirect plain HTTP → HTTPS so you never land on :8080 by mistake
+:80 {
+	redir https://{host}{uri} permanent
+}

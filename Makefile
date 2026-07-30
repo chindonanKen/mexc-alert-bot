@@ -26,6 +26,9 @@ stress:
 desk:
 	python3 -m mexc_bot.webapi
 
+desk-https:
+	bash scripts/desk_https_up.sh
+
 test-web:
 	python3 tests/test_webapi.py
 

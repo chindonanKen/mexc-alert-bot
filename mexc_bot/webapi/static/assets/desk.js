@@ -1,4 +1,4 @@
-/* AD Desk v2.1 — dynamic command surface */
+/* AD Desk v2.1 — HTTPS-first voice + full desk control */
 (function () {
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -6,7 +6,6 @@
   const state = {
     token: localStorage.getItem("desk_token") || "",
     view: "overview",
-    media: null,
     chunks: [],
     recording: false,
   };
@@ -101,7 +100,7 @@
       targets: ["Targets", "Add · edit · delete one-shot alerts"],
       memory: ["Memory", "Fires + labels"],
       intel: ["Intel", "News · delist radar · source weights"],
-      voice: ["Voice Agent", "Grok STT + tools · control the desk"],
+      voice: ["Voice Agent", "Mic on HTTPS · Grok tools control the desk"],
       roadmap: ["Roadmap", "Where the platform is going"],
       playbook: ["Playbook", "AD strategy encoded"],
     }[name] || ["Desk", ""];
@@ -447,50 +446,52 @@
     }
   }
 
-  // ---- Voice: mic (HTTPS only) + file upload (works on http://IP) ----
+  // ---- Microphone (requires HTTPS) ----
   function isSecureForMic() {
-    // Browsers treat only https: and http://localhost as secure for getUserMedia
     if (window.isSecureContext) return true;
     const h = location.hostname;
     return h === "localhost" || h === "127.0.0.1" || h === "[::1]";
   }
 
   function micSupported() {
-    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+    return !!(
+      navigator.mediaDevices &&
+      navigator.mediaDevices.getUserMedia &&
+      window.MediaRecorder
+    );
   }
 
   function updateMicUi() {
     const box = $("#secureBox");
-    const mic = $("#btnMic");
+    const micBtn = $("#btnMic");
+    if (!box || !micBtn) return;
     const secure = isSecureForMic();
-    const ok = micSupported() && secure;
     if (!secure) {
       box.hidden = false;
       box.innerHTML =
-        "<strong>Microphone blocked on this URL.</strong> " +
-        "Browsers only allow the mic on <code>https://</code> or <code>localhost</code>. " +
+        "<strong>Open the desk on HTTPS to use the mic.</strong><br/>" +
         "You are on <code>" +
         location.protocol +
         "//" +
         location.host +
         "</code>. " +
-        "Use <em>Upload voice note</em> or type commands below — both fully control the desk.";
-      mic.disabled = true;
-      mic.textContent = "Mic blocked";
-      mic.title = "Requires HTTPS or localhost";
-      $("#voiceStatus").textContent = "Use upload or type — agent tools still work";
+        "Use <code>https://YOUR_DROPLET_IP/</code> (Caddy). " +
+        "Accept the certificate warning once, then reload this page.";
+      micBtn.disabled = true;
+      micBtn.textContent = "Need HTTPS";
+      $("#voiceStatus").textContent = "Switch to https:// — then tap to record";
     } else if (!micSupported()) {
       box.hidden = false;
-      box.innerHTML =
-        "This browser has no MediaRecorder / getUserMedia. Use <em>Upload voice note</em> or type.";
-      mic.disabled = true;
-      mic.textContent = "Mic N/A";
-      $("#voiceStatus").textContent = "Upload or type a command";
+      box.innerHTML = "This browser cannot record audio. Try Chrome or Safari.";
+      micBtn.disabled = true;
+      micBtn.textContent = "Mic N/A";
     } else {
       box.hidden = true;
-      mic.disabled = false;
-      mic.textContent = state.recording ? "Stop · send" : "Tap to record";
-      $("#voiceStatus").textContent = state.recording ? "Recording…" : "Ready — tap mic or upload";
+      micBtn.disabled = false;
+      micBtn.textContent = state.recording ? "Stop · send" : "Tap to record";
+      $("#voiceStatus").textContent = state.recording
+        ? "Recording… tap again to send"
+        : "Ready — tap the mic and speak";
     }
   }
 
@@ -539,7 +540,7 @@
     if (state.recording) return;
     if (!isSecureForMic() || !micSupported()) {
       updateMicUi();
-      toast("Mic blocked — use Upload or type a command");
+      toast("Open https://YOUR_IP/ for microphone");
       return;
     }
     try {
@@ -564,7 +565,7 @@
       };
       recorder.onerror = () => {
         toast("Recorder error");
-        stopRec(false);
+        stopRec();
       };
       recorder.onstop = async () => {
         try {
@@ -573,8 +574,7 @@
           const type = recorder?.mimeType || "audio/webm";
           const blob = new Blob(state.chunks, { type });
           if (!blob.size) {
-            toast("Empty recording — try upload or type");
-            $("#voiceStatus").textContent = "Ready";
+            toast("Empty recording — try again");
             return;
           }
           await sendAudioBlob(blob, "voice.webm");
@@ -595,11 +595,11 @@
       const name = e && e.name;
       let msg = "Mic failed";
       if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-        msg = "Mic permission denied — allow microphone for this site, or use Upload";
+        msg = "Allow microphone for this site in browser settings";
       } else if (name === "NotFoundError") {
-        msg = "No microphone found — use Upload";
+        msg = "No microphone found";
       } else if (!window.isSecureContext) {
-        msg = "Mic needs HTTPS — use Upload or type";
+        msg = "Need HTTPS — use https://YOUR_IP/";
       }
       toast(msg);
       $("#voiceStatus").textContent = msg;
@@ -607,7 +607,7 @@
     }
   }
 
-  function stopRec(send = true) {
+  function stopRec() {
     if (recorder && state.recording) {
       try {
         if (recorder.state !== "inactive") recorder.stop();
@@ -615,36 +615,16 @@
         state.recording = false;
         updateMicUi();
       }
-    } else if (!send) {
-      state.recording = false;
-      if (mediaStream) mediaStream.getTracks().forEach((t) => t.stop());
-      updateMicUi();
     }
   }
 
   const mic = $("#btnMic");
-  // Tap to toggle (more reliable than hold in many browsers / touchpads)
-  mic.addEventListener("click", () => {
-    if (state.recording) stopRec(true);
-    else startRec();
-  });
-
-  $("#audioFile").addEventListener("change", async (e) => {
-    const f = e.target.files && e.target.files[0];
-    e.target.value = "";
-    if (!f) return;
-    try {
-      agentMsg("user", "📎 " + f.name);
-      await sendAudioBlob(f, f.name);
-    } catch (err) {
-      toast(String(err.message || err).slice(0, 140));
-      $("#voiceStatus").textContent = "Upload failed";
-    }
-  });
-
-  $$("[data-agent]").forEach((b) =>
-    b.addEventListener("click", () => runAgentText(b.dataset.agent))
-  );
+  if (mic) {
+    mic.addEventListener("click", () => {
+      if (state.recording) stopRec();
+      else startRec();
+    });
+  }
 
   $("#agentForm").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -755,7 +735,8 @@
       const st = $("#connStatus");
       st.textContent = h.db_exists ? "live · db" : "live · empty db";
       st.className = "pill ok";
-      $("#xaiBadge").textContent = h.xai_configured ? "XAI ready" : "set XAI_API_KEY";
+      const xb = $("#xaiBadge");
+      if (xb) xb.textContent = h.xai_configured ? "XAI ready" : "set XAI_API_KEY";
     } catch (e) {
       $("#connStatus").textContent = "offline";
       $("#connStatus").className = "pill err";
@@ -770,11 +751,11 @@
       roadmap: loadRoadmap,
       playbook: loadPlaybook,
       voice: async () => {
+        updateMicUi();
         try {
           const h = await api("/api/health");
           $("#xaiBadge").textContent = h.xai_configured ? "XAI ready" : "set XAI_API_KEY";
         } catch (_) {}
-        updateMicUi();
       },
     };
     try {
@@ -796,6 +777,7 @@
   $("#btnRefresh").addEventListener("click", refreshAll);
 
   setView("overview");
+  updateMicUi();
   refreshAll();
   setInterval(refreshAll, 40000);
 })();

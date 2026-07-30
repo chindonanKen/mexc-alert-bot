@@ -40,11 +40,11 @@ services:
       retries: 3
       start_period: 15s
 
-  # V2 AD Desk web UI — reads same SQLite as prod (or staging if remapped)
-  # Start: docker compose --profile desk up -d --build mexc-desk
-  # Open:  http://DROPLET_IP:8080  (set DESK_API_TOKEN in .env)
+  # V2 AD Desk app (internal :8080). Prefer HTTPS front (desk-https) for microphone.
+  # Start full stack: docker compose --profile desk --profile desk-https up -d --build
+  # Or: ./scripts/desk_https_up.sh
   mexc-desk:
-    profiles: ["desk"]
+    profiles: ["desk", "desk-https"]
     build:
       context: .
       dockerfile: Dockerfile.desk
@@ -56,10 +56,10 @@ services:
       ALERTS_FILE: /app/data/alerts.json
       DESK_HOST: 0.0.0.0
       DESK_PORT: "8080"
-    ports:
-      - "${DESK_PORT:-8080}:8080"
+    # App only on Docker network — public entry is HTTPS (mexc-desk-https :443)
+    expose:
+      - "8080"
     volumes:
-      # RW required for desk CRUD (alerts / watchlist / journal labels)
       - ./data:/app/data
     healthcheck:
       test:
@@ -73,3 +73,25 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  # HTTPS reverse proxy — required for browser microphone (secure context)
+  # Start: ./scripts/desk_https_up.sh
+  # Open: https://DROPLET_IP/?token=DESK_API_TOKEN  (accept self-signed cert once)
+  mexc-desk-https:
+    profiles: ["desk-https"]
+    image: caddy:2-alpine
+    container_name: mexc-desk-https
+    restart: unless-stopped
+    depends_on:
+      - mexc-desk
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

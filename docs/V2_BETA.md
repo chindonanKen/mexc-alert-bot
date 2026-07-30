@@ -52,18 +52,19 @@ Tools: add/delete/list alerts, watchlist, movers settings, positions, label_fire
 
 Realtime `wss://api.x.ai/v1/realtime?model=grok-voice-latest` is the next voice upgrade.
 
-### Mic blocked in the browser?
+### Microphone (required: HTTPS)
 
-Modern browsers **block `getUserMedia` on plain `http://DROPLET_IP:8080`**. Only `https://` or `localhost` count as a secure context.
+Browsers **block the mic on `http://IP:8080`**. The desk is meant to be opened on **HTTPS**.
 
-**Workarounds (already in the desk):**
+```bash
+# On droplet
+./scripts/desk_https_up.sh
+# Open: https://DROPLET_IP/?token=DESK_API_TOKEN
+# Accept self-signed cert warning once → mic works
+```
 
-1. **Upload voice note** — record in Voice Memos / phone, upload on Voice Agent tab  
-2. **Type** commands (same tools as voice)  
-3. Later: put desk behind **HTTPS** (Caddy / nginx / Cloudflare Tunnel) so the mic works live  
-
-The yellow banner on the Voice tab explains this when the page is not secure.
-
+Stack: `mexc-desk` (app) + `mexc-desk-https` (Caddy TLS on 443).  
+Do **not** use plain `:8080` for voice.
 ---
 
 ## Deploy
