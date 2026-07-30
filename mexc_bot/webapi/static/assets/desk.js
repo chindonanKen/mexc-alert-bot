@@ -17,15 +17,21 @@
     silenceMs: 0,
   };
 
-  // Grok-app style VAD: end turn after this much silence once user has spoken
+  // Grok-app style VAD: end turn after short silence once user has spoken
   const VAD = {
-    speakRms: 0.02,
-    silenceRms: 0.012,
-    endSilenceMs: 1100,
-    minSpeechMs: 450,
-    maxTurnMs: 28000,
-    pollMs: 80,
+    speakRms: 0.018,
+    silenceRms: 0.011,
+    endSilenceMs: 700, // snappier end-of-turn (was ~1.1s)
+    minSpeechMs: 350,
+    maxTurnMs: 22000,
+    pollMs: 60,
   };
+
+  const HIST_KEY = "desk_agent_history_v1";
+  try {
+    const saved = JSON.parse(localStorage.getItem(HIST_KEY) || "[]");
+    if (Array.isArray(saved)) state.agentHistory = saved.slice(-24);
+  } catch (_) {}
 
   const qp = new URLSearchParams(location.search);
   if (qp.get("token")) {
@@ -439,7 +445,18 @@
   }
 
   function applyHistory(hist) {
-    if (Array.isArray(hist)) state.agentHistory = hist.slice(-24);
+    if (Array.isArray(hist)) {
+      state.agentHistory = hist.slice(-24);
+      try {
+        localStorage.setItem(HIST_KEY, JSON.stringify(state.agentHistory));
+      } catch (_) {}
+    }
+  }
+
+  function persistHistory() {
+    try {
+      localStorage.setItem(HIST_KEY, JSON.stringify(state.agentHistory.slice(-24)));
+    } catch (_) {}
   }
 
   async function runAgentText(text) {
@@ -464,7 +481,9 @@
           content: out.reply || "",
         });
         state.agentHistory = state.agentHistory.slice(-24);
+        persistHistory();
       }
+      persistHistory();
       if (out.tools_run?.length) {
         agentMsg(
           "tools",
@@ -637,7 +656,10 @@
     }
   }
 
-  /** Decode MediaRecorder blob → 16 kHz mono PCM WAV (no ffmpeg needed). */
+  /**
+   * Fast path: decode mic blob → mono PCM WAV at native rate (no Offline resample).
+   * xAI STT accepts common rates; skipping 16k resample cuts hundreds of ms.
+   */
   async function blobToWav16k(blob) {
     const ab = await blob.arrayBuffer();
     const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -649,53 +671,42 @@
       await ctx.close().catch(() => {});
       throw new Error("Could not decode mic audio: " + (e.message || e));
     }
-    const targetRate = 16000;
-    const duration = decoded.duration;
-    const offline = new OfflineAudioContext(
-      1,
-      Math.max(1, Math.ceil(duration * targetRate)),
-      targetRate
-    );
-    const src = offline.createBufferSource();
-    const mono = offline.createBuffer(1, decoded.length, decoded.sampleRate);
-    const ch0 = mono.getChannelData(0);
+    const rate = decoded.sampleRate || 48000;
     const nCh = decoded.numberOfChannels;
-    for (let i = 0; i < decoded.length; i++) {
-      let s = 0;
-      for (let c = 0; c < nCh; c++) s += decoded.getChannelData(c)[i];
-      ch0[i] = s / nCh;
-    }
-    src.buffer = mono;
-    src.connect(offline.destination);
-    src.start(0);
-    const rendered = await offline.startRendering();
-    await ctx.close().catch(() => {});
-    const pcm = rendered.getChannelData(0);
-    const samples = pcm.length;
-    const buf = new ArrayBuffer(44 + samples * 2);
+    const samples = decoded.length;
+    // Downsample in one pass if > 24 kHz (cheap every-N pick, not full resampler)
+    const stride = rate > 24000 ? Math.max(1, Math.round(rate / 16000)) : 1;
+    const outRate = Math.round(rate / stride);
+    const outLen = Math.floor(samples / stride);
+    const buf = new ArrayBuffer(44 + outLen * 2);
     const view = new DataView(buf);
     const wstr = (o, s) => {
       for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i));
     };
     wstr(0, "RIFF");
-    view.setUint32(4, 36 + samples * 2, true);
+    view.setUint32(4, 36 + outLen * 2, true);
     wstr(8, "WAVE");
     wstr(12, "fmt ");
     view.setUint32(16, 16, true);
     view.setUint16(20, 1, true);
     view.setUint16(22, 1, true);
-    view.setUint32(24, targetRate, true);
-    view.setUint32(28, targetRate * 2, true);
+    view.setUint32(24, outRate, true);
+    view.setUint32(28, outRate * 2, true);
     view.setUint16(32, 2, true);
     view.setUint16(34, 16, true);
     wstr(36, "data");
-    view.setUint32(40, samples * 2, true);
+    view.setUint32(40, outLen * 2, true);
     let off = 44;
-    for (let i = 0; i < samples; i++) {
-      let x = Math.max(-1, Math.min(1, pcm[i]));
-      view.setInt16(off, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+    for (let i = 0; i < outLen; i++) {
+      const idx = i * stride;
+      let s = 0;
+      for (let c = 0; c < nCh; c++) s += decoded.getChannelData(c)[idx];
+      s /= nCh;
+      s = Math.max(-1, Math.min(1, s));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
       off += 2;
     }
+    await ctx.close().catch(() => {});
     return new Blob([buf], { type: "audio/wav" });
   }
 
@@ -772,6 +783,14 @@
     }
     // Text is secondary transcript; voice is primary
     if (out.reply) agentMsg("bot", "🔊 " + out.reply);
+    if (out.timing_ms) {
+      const t = out.timing_ms;
+      agentMsg(
+        "tools",
+        `⏱ stt ${t.stt_ms || "?"}ms · chat ${t.chat_ms || "?"}ms · tts ${t.tts_ms || "?"}ms · total ${t.total_ms || "?"}ms`
+      );
+    }
+    persistHistory();
     refreshAll();
     state.busy = false;
     updateMicUi();
@@ -779,7 +798,6 @@
       $("#voiceStatus").textContent = "Grok speaking…";
       await playTts(out.audio_b64);
     } else if (out.reply && !state.muteSpk) {
-      // TTS missing — try dedicated endpoint
       try {
         const tts = await api("/api/tts", {
           method: "POST",
@@ -1094,9 +1112,12 @@
   if (clearHist) {
     clearHist.addEventListener("click", () => {
       state.agentHistory = [];
+      try {
+        localStorage.removeItem(HIST_KEY);
+      } catch (_) {}
       const log = $("#agentLog");
       if (log) log.innerHTML = "";
-      agentMsg("bot", "Conversation cleared.");
+      agentMsg("bot", "Conversation cleared (including saved history).");
       toast("History cleared");
     });
   }

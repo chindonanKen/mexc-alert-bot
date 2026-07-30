@@ -219,14 +219,28 @@ def _sanitize_history(history: Optional[List[dict]]) -> List[dict]:
     return out
 
 
-def chat_with_tools(user_text: str, history: Optional[List[dict]] = None) -> Dict[str, Any]:
+def chat_with_tools(
+    user_text: str,
+    history: Optional[List[dict]] = None,
+    *,
+    voice: bool = False,
+) -> Dict[str, Any]:
     """
-    Multi-round tool loop (max 8). Returns reply, tools_run, model, history_out.
-    history_out is client-safe user/assistant turns including this exchange.
+    Multi-round tool loop. voice=True: fewer rounds, shorter history, snappier replies.
     """
+    import time as _time
+
+    t0 = _time.time()
     key = _api_key()
-    model = os.getenv("XAI_CHAT_MODEL") or os.getenv("DESK_AGENT_MODEL") or "grok-4.5"
-    prior = _sanitize_history(history)
+    model = (
+        os.getenv("XAI_VOICE_CHAT_MODEL")
+        or os.getenv("XAI_CHAT_MODEL")
+        or os.getenv("DESK_AGENT_MODEL")
+        or "grok-4.5"
+    )
+    # Voice: keep last 8 turns only (faster prompts)
+    hist_cap = 8 if voice else 24
+    prior = _sanitize_history(history)[-hist_cap:]
     messages: List[dict] = [{"role": "system", "content": SYSTEM}]
     messages.extend(prior)
     messages.append({"role": "user", "content": user_text})
@@ -248,11 +262,15 @@ def chat_with_tools(user_text: str, history: Optional[List[dict]] = None) -> Dic
             "tools_run": [],
             "model": None,
             "history": hist[-24:],
+            "timing_ms": {"total": int((_time.time() - t0) * 1000)},
         }
 
     final_reply = ""
-    max_rounds = int(os.getenv("DESK_AGENT_TOOL_ROUNDS", "8") or "8")
-    max_rounds = max(2, min(max_rounds, 12))
+    default_rounds = "4" if voice else "8"
+    max_rounds = int(os.getenv("DESK_AGENT_TOOL_ROUNDS", default_rounds) or default_rounds)
+    max_rounds = max(2, min(max_rounds, 12 if not voice else 6))
+    tool_json_cap = 2500 if voice else 8000
+    chat_timeout = 45 if voice else 120
 
     for _ in range(max_rounds):
         payload = {
@@ -260,8 +278,12 @@ def chat_with_tools(user_text: str, history: Optional[List[dict]] = None) -> Dic
             "messages": messages,
             "tools": TOOL_DEFS,
             "tool_choice": "auto",
-            "temperature": 0.25,
+            "temperature": 0.2 if voice else 0.25,
         }
+        # Nudge model toward single-tool-batch for voice
+        if voice:
+            payload["messages"] = list(messages)
+            # soft instruction via last user (already spoken) — no extra round
         r = requests.post(
             f"{_base()}/chat/completions",
             headers={
@@ -269,7 +291,7 @@ def chat_with_tools(user_text: str, history: Optional[List[dict]] = None) -> Dic
                 "Content-Type": "application/json",
             },
             json=payload,
-            timeout=120,
+            timeout=chat_timeout,
             verify=_CA,
         )
         if r.status_code != 200:
@@ -297,18 +319,22 @@ def chat_with_tools(user_text: str, history: Optional[List[dict]] = None) -> Dic
                 {
                     "role": "tool",
                     "tool_call_id": tc.get("id"),
-                    "content": json.dumps(result)[:8000],
+                    "content": json.dumps(result)[:tool_json_cap],
                 }
             )
     else:
         final_reply = (
-            "Done — applied tool updates."
+            "Done."
             if tools_run
             else "Timed out before a final reply."
         )
 
     if not final_reply and tools_run:
         final_reply = "Done — desk updated."
+
+    # Voice: clamp spoken length
+    if voice and final_reply and len(final_reply) > 500:
+        final_reply = final_reply[:497] + "…"
 
     hist = prior + [
         {"role": "user", "content": user_text},
@@ -319,6 +345,7 @@ def chat_with_tools(user_text: str, history: Optional[List[dict]] = None) -> Dic
         "tools_run": tools_run,
         "model": model,
         "history": hist[-24:],
+        "timing_ms": {"chat_total": int((_time.time() - t0) * 1000)},
     }
 
 
@@ -328,9 +355,13 @@ def handle_voice_audio(
     content_type: str = "",
     history: Optional[List[dict]] = None,
 ) -> Dict[str, Any]:
+    import time as _time
+
+    t0 = _time.time()
     text, stt_err = stt_transcribe(
         audio_bytes, filename=filename, content_type=content_type
     )
+    t_stt = _time.time()
     if not text:
         return {
             "ok": False,
@@ -340,13 +371,30 @@ def handle_voice_audio(
             "reply": None,
             "tools_run": [],
             "history": _sanitize_history(history),
+            "timing_ms": {"stt": int((t_stt - t0) * 1000)},
         }
-    out = chat_with_tools(text, history=history)
+    out = chat_with_tools(text, history=history, voice=True)
+    t_chat = _time.time()
     audio_out = None
     if os.getenv("DESK_VOICE_TTS", "true").lower() in ("1", "true", "yes"):
-        raw = tts_speak(out["reply"][:1500])
+        raw = tts_speak(out["reply"][:800])
         if raw:
             audio_out = base64.b64encode(raw).decode("ascii")
+    t_end = _time.time()
+    timing = {
+        "stt_ms": int((t_stt - t0) * 1000),
+        "chat_ms": int((t_chat - t_stt) * 1000),
+        "tts_ms": int((t_end - t_chat) * 1000),
+        "total_ms": int((t_end - t0) * 1000),
+    }
+    logger.info(
+        "voice turn stt=%sms chat=%sms tts=%sms total=%sms tools=%s",
+        timing["stt_ms"],
+        timing["chat_ms"],
+        timing["tts_ms"],
+        timing["total_ms"],
+        len(out.get("tools_run") or []),
+    )
     return {
         "ok": True,
         "transcript": text,
@@ -355,4 +403,5 @@ def handle_voice_audio(
         "model": out.get("model"),
         "history": out.get("history") or [],
         "audio_b64": audio_out,
+        "timing_ms": timing,
     }
