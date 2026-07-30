@@ -108,7 +108,137 @@ body {
 .pill.err { color: var(--rose); border-color: rgba(251,113,133,.35); }
 .rail-meta p { margin: 0; font-size: 0.72rem; color: var(--mute); line-height: 1.4; }
 
-.stage { padding: 1.15rem 1.4rem 2.5rem; max-width: 1440px; }
+.stage { padding: 1.15rem 1.4rem 7.5rem; max-width: 1440px; }
+
+/* ---- Global voice dock (all pages) ---- */
+.voice-dock {
+  position: fixed;
+  left: 220px;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  padding: 0.65rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, rgba(5, 7, 12, 0.2), rgba(5, 7, 12, 0.92) 28%);
+  border-top: 1px solid rgba(56, 189, 248, 0.18);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.voice-dock.in-call {
+  border-top-color: rgba(52, 211, 153, 0.4);
+  box-shadow: 0 -12px 40px rgba(52, 211, 153, 0.08);
+}
+.voice-dock-inner {
+  max-width: 1440px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+.voice-dock-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 180px;
+}
+.vd-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--mute);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.15);
+  flex-shrink: 0;
+}
+.voice-dock.in-call .vd-dot {
+  background: var(--mint);
+  box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.25);
+  animation: pulse 1.4s infinite;
+}
+.voice-dock.busy .vd-dot {
+  background: var(--sky);
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.25);
+}
+.vd-title {
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+}
+.vd-status {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--mute);
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.voice-dock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+.dock-mic {
+  min-width: 7.5rem;
+}
+.voice-dock .mic {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0.65rem 1.15rem;
+  font-size: 0.88rem;
+  color: #031018;
+  background: linear-gradient(135deg, #34d399, #38bdf8);
+  box-shadow: 0 8px 24px rgba(52, 211, 153, 0.28);
+}
+.voice-dock .mic:hover { filter: brightness(1.06); }
+.voice-dock .mic:disabled {
+  opacity: 0.85;
+  cursor: default;
+}
+.voice-dock .mic.rec {
+  background: radial-gradient(circle at 30% 30%, rgba(251,113,133,.95), #fb7185);
+  color: #fff;
+  animation: pulse 1.2s infinite;
+}
+.dock-level {
+  flex: 1;
+  min-width: 100px;
+  max-width: 180px;
+  margin: 0;
+}
+.call-pill.live {
+  color: var(--mint);
+  border-color: rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.1);
+}
+.rail-voice-btn {
+  width: 100%;
+  margin-top: 0.45rem;
+  font-size: 0.8rem;
+  padding: 0.5rem 0.6rem;
+}
+.top-voice {
+  display: flex;
+  align-items: center;
+}
+.top-voice-state {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--mute);
+  padding: 0.4rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+}
+.top-voice-state.live {
+  color: var(--mint);
+  border-color: rgba(52, 211, 153, 0.35);
+}
 .top {
   display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start;
   margin-bottom: 1.15rem;
@@ -402,6 +532,9 @@ table.data tr:hover td { background: rgba(56,189,248,.04); }
 }
 
 @media (max-width: 980px) {
+  .voice-dock { left: 0; }
+  .stage { padding-bottom: 9rem; }
+
   .app { grid-template-columns: 1fr; }
   .rail { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .nav { flex-direction: row; flex-wrap: wrap; }

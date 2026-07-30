@@ -529,8 +529,15 @@
     const muteMic = $("#btnMuteMic");
     const muteSpk = $("#btnMuteSpk");
     const level = $("#voiceLevel");
-    const panel = $(".voice-panel");
-    if (panel) panel.classList.toggle("in-call", state.inCall);
+    const dock = $("#voiceDock");
+    const railPill = $("#callRailPill");
+    const railCall = $("#btnRailCall");
+    const topState = $("#topVoiceState");
+
+    if (dock) {
+      dock.classList.toggle("in-call", state.inCall);
+      dock.classList.toggle("busy", state.busy);
+    }
     if (endBtn) endBtn.hidden = !state.inCall;
     if (muteMic) {
       muteMic.hidden = !state.inCall;
@@ -544,52 +551,89 @@
     }
     if (level) level.hidden = !(state.inCall && state.recording && !state.muteMic);
 
-    if (!box || !micBtn) return;
+    let statusLine = "Ready — Start call to talk";
+    let pillText = "voice idle";
+    let mainLabel = "Start call";
+    let mainDisabled = false;
+
     const secure = isSecureForMic();
     if (!secure) {
-      box.hidden = false;
-      box.innerHTML =
-        "<strong>Mic needs HTTPS</strong> on plain http://IP.<br/>" +
-        "Local: <code>http://127.0.0.1:8080</code>. Droplet: <code>https://IP/</code>.";
-      micBtn.disabled = true;
-      micBtn.textContent = "Need HTTPS";
-      return;
-    }
-    if (!micSupported()) {
-      box.hidden = false;
-      box.innerHTML = "This browser cannot record audio. Try Chrome or Safari.";
-      micBtn.disabled = true;
-      micBtn.textContent = "Mic N/A";
-      return;
-    }
-    box.hidden = true;
-    micBtn.classList.toggle("rec", state.recording);
-
-    if (!state.inCall) {
-      micBtn.disabled = false;
-      micBtn.textContent = "Start call";
-      if (!$("#voiceStatus").textContent.startsWith("Error")) {
-        $("#voiceStatus").textContent = "Ready — Start call to talk with Grok";
+      if (box) {
+        box.hidden = false;
+        box.innerHTML =
+          "<strong>Mic needs HTTPS</strong> on plain http://IP.<br/>" +
+          "Local: <code>http://127.0.0.1:8080</code>. Droplet: <code>https://IP/</code>.";
       }
-      return;
+      mainLabel = "Need HTTPS";
+      mainDisabled = true;
+      statusLine = "Voice needs secure context";
+      pillText = "voice blocked";
+    } else if (!micSupported()) {
+      if (box) {
+        box.hidden = false;
+        box.innerHTML = "This browser cannot record audio. Try Chrome or Safari.";
+      }
+      mainLabel = "Mic N/A";
+      mainDisabled = true;
+      statusLine = "Mic not available";
+      pillText = "no mic";
+    } else {
+      if (box) box.hidden = true;
+      if (!state.inCall) {
+        mainLabel = "Start call";
+        mainDisabled = false;
+        statusLine = "Ready — Start call anytime (any page)";
+        pillText = "voice idle";
+      } else if (state.busy) {
+        mainLabel = "Grok…";
+        mainDisabled = true;
+        statusLine = "Working · STT + tools + speaking";
+        pillText = "call · busy";
+      } else if (state.muteMic) {
+        mainLabel = "In call";
+        mainDisabled = true;
+        statusLine = "Call live · mic muted";
+        pillText = "call · muted";
+      } else if (state.recording) {
+        mainLabel = "Listening…";
+        mainDisabled = true;
+        statusLine = state.speakingHeard
+          ? "Hearing you — pause when finished"
+          : "Listening — start talking";
+        pillText = "call · live";
+      } else {
+        mainLabel = "In call";
+        mainDisabled = true;
+        statusLine = "Call live";
+        pillText = "call · live";
+      }
     }
 
-    // In call — primary button shows state; End ends call
-    micBtn.disabled = true;
-    if (state.busy) {
-      micBtn.textContent = "Grok speaking…";
-      $("#voiceStatus").textContent = "Working · STT + tools + voice reply";
-    } else if (state.muteMic) {
-      micBtn.textContent = "Mic muted";
-      $("#voiceStatus").textContent = "Call live · your mic is muted";
-    } else if (state.recording) {
-      micBtn.textContent = state.speakingHeard ? "Listening…" : "Listening…";
-      $("#voiceStatus").textContent = state.speakingHeard
-        ? "Hearing you — pause when finished"
-        : "Listening — start talking";
-    } else {
-      micBtn.textContent = "In call";
-      $("#voiceStatus").textContent = "Call live";
+    if (micBtn) {
+      micBtn.disabled = mainDisabled;
+      micBtn.textContent = mainLabel;
+      micBtn.classList.toggle("rec", state.recording && state.inCall);
+    }
+    const vs = $("#voiceStatus");
+    if (vs) vs.textContent = statusLine;
+    if (railPill) {
+      railPill.textContent = pillText;
+      railPill.classList.toggle("live", state.inCall);
+    }
+    if (railCall) {
+      railCall.textContent = state.inCall ? "End call" : "Start call";
+      railCall.classList.toggle("danger", state.inCall);
+      railCall.disabled = !secure || !micSupported();
+    }
+    if (topState) {
+      topState.textContent = state.inCall
+        ? state.muteMic
+          ? "Voice · mic muted"
+          : state.busy
+            ? "Voice · Grok busy"
+            : "Voice · live"
+        : "Voice idle";
+      topState.classList.toggle("live", state.inCall);
     }
   }
 
@@ -985,6 +1029,22 @@
   if (mic) {
     mic.addEventListener("click", () => {
       if (!state.inCall) startCall();
+    });
+  }
+
+  const railCall = $("#btnRailCall");
+  if (railCall) {
+    railCall.addEventListener("click", () => {
+      if (state.inCall) endCall();
+      else startCall();
+    });
+  }
+
+  const dockLog = $("#btnDockTranscript");
+  if (dockLog) {
+    dockLog.addEventListener("click", () => {
+      setView("voice");
+      refreshAll();
     });
   }
 

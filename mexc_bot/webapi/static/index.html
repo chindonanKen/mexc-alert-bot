@@ -34,7 +34,9 @@
       </nav>
       <div class="rail-meta">
         <div id="connStatus" class="pill">…</div>
+        <div id="callRailPill" class="pill call-pill">voice idle</div>
         <p>Telegram = push · Desk = control</p>
+        <button type="button" class="btn soft rail-voice-btn" id="btnRailCall">Start call</button>
       </div>
     </aside>
 
@@ -46,6 +48,9 @@
         </div>
         <div class="top-actions">
           <div id="majors" class="majors"></div>
+          <div class="top-voice" id="topVoiceMini" title="Voice call controls also in the dock below">
+            <span id="topVoiceState" class="top-voice-state">Voice idle</span>
+          </div>
           <button type="button" class="btn soft" id="btnRefresh">Refresh</button>
         </div>
       </header>
@@ -166,32 +171,21 @@
         </div>
       </section>
 
-      <!-- VOICE -->
+      <!-- VOICE (transcript + type; call controls live in the global dock) -->
       <section class="view" id="view-voice">
         <div class="split">
           <div class="panel voice-panel">
             <div class="panel-h">
-              <h3>Grok voice co-pilot</h3>
+              <h3>Conversation transcript</h3>
               <span class="badge" id="xaiBadge">XAI key?</span>
             </div>
             <div id="secureBox" class="secure-box" hidden></div>
             <p class="hint">
-              Like the Grok app: press <strong>Start call</strong>, then just talk.
-              Pause when done — Grok hears the silence, acts on the desk, and speaks back.
-              Mute mic or speaker anytime; End ends the call.
+              Call controls stay on every page (dock below). Use this tab for full transcript
+              and typed commands in the same conversation.
             </p>
-            <div class="voice-controls">
-              <button type="button" id="btnMic" class="mic">Start call</button>
-              <button type="button" id="btnMuteMic" class="btn soft" hidden>Mic on</button>
-              <button type="button" id="btnMuteSpk" class="btn soft" hidden>Speaker on</button>
-              <button type="button" id="btnEndCall" class="btn soft danger" hidden>End</button>
-              <button type="button" id="btnClearHist" class="btn soft">Clear chat</button>
-            </div>
-            <div id="voiceLevel" class="voice-level" hidden><span></span></div>
-            <div id="voiceStatus" class="voice-status">Ready — Start call to talk with Grok</div>
-            <audio id="voiceAudio" playsinline></audio>
             <form id="agentForm" class="chat-line">
-              <input id="agentInput" placeholder="Or type in the same conversation…" autocomplete="off" />
+              <input id="agentInput" placeholder="Type in the same conversation…" autocomplete="off" />
               <button class="btn" type="submit">Run</button>
             </form>
             <div class="quick-asks" id="voiceQuick">
@@ -202,6 +196,9 @@
               <button type="button" class="chip-btn" data-agent="list recent fires">Fires</button>
               <button type="button" class="chip-btn" data-agent="label latest fire as took">Took last</button>
               <button type="button" class="chip-btn" data-agent="label latest fire as skip">Skip last</button>
+            </div>
+            <div class="panel-h mt"><h3>Live log</h3>
+              <button type="button" id="btnClearHist" class="btn soft">Clear chat</button>
             </div>
             <div id="agentLog" class="agent-log"></div>
           </div>
@@ -216,7 +213,7 @@
               <li>desk overview · propose AD trade (paper)</li>
             </ul>
             <p class="hint mt">
-              Same continuous history for voice and typed commands.
+              Grok-app style: Start call once, talk freely, mute mic/speaker anytime.
               No live exchange orders — journal/propose only.
             </p>
           </div>
@@ -262,6 +259,29 @@
       </section>
     </div>
   </div>
+
+  <!-- Global voice dock — always visible on every page -->
+  <div id="voiceDock" class="voice-dock" aria-label="Grok voice call">
+    <div class="voice-dock-inner">
+      <div class="voice-dock-brand">
+        <span class="vd-dot" id="vdDot"></span>
+        <div>
+          <div class="vd-title">Grok voice</div>
+          <div id="voiceStatus" class="vd-status">Ready — Start call to talk</div>
+        </div>
+      </div>
+      <div id="voiceLevel" class="voice-level dock-level" hidden><span></span></div>
+      <div class="voice-dock-actions">
+        <button type="button" id="btnMic" class="mic dock-mic">Start call</button>
+        <button type="button" id="btnMuteMic" class="btn soft" hidden>Mic on</button>
+        <button type="button" id="btnMuteSpk" class="btn soft" hidden>Speaker on</button>
+        <button type="button" id="btnEndCall" class="btn soft danger" hidden>End</button>
+        <button type="button" class="btn soft" id="btnDockTranscript" title="Open transcript">Log</button>
+      </div>
+    </div>
+    <audio id="voiceAudio" playsinline></audio>
+  </div>
+
   <div id="toast" class="toast" hidden></div>
   <script src="/assets/desk.js"></script>
 </body>
