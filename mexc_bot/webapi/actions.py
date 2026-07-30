@@ -358,176 +358,182 @@ def label_latest(
         conn.close()
 
 
-# ---- Voice / agent tool registry ----
+def list_recent_fires(user_id: Optional[int] = None, limit: int = 12) -> List[dict]:
+    uid = _uid(user_id)
+    return db.fetch_all(
+        """
+        SELECT id, source, symbol, market, drop_pct, velocity_band, mode, ts, price
+        FROM learning_events WHERE user_id = ?
+        ORDER BY ts DESC LIMIT ?
+        """,
+        (uid, max(1, min(int(limit), 40))),
+    )
+
+
+def list_investigations(user_id: Optional[int] = None, limit: int = 10) -> List[dict]:
+    uid = _uid(user_id)
+    return db.fetch_all(
+        """
+        SELECT id, symbol, market, drop_pct, velocity_band, heat_breadth,
+               verdict, confidence, ts
+        FROM investigations WHERE user_id = ?
+        ORDER BY ts DESC LIMIT ?
+        """,
+        (uid, max(1, min(int(limit), 30))),
+    )
+
+
+def list_news(limit: int = 12) -> List[dict]:
+    return db.fetch_all(
+        """
+        SELECT id, symbol, class, severity, title, source, ts
+        FROM news_events ORDER BY ts DESC LIMIT ?
+        """,
+        (max(1, min(int(limit), 40)),),
+    )
+
+
+def get_movers_settings(user_id: Optional[int] = None) -> dict:
+    uid = _uid(user_id)
+    row = db.fetch_one(
+        "SELECT enabled, threshold_percent, lookback_seconds FROM mover_settings WHERE user_id = ?",
+        (uid,),
+    )
+    if not row:
+        return {"enabled": False, "threshold_percent": 5.0, "lookback_seconds": 900}
+    return {
+        "enabled": bool(row.get("enabled")),
+        "threshold_percent": float(row.get("threshold_percent") or 5),
+        "lookback_seconds": int(row.get("lookback_seconds") or 900),
+    }
+
+
+# ---- Voice / agent tool registry (full desk control) ----
+
+def _tool(name: str, description: str, properties: dict, required: Optional[List[str]] = None) -> dict:
+    params: Dict[str, Any] = {"type": "object", "properties": properties}
+    if required:
+        params["required"] = required
+    return {
+        "type": "function",
+        "function": {"name": name, "description": description, "parameters": params},
+    }
+
 
 TOOL_DEFS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "add_alert",
-            "description": "Add a one-shot price target alert on spot or futures",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string"},
-                    "price": {"type": "number"},
-                    "market": {"type": "string", "enum": ["spot", "futures"]},
-                },
-                "required": ["symbol", "price"],
-            },
+    _tool(
+        "add_alert",
+        "Add a one-shot price target alarm/alert on spot or futures",
+        {
+            "symbol": {"type": "string"},
+            "price": {"type": "number"},
+            "market": {"type": "string", "enum": ["spot", "futures"]},
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "delete_alert",
-            "description": "Delete target alert by stable_id or visual_id",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "stable_id": {"type": "integer"},
-                    "visual_id": {"type": "integer"},
-                },
-            },
+        ["symbol", "price"],
+    ),
+    _tool(
+        "update_alert",
+        "Update alert price and/or enabled by stable_id or visual list number",
+        {
+            "stable_id": {"type": "integer"},
+            "visual_id": {"type": "integer"},
+            "price": {"type": "number"},
+            "enabled": {"type": "boolean"},
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_alerts",
-            "description": "List current target alerts",
-            "parameters": {"type": "object", "properties": {}},
+    ),
+    _tool(
+        "delete_alert",
+        "Delete target alert by stable_id or visual_id",
+        {"stable_id": {"type": "integer"}, "visual_id": {"type": "integer"}},
+    ),
+    _tool("list_alerts", "List all target alarms/alerts", {}),
+    _tool("list_watchlist", "List mover watchlist and mover settings", {}),
+    _tool(
+        "add_watch",
+        "Add symbol to downside mover watchlist",
+        {
+            "symbol": {"type": "string"},
+            "market": {"type": "string", "enum": ["spot", "futures"]},
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "add_watch",
-            "description": "Add symbol to downside mover watchlist",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string"},
-                    "market": {"type": "string", "enum": ["spot", "futures"]},
-                },
-                "required": ["symbol"],
-            },
+        ["symbol"],
+    ),
+    _tool(
+        "remove_watch",
+        "Remove symbol from mover watchlist",
+        {"symbol": {"type": "string"}, "market": {"type": "string"}},
+        ["symbol"],
+    ),
+    _tool(
+        "set_movers",
+        "Enable/disable movers or set threshold % and lookback minutes",
+        {
+            "enabled": {"type": "boolean"},
+            "threshold_percent": {"type": "number"},
+            "lookback_minutes": {"type": "number"},
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "remove_watch",
-            "description": "Remove symbol from mover watchlist",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string"},
-                    "market": {"type": "string"},
-                },
-                "required": ["symbol"],
-            },
+    ),
+    _tool(
+        "open_position",
+        "Open a journal (paper) position — not a live exchange order",
+        {
+            "symbol": {"type": "string"},
+            "market": {"type": "string"},
+            "entry_avg": {"type": "number"},
+            "notes": {"type": "string"},
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "set_movers",
-            "description": "Enable/disable movers or set threshold % and lookback minutes",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "enabled": {"type": "boolean"},
-                    "threshold_percent": {"type": "number"},
-                    "lookback_minutes": {"type": "number"},
-                },
-            },
+        ["symbol"],
+    ),
+    _tool(
+        "close_position",
+        "Close journal position by id or symbol",
+        {
+            "trade_id": {"type": "integer"},
+            "symbol": {"type": "string"},
+            "exit_avg": {"type": "number"},
+            "notes": {"type": "string"},
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "open_position",
-            "description": "Record an open trade in the journal (paper desk log — not exchange order unless live enabled)",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string"},
-                    "market": {"type": "string"},
-                    "entry_avg": {"type": "number"},
-                    "notes": {"type": "string"},
-                },
-                "required": ["symbol"],
-            },
+    ),
+    _tool(
+        "list_positions",
+        "List journal trades/positions",
+        {"include_closed": {"type": "boolean"}},
+    ),
+    _tool(
+        "label_fire",
+        "Label latest fire as took, skip, or watch",
+        {
+            "action": {"type": "string", "enum": ["took", "skip", "watch"]},
+            "bounce_quality": {"type": "string"},
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "close_position",
-            "description": "Close journal position by id or symbol",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "trade_id": {"type": "integer"},
-                    "symbol": {"type": "string"},
-                    "exit_avg": {"type": "number"},
-                    "notes": {"type": "string"},
-                },
-            },
+        ["action"],
+    ),
+    _tool(
+        "list_fires",
+        "List recent mover/target fire events from memory",
+        {"limit": {"type": "integer"}},
+    ),
+    _tool(
+        "list_intel",
+        "List isolated-dump investigations and recent news",
+        {},
+    ),
+    _tool(
+        "get_overview",
+        "Desk status: counts, movers settings, recent fires",
+        {},
+    ),
+    _tool(
+        "propose_trade",
+        "Propose AD trade plan (paper). Prefer over live orders.",
+        {
+            "symbol": {"type": "string"},
+            "thesis": {"type": "string"},
+            "entry_zone": {"type": "string"},
+            "layers": {"type": "integer"},
+            "invalidation": {"type": "string"},
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_positions",
-            "description": "List open journal trades / positions",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "label_fire",
-            "description": "Label latest mover/target fire as took, skip, or watch",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["took", "skip", "watch"]},
-                },
-                "required": ["action"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_overview",
-            "description": "Get desk status summary counts",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "propose_trade",
-            "description": (
-                "Propose a trade plan (AD layers) without placing an exchange order. "
-                "Always prefer this over live orders unless user explicitly insists on live."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string"},
-                    "thesis": {"type": "string"},
-                    "entry_zone": {"type": "string"},
-                    "layers": {"type": "integer"},
-                    "invalidation": {"type": "string"},
-                },
-                "required": ["symbol", "thesis"],
-            },
-        },
-    },
+        ["symbol", "thesis"],
+    ),
 ]
 
 
@@ -536,6 +542,20 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     try:
         if name == "add_alert":
             return add_alert(args["symbol"], float(args["price"]), args.get("market", "spot"))
+        if name == "update_alert":
+            sid = args.get("stable_id")
+            if not sid and args.get("visual_id"):
+                for a in list_alerts():
+                    if a["visual_id"] == int(args["visual_id"]):
+                        sid = a["stable_id"]
+                        break
+            if not sid:
+                raise ValueError("stable_id or visual_id required")
+            return update_alert(
+                int(sid),
+                price=float(args["price"]) if args.get("price") is not None else None,
+                enabled=args.get("enabled"),
+            )
         if name == "delete_alert":
             if args.get("stable_id"):
                 return delete_alert(int(args["stable_id"]))
@@ -544,6 +564,8 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError("stable_id or visual_id required")
         if name == "list_alerts":
             return {"alerts": list_alerts()}
+        if name == "list_watchlist":
+            return {"watchlist": list_watchlist(), "settings": get_movers_settings()}
         if name == "add_watch":
             return add_watch(args["symbol"], args.get("market", "futures"))
         if name == "remove_watch":
@@ -569,15 +591,26 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 args.get("notes"),
             )
         if name == "list_positions":
-            return {"positions": list_positions()}
+            return {
+                "positions": list_positions(include_closed=bool(args.get("include_closed")))
+            }
         if name == "label_fire":
-            return label_latest(action=args.get("action"))
+            return label_latest(
+                action=args.get("action"),
+                bounce=args.get("bounce_quality"),
+            )
+        if name == "list_fires":
+            return {"fires": list_recent_fires(limit=int(args.get("limit") or 12))}
+        if name == "list_intel":
+            return {"investigations": list_investigations(), "news": list_news()}
         if name == "get_overview":
             uid = _uid()
             return {
                 "alerts": len(list_alerts()),
                 "watch": len(list_watchlist()),
                 "open_positions": len(list_positions()),
+                "movers": get_movers_settings(),
+                "recent_fires": list_recent_fires(limit=5),
                 "user_id": uid,
                 "live_orders_allowed": live_orders_allowed(),
             }
@@ -589,14 +622,13 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 "layers": args.get("layers") or 5,
                 "invalidation": args.get("invalidation"),
                 "mode": "paper_proposal",
-                "note": "Not sent to exchange. Use open_position to journal; live orders require DESK_ALLOW_LIVE_ORDERS.",
+                "note": "Not sent to exchange. Use open_position to journal.",
             }
-            # persist as learning note if possible
             try:
                 open_position(
                     plan["symbol"],
                     "futures",
-                    notes=f"PROPOSAL: {plan['thesis'][:200]}",
+                    notes=f"PROPOSAL: {(plan.get('thesis') or '')[:200]}",
                 )
                 plan["journaled_proposal"] = True
             except Exception:

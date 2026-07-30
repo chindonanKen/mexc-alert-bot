@@ -176,22 +176,26 @@
             </div>
             <div id="secureBox" class="secure-box" hidden></div>
             <p class="hint">
-              Tap the mic — speak a command. Grok STT + tools edit the desk
-              (alerts, watch, positions, labels). Requires <strong>HTTPS</strong> desk URL.
+              Continuous conversation with Grok: speak → tools edit the desk →
+              reply → mic re-opens. Localhost mic works; droplet needs HTTPS.
             </p>
             <div class="voice-controls">
-              <button type="button" id="btnMic" class="mic">Tap to record</button>
+              <button type="button" id="btnMic" class="mic">Talk (continuous)</button>
+              <button type="button" id="btnCont" class="btn soft on">Continuous: ON</button>
+              <button type="button" id="btnClearHist" class="btn soft">Clear chat</button>
             </div>
             <div id="voiceStatus" class="voice-status">Ready</div>
             <audio id="voiceAudio" controls hidden></audio>
             <form id="agentForm" class="chat-line">
-              <input id="agentInput" placeholder="Type: add watch SIREN futures · open position · label took…" autocomplete="off" />
+              <input id="agentInput" placeholder="Type in the same conversation…" autocomplete="off" />
               <button class="btn" type="submit">Run</button>
             </form>
             <div class="quick-asks" id="voiceQuick">
               <button type="button" class="chip-btn" data-agent="get overview of the desk">Overview</button>
               <button type="button" class="chip-btn" data-agent="list my open positions">Positions</button>
               <button type="button" class="chip-btn" data-agent="list my mover watchlist">Watchlist</button>
+              <button type="button" class="chip-btn" data-agent="list my target alerts">Alerts</button>
+              <button type="button" class="chip-btn" data-agent="list recent fires">Fires</button>
               <button type="button" class="chip-btn" data-agent="label latest fire as took">Took last</button>
               <button type="button" class="chip-btn" data-agent="label latest fire as skip">Skip last</button>
             </div>
@@ -200,18 +204,16 @@
           <div class="panel">
             <div class="panel-h"><h3>Tools the agent can use</h3></div>
             <ul class="tool-list">
-              <li>add / delete / list target alerts</li>
-              <li>add / remove mover watchlist</li>
-              <li>enable movers · set threshold / lookback</li>
-              <li>open / close journal positions</li>
-              <li>label latest fire took/skip</li>
-              <li>propose AD trade plan (paper)</li>
+              <li>list / add / update / delete target alerts</li>
+              <li>list / add / remove mover watchlist</li>
+              <li>movers on/off · threshold · lookback</li>
+              <li>list / open / close journal positions</li>
+              <li>list fires · label took/skip · intel/news</li>
+              <li>desk overview · propose AD trade (paper)</li>
             </ul>
             <p class="hint mt">
-              <strong>HTTP</strong> <code>http://IP:8080</code> — UI + text agent
-              (droplet guide).<br/>
-              <strong>HTTPS</strong> <code>https://IP/</code> — mic/voice after
-              <code>desk_https_up.sh</code> (self-signed: Advanced → Proceed).
+              Same continuous history for voice and typed commands.
+              No live exchange orders — journal/propose only.
             </p>
           </div>
         </div>

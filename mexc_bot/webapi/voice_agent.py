@@ -1,14 +1,14 @@
-"""Grok / xAI voice + tool agent for the desk.
+"""Grok / xAI continuous voice + tool agent for the desk.
 
 Uses:
-- STT: convert mic audio → 16 kHz mono WAV, then POST https://api.x.ai/v1/stt
-- LLM tools: POST https://api.x.ai/v1/chat/completions with grok model
-- Optional TTS: POST https://api.x.ai/v1/tts
+- STT: browser WAV (preferred) or ffmpeg convert → POST /v1/stt
+- LLM tools: multi-turn chat/completions with full desk tool graph
+- Optional TTS: POST /v1/tts
 
-Browser MediaRecorder often sends WebM/Opus; xAI STT rejects WebM. We always
-ffmpeg-normalize to WAV before STT (see audio_convert.py).
+Conversation history is client-maintained and passed each turn so the agent
+keeps context across continuous voice exchanges.
 
-Live exchange orders are NOT enabled here — tools mutate desk/journal/alerts only.
+Live exchange orders stay off unless DESK_ALLOW_LIVE_ORDERS (no placement tool).
 """
 
 from __future__ import annotations
@@ -33,23 +33,28 @@ from .audio_convert import to_wav_16k_mono
 
 logger = logging.getLogger(__name__)
 
-SYSTEM = """You are the AD Desk voice co-pilot for Kenneth, a MEXC day/swing trader.
+SYSTEM = """You are the AD Desk continuous voice co-pilot for Kenneth (MEXC AD trader).
 
-Strategy (Average Drop / panic):
+You fully control the DESK UI data via tools — not just chat:
+- Target alarms/alerts: list / add / update / delete
+- Mover watchlist: list / add / remove; movers on/off + threshold + lookback
+- Journal positions: list / open / close
+- Memory: list fires, label took/skip/watch
+- Intel: investigations + news
+- Overview + propose_trade (paper AD plan)
+
+Strategy:
 - Prefer sharp panic dumps with market-wide heat and volume.
-- Isolated single-name dumps: check delist/hack risk; bias no-trade.
-- Scale in 5–10 exponential layers; never all-in; pride/greed are enemies.
-- Workflow: plan levels → alarms wait → engage when tools fire.
+- Isolated single-name dumps: bias no-trade until intel is clean.
+- Scale in layers; never all-in. Journal before ego.
 
-You control the DESK terminal via tools: alerts, watchlist, movers settings,
-journal positions (paper log), label fires, propose trades.
-
-Rules:
-- Prefer propose_trade / open_position (journal) over anything that sounds like live orders.
-- There is NO tool to place live exchange orders. If user asks to buy on MEXC live, explain
-  they must enable exchange UI or future DESK_ALLOW_LIVE_ORDERS — and still journal the plan.
-- Confirm destructive deletes briefly in your spoken/text reply after doing them.
-- Be concise, decisive, AD-native. Not financial advice.
+Conversation style:
+- This is a continuous multi-turn conversation — use prior turns.
+- When the user asks to change the desk, CALL TOOLS immediately (do not only describe).
+- After tools run, confirm briefly what changed.
+- Keep spoken replies short (1–3 sentences) unless asked for detail.
+- No live exchange order placement. Journal / propose only.
+- Not financial advice.
 """
 
 
@@ -68,10 +73,6 @@ def _base() -> str:
 
 
 def _stt_post_wav(wav_bytes: bytes) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Send WAV to xAI STT. Returns (transcript, error).
-    Empty transcript with 200 is treated as soft failure (silence / pure tone).
-    """
     key = _api_key()
     if not key:
         return None, "XAI_API_KEY not set"
@@ -102,13 +103,11 @@ def _stt_post_wav(wav_bytes: bytes) -> Tuple[Optional[str], Optional[str]]:
         text = (j.get("text") or j.get("transcript") or "").strip()
         if text:
             return text, None
-        # 200 but empty — often silence / pure tone / no speech
         return None, (
-            "STT returned empty text (speak a short phrase — silence/tone yields nothing)"
+            "STT empty text — speak clearly for ~1–2 seconds (silence yields nothing)"
         )
 
     body = (r.text or "")[:400]
-    # OpenAI-compatible whisper fallback (if base is not xAI)
     url2 = f"{_base()}/audio/transcriptions"
     try:
         r2 = requests.post(
@@ -142,10 +141,6 @@ def stt_transcribe(
     filename: str = "audio.webm",
     content_type: str = "",
 ) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Convert browser audio → WAV → xAI STT.
-    Returns (transcript, error_detail). Exactly one of them is set on failure paths.
-    """
     wav, conv_err = to_wav_16k_mono(
         audio_bytes, filename=filename, content_type=content_type
     )
@@ -186,35 +181,63 @@ def tts_speak(text: str) -> Optional[bytes]:
     return None
 
 
+def _sanitize_history(history: Optional[List[dict]]) -> List[dict]:
+    """Keep only role/content user+assistant turns for multi-turn continuity."""
+    out: List[dict] = []
+    if not history:
+        return out
+    for m in history[-24:]:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        content = m.get("content")
+        if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+            out.append({"role": role, "content": content.strip()[:4000]})
+    return out
+
+
 def chat_with_tools(user_text: str, history: Optional[List[dict]] = None) -> Dict[str, Any]:
     """
-    One-shot tool loop (max 4 rounds). Returns {reply, tools_run, transcript}.
+    Multi-round tool loop (max 8). Returns reply, tools_run, model, history_out.
+    history_out is client-safe user/assistant turns including this exchange.
     """
     key = _api_key()
     model = os.getenv("XAI_CHAT_MODEL") or os.getenv("DESK_AGENT_MODEL") or "grok-4.5"
+    prior = _sanitize_history(history)
     messages: List[dict] = [{"role": "system", "content": SYSTEM}]
-    if history:
-        messages.extend(history[-12:])
+    messages.extend(prior)
     messages.append({"role": "user", "content": user_text})
 
     tools_run: List[dict] = []
     if not key:
         from ..coach.engine import format_coach_reply
 
+        reply = (
+            format_coach_reply(user_text, recent_events=[])
+            + "\n\n(No XAI_API_KEY — tools disabled.)"
+        )
+        hist = prior + [
+            {"role": "user", "content": user_text},
+            {"role": "assistant", "content": reply},
+        ]
         return {
-            "reply": format_coach_reply(user_text, recent_events=[])
-            + "\n\n(No XAI_API_KEY — tools disabled. Set XAI_API_KEY for Grok voice agent.)",
+            "reply": reply,
             "tools_run": [],
             "model": None,
+            "history": hist[-24:],
         }
 
-    for _ in range(4):
+    final_reply = ""
+    max_rounds = int(os.getenv("DESK_AGENT_TOOL_ROUNDS", "8") or "8")
+    max_rounds = max(2, min(max_rounds, 12))
+
+    for _ in range(max_rounds):
         payload = {
             "model": model,
             "messages": messages,
             "tools": TOOL_DEFS,
             "tool_choice": "auto",
-            "temperature": 0.3,
+            "temperature": 0.25,
         }
         r = requests.post(
             f"{_base()}/chat/completions",
@@ -223,26 +246,20 @@ def chat_with_tools(user_text: str, history: Optional[List[dict]] = None) -> Dic
                 "Content-Type": "application/json",
             },
             json=payload,
-            timeout=90,
+            timeout=120,
             verify=_CA,
         )
         if r.status_code != 200:
             logger.warning("chat %s %s", r.status_code, r.text[:300])
-            return {
-                "reply": f"Agent API error {r.status_code}. Check XAI_API_KEY / model.",
-                "tools_run": tools_run,
-                "model": model,
-            }
+            final_reply = f"Agent API error {r.status_code}. Check XAI_API_KEY / model."
+            break
         data = r.json()
         choice = (data.get("choices") or [{}])[0]
         msg = choice.get("message") or {}
         tool_calls = msg.get("tool_calls") or []
         if not tool_calls:
-            return {
-                "reply": (msg.get("content") or "").strip() or "(empty)",
-                "tools_run": tools_run,
-                "model": model,
-            }
+            final_reply = (msg.get("content") or "").strip() or "(empty)"
+            break
         messages.append(msg)
         for tc in tool_calls:
             fn = tc.get("function") or {}
@@ -257,13 +274,28 @@ def chat_with_tools(user_text: str, history: Optional[List[dict]] = None) -> Dic
                 {
                     "role": "tool",
                     "tool_call_id": tc.get("id"),
-                    "content": json.dumps(result),
+                    "content": json.dumps(result)[:8000],
                 }
             )
+    else:
+        final_reply = (
+            "Done — applied tool updates."
+            if tools_run
+            else "Timed out before a final reply."
+        )
+
+    if not final_reply and tools_run:
+        final_reply = "Done — desk updated."
+
+    hist = prior + [
+        {"role": "user", "content": user_text},
+        {"role": "assistant", "content": final_reply},
+    ]
     return {
-        "reply": "Done — ran tools. Ask if you need a summary.",
+        "reply": final_reply,
         "tools_run": tools_run,
         "model": model,
+        "history": hist[-24:],
     }
 
 
@@ -271,6 +303,7 @@ def handle_voice_audio(
     audio_bytes: bytes,
     filename: str = "audio.webm",
     content_type: str = "",
+    history: Optional[List[dict]] = None,
 ) -> Dict[str, Any]:
     text, stt_err = stt_transcribe(
         audio_bytes, filename=filename, content_type=content_type
@@ -279,12 +312,13 @@ def handle_voice_audio(
         return {
             "ok": False,
             "error": stt_err
-            or "STT failed — set XAI_API_KEY; mic audio is converted to WAV before STT",
+            or "STT failed — set XAI_API_KEY; send WAV (browser encodes if no ffmpeg)",
             "transcript": None,
             "reply": None,
             "tools_run": [],
+            "history": _sanitize_history(history),
         }
-    out = chat_with_tools(text)
+    out = chat_with_tools(text, history=history)
     audio_out = None
     if os.getenv("DESK_VOICE_TTS", "true").lower() in ("1", "true", "yes"):
         raw = tts_speak(out["reply"][:1500])
@@ -296,5 +330,6 @@ def handle_voice_audio(
         "reply": out["reply"],
         "tools_run": out["tools_run"],
         "model": out.get("model"),
+        "history": out.get("history") or [],
         "audio_b64": audio_out,
     }

@@ -8,6 +8,9 @@
     view: "overview",
     chunks: [],
     recording: false,
+    continuous: localStorage.getItem("desk_voice_cont") !== "0",
+    agentHistory: [],
+    busy: false,
   };
 
   const qp = new URLSearchParams(location.search);
@@ -421,32 +424,57 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  function applyHistory(hist) {
+    if (Array.isArray(hist)) state.agentHistory = hist.slice(-24);
+  }
+
   async function runAgentText(text) {
+    if (state.busy) return;
+    state.busy = true;
     agentMsg("user", text);
     $("#voiceStatus").textContent = "Agent thinking…";
     try {
       const out = await api("/api/agent", {
         method: "POST",
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({
+          message: text,
+          history: state.agentHistory,
+        }),
       });
+      if (out.history) applyHistory(out.history);
+      else {
+        state.agentHistory.push({ role: "user", content: text });
+        state.agentHistory.push({
+          role: "assistant",
+          content: out.reply || "",
+        });
+        state.agentHistory = state.agentHistory.slice(-24);
+      }
       if (out.tools_run?.length) {
         agentMsg(
           "tools",
           out.tools_run
-            .map((t) => `${t.name}(${JSON.stringify(t.args)}) → ${JSON.stringify(t.result)}`)
+            .map(
+              (t) =>
+                `${t.name}(${JSON.stringify(t.args)}) → ${JSON.stringify(t.result)}`
+            )
             .join("\n")
         );
       }
       agentMsg("bot", out.reply || "—");
-      $("#voiceStatus").textContent = "Ready";
+      $("#voiceStatus").textContent = state.continuous
+        ? "Listening continuum — tap Stop when done"
+        : "Ready";
       refreshAll();
     } catch (e) {
       agentMsg("bot", "Error: " + e.message);
       $("#voiceStatus").textContent = "Error";
+    } finally {
+      state.busy = false;
     }
   }
 
-  // ---- Microphone (requires HTTPS) ----
+  // ---- Mic: localhost OK; convert to WAV client-side (no local ffmpeg needed) ----
   function isSecureForMic() {
     if (window.isSecureContext) return true;
     const h = location.hostname;
@@ -464,25 +492,24 @@
   function updateMicUi() {
     const box = $("#secureBox");
     const micBtn = $("#btnMic");
+    const cont = $("#btnCont");
+    if (cont) {
+      cont.classList.toggle("on", state.continuous);
+      cont.textContent = state.continuous
+        ? "Continuous: ON"
+        : "Continuous: OFF";
+    }
     if (!box || !micBtn) return;
     const secure = isSecureForMic();
     if (!secure) {
       box.hidden = false;
       box.innerHTML =
-        "<strong>Mic needs HTTPS</strong> (browser rule on plain http://IP).<br/>" +
-        "You are on <code>" +
-        location.protocol +
-        "//" +
-        location.host +
-        "</code>. " +
-        "Text agent and the rest of the desk work here. " +
-        "For voice: run <code>./scripts/desk_https_up.sh</code> on the droplet, open " +
-        "<code>https://YOUR_DROPLET_IP/</code> with the same token, " +
-        "Advanced → Proceed (self-signed), then allow microphone.";
+        "<strong>Mic needs HTTPS</strong> on plain http://IP.<br/>" +
+        "Local: use <code>http://127.0.0.1:8080</code>. Droplet: " +
+        "<code>https://IP/</code> after desk_https_up.sh.";
       micBtn.disabled = true;
       micBtn.textContent = "Need HTTPS";
-      $("#voiceStatus").textContent =
-        "UI/text OK on HTTP · voice needs https:// same IP";
+      $("#voiceStatus").textContent = "Text agent works · voice needs secure context";
     } else if (!micSupported()) {
       box.hidden = false;
       box.innerHTML = "This browser cannot record audio. Try Chrome or Safari.";
@@ -490,18 +517,139 @@
       micBtn.textContent = "Mic N/A";
     } else {
       box.hidden = true;
-      micBtn.disabled = false;
-      micBtn.textContent = state.recording ? "Stop · send" : "Tap to record";
-      $("#voiceStatus").textContent = state.recording
-        ? "Recording… tap again to send"
-        : "Ready — tap the mic and speak";
+      micBtn.disabled = state.busy && !state.recording;
+      if (state.recording) {
+        micBtn.textContent = "Stop · send";
+        $("#voiceStatus").textContent = "Recording… tap to send turn";
+      } else if (state.busy) {
+        micBtn.textContent = "Working…";
+        $("#voiceStatus").textContent = "Transcribing + tools…";
+      } else {
+        micBtn.textContent = state.continuous
+          ? "Talk (continuous)"
+          : "Tap to record";
+        $("#voiceStatus").textContent = state.continuous
+          ? "Continuous conversation — tap to speak each turn"
+          : "Ready — tap mic, speak, tap again to send";
+      }
     }
   }
 
-  async function sendAudioBlob(blob, filename) {
+  /** Decode MediaRecorder blob → 16 kHz mono PCM WAV (works without ffmpeg). */
+  async function blobToWav16k(blob) {
+    const ab = await blob.arrayBuffer();
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    let decoded;
+    try {
+      decoded = await ctx.decodeAudioData(ab.slice(0));
+    } catch (e) {
+      await ctx.close().catch(() => {});
+      throw new Error("Could not decode mic audio: " + (e.message || e));
+    }
+    const targetRate = 16000;
+    const duration = decoded.duration;
+    const offline = new OfflineAudioContext(
+      1,
+      Math.max(1, Math.ceil(duration * targetRate)),
+      targetRate
+    );
+    const src = offline.createBufferSource();
+    // mixdown to mono
+    const mono = offline.createBuffer(1, decoded.length, decoded.sampleRate);
+    const ch0 = mono.getChannelData(0);
+    const nCh = decoded.numberOfChannels;
+    for (let i = 0; i < decoded.length; i++) {
+      let s = 0;
+      for (let c = 0; c < nCh; c++) s += decoded.getChannelData(c)[i];
+      ch0[i] = s / nCh;
+    }
+    src.buffer = mono;
+    src.connect(offline.destination);
+    src.start(0);
+    const rendered = await offline.startRendering();
+    await ctx.close().catch(() => {});
+    const pcm = rendered.getChannelData(0);
+    const samples = pcm.length;
+    const buf = new ArrayBuffer(44 + samples * 2);
+    const view = new DataView(buf);
+    const wstr = (o, s) => {
+      for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i));
+    };
+    wstr(0, "RIFF");
+    view.setUint32(4, 36 + samples * 2, true);
+    wstr(8, "WAVE");
+    wstr(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, targetRate, true);
+    view.setUint32(28, targetRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    wstr(36, "data");
+    view.setUint32(40, samples * 2, true);
+    let off = 44;
+    for (let i = 0; i < samples; i++) {
+      let x = Math.max(-1, Math.min(1, pcm[i]));
+      view.setInt16(off, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+      off += 2;
+    }
+    return new Blob([buf], { type: "audio/wav" });
+  }
+
+  async function playTtsAndMaybeContinue(audioB64) {
+    const audio = $("#voiceAudio");
+    if (!audioB64 || !audio) {
+      if (state.continuous && !state.busy) setTimeout(() => startRec(), 400);
+      return;
+    }
+    audio.src = "data:audio/mpeg;base64," + audioB64;
+    audio.hidden = false;
+    try {
+      await audio.play();
+      await new Promise((resolve) => {
+        const done = () => {
+          audio.removeEventListener("ended", done);
+          audio.removeEventListener("error", done);
+          resolve();
+        };
+        audio.addEventListener("ended", done);
+        audio.addEventListener("error", done);
+        // safety if play hangs
+        setTimeout(done, 60000);
+      });
+    } catch (_) {
+      /* autoplay blocked — still continue */
+    }
+    if (state.continuous && !state.busy && !state.recording) {
+      setTimeout(() => startRec(), 350);
+    }
+  }
+
+  async function sendAudioBlob(blob) {
+    state.busy = true;
+    updateMicUi();
+    $("#voiceStatus").textContent = "Encoding WAV + STT + tools…";
+    let wavBlob = blob;
+    let fname = "voice.wav";
+    try {
+      if (!blob.type.includes("wav")) {
+        wavBlob = await blobToWav16k(blob);
+      }
+    } catch (e) {
+      // fall back to original; server may convert if ffmpeg present
+      fname = blob.type.includes("mp4")
+        ? "voice.mp4"
+        : blob.type.includes("ogg")
+          ? "voice.ogg"
+          : "voice.webm";
+      wavBlob = blob;
+      console.warn("client WAV convert failed", e);
+    }
     const fd = new FormData();
-    fd.append("file", blob, filename || "voice.webm");
-    $("#voiceStatus").textContent = "Transcribing + running tools…";
+    fd.append("file", wavBlob, fname);
+    fd.append("history", JSON.stringify(state.agentHistory || []));
     const res = await fetch("/api/voice", {
       method: "POST",
       headers: headers(false),
@@ -516,6 +664,7 @@
       throw new Error(msg || res.statusText);
     }
     const out = await res.json();
+    if (out.history) applyHistory(out.history);
     if (out.transcript) agentMsg("user", "🎤 " + out.transcript);
     if (out.tools_run?.length) {
       agentMsg(
@@ -526,24 +675,21 @@
       );
     }
     agentMsg("bot", out.reply || "—");
-    if (out.audio_b64) {
-      const audio = $("#voiceAudio");
-      audio.src = "data:audio/mpeg;base64," + out.audio_b64;
-      audio.hidden = false;
-      audio.play().catch(() => {});
-    }
-    $("#voiceStatus").textContent = "Ready";
     refreshAll();
+    state.busy = false;
+    updateMicUi();
+    await playTtsAndMaybeContinue(out.audio_b64);
+    updateMicUi();
   }
 
   let recorder = null;
   let mediaStream = null;
 
   async function startRec() {
-    if (state.recording) return;
+    if (state.recording || state.busy) return;
     if (!isSecureForMic() || !micSupported()) {
       updateMicUi();
-      toast("Open https://YOUR_IP/ for microphone");
+      toast("Mic needs secure context (localhost or HTTPS)");
       return;
     }
     try {
@@ -555,14 +701,12 @@
         },
       });
       state.chunks = [];
-      // Prefer containers xAI/ffmpeg handle cleanly; WebM still OK (server → WAV)
       const mimeCandidates = [
-        "audio/mp4",
-        "audio/mp4;codecs=mp4a.40.2",
-        "audio/ogg;codecs=opus",
-        "audio/ogg",
         "audio/webm;codecs=opus",
         "audio/webm",
+        "audio/mp4",
+        "audio/ogg;codecs=opus",
+        "audio/ogg",
       ];
       let mime = "";
       for (const c of mimeCandidates) {
@@ -591,15 +735,11 @@
             toast("Empty recording — try again");
             return;
           }
-          const fname = type.includes("mp4")
-            ? "voice.mp4"
-            : type.includes("ogg")
-              ? "voice.ogg"
-              : "voice.webm";
-          await sendAudioBlob(blob, fname);
+          await sendAudioBlob(blob);
         } catch (e) {
           $("#voiceStatus").textContent = "Voice failed";
-          toast(String(e.message || e).slice(0, 140));
+          toast(String(e.message || e).slice(0, 160));
+          state.busy = false;
         } finally {
           state.recording = false;
           $("#btnMic").classList.remove("rec");
@@ -618,7 +758,7 @@
       } else if (name === "NotFoundError") {
         msg = "No microphone found";
       } else if (!window.isSecureContext) {
-        msg = "Need HTTPS — use https://YOUR_IP/";
+        msg = "Need HTTPS or localhost";
       }
       toast(msg);
       $("#voiceStatus").textContent = msg;
@@ -642,6 +782,31 @@
     mic.addEventListener("click", () => {
       if (state.recording) stopRec();
       else startRec();
+    });
+  }
+
+  const contBtn = $("#btnCont");
+  if (contBtn) {
+    contBtn.addEventListener("click", () => {
+      state.continuous = !state.continuous;
+      localStorage.setItem("desk_voice_cont", state.continuous ? "1" : "0");
+      updateMicUi();
+      toast(
+        state.continuous
+          ? "Continuous conversation ON — after each reply, mic re-opens"
+          : "Continuous OFF — one shot per tap"
+      );
+    });
+  }
+
+  const clearHist = $("#btnClearHist");
+  if (clearHist) {
+    clearHist.addEventListener("click", () => {
+      state.agentHistory = [];
+      const log = $("#agentLog");
+      if (log) log.innerHTML = "";
+      agentMsg("bot", "Conversation cleared — new continuous session.");
+      toast("History cleared");
     });
   }
 

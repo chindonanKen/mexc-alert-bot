@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -469,21 +469,33 @@ def create_app() -> FastAPI:
 
     @app.post("/api/agent")
     def agent_text(body: AgentBody, _: bool = Depends(require_auth)):
-        """Grok tool-using agent (text). Same tools as voice."""
+        """Grok tool-using agent (text). Continuous history + full desk tools."""
         out = chat_with_tools(body.message, history=body.history)
         return out
 
     @app.post("/api/voice")
     async def agent_voice(
         file: UploadFile = File(...),
+        history: Optional[str] = Form(None),
         _: bool = Depends(require_auth),
     ):
+        """Continuous voice turn: STT → tools → optional TTS. Pass history JSON for multi-turn."""
         raw = await file.read()
         if not raw:
             raise HTTPException(400, "Empty audio")
         name = file.filename or "audio.webm"
         ctype = file.content_type or ""
-        out = handle_voice_audio(raw, filename=name, content_type=ctype)
+        hist = None
+        if history:
+            try:
+                hist = json.loads(history)
+                if not isinstance(hist, list):
+                    hist = None
+            except Exception:
+                hist = None
+        out = handle_voice_audio(
+            raw, filename=name, content_type=ctype, history=hist
+        )
         if not out.get("ok"):
             raise HTTPException(502, out.get("error") or "voice failed")
         return out
