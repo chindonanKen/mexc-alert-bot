@@ -36,7 +36,6 @@
       </nav>
       <div class="rail-meta">
         <div id="connStatus" class="pill">…</div>
-        <button type="button" class="btn soft rail-voice-btn" id="btnRailCall">Start call</button>
       </div>
     </aside>
 
@@ -51,8 +50,9 @@
         </div>
       </header>
 
-      <!-- OVERVIEW — Targets · Movers · Positions only -->
+      <!-- OVERVIEW — Targets · Movers · Positions (+ book news only when relevant) -->
       <section class="view on" id="view-overview">
+        <div id="ovBookNews" class="ov-book-news" hidden></div>
         <div class="command-triad">
           <article class="cmd-panel cmd-targets">
             <header class="cmd-h">

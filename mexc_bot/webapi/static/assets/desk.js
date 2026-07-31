@@ -153,6 +153,31 @@
     const d = await api("/api/overview");
     const h = d.hierarchy || {};
 
+    // High-priority book news only (targets / movers / positions). Hidden if none.
+    const newsEl = $("#ovBookNews");
+    if (newsEl) {
+      const bn = h.book_news || [];
+      if (!bn.length) {
+        newsEl.hidden = true;
+        newsEl.innerHTML = "";
+      } else {
+        newsEl.hidden = false;
+        newsEl.innerHTML =
+          `<div class="ov-news-h">Book news</div>` +
+          bn
+            .map(
+              (n) => `<div class="ov-news-row">
+              <span class="ov-news-sev">${(n.severity || n.class || "news").toString().slice(0, 12)}</span>
+              <div class="ov-news-body">
+                <div class="ov-news-title">${(n.title || "—").slice(0, 120)}</div>
+                <div class="ov-news-meta">${n.symbol || "—"} · ${n.source || ""} · ${fmtTime(n.ts)}</div>
+              </div>
+            </div>`
+            )
+            .join("");
+      }
+    }
+
     const tt = h.top_targets || [];
     $("#ovTopTargets").innerHTML = tt.length
       ? tt
@@ -563,8 +588,6 @@
     const muteSpk = $("#btnMuteSpk");
     const level = $("#voiceLevel");
     const dock = $("#voiceDock");
-    const railCall = $("#btnRailCall");
-
     if (dock) {
       dock.classList.toggle("in-call", state.inCall);
       dock.classList.toggle("busy", state.busy);
@@ -635,11 +658,6 @@
     }
     const vs = $("#voiceStatus");
     if (vs) vs.textContent = statusLine;
-    if (railCall) {
-      railCall.textContent = state.inCall ? "End call" : "Start call";
-      railCall.classList.toggle("danger", state.inCall);
-      railCall.disabled = !secure || !micSupported();
-    }
   }
 
   /** Build mono 16-bit PCM WAV from Float32 samples (no ffmpeg / no MediaRecorder). */
@@ -1133,14 +1151,6 @@
   if (mic) {
     mic.addEventListener("click", () => {
       if (!state.inCall) startCall();
-    });
-  }
-
-  const railCall = $("#btnRailCall");
-  if (railCall) {
-    railCall.addEventListener("click", () => {
-      if (state.inCall) endCall();
-      else startCall();
     });
   }
 

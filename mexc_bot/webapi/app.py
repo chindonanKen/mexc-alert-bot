@@ -216,24 +216,61 @@ def create_app() -> FastAPI:
         ]
         top_movers = sorted(mover_like, key=_mover_score, reverse=True)[:3]
 
-        book_syms = set()
+        # Book = only symbols you care about: targets + movers watchlist + open positions
+        book_syms: set = set()
+        book_bases: set = set()
+
+        def _add_book_sym(raw: str) -> None:
+            s = (raw or "").upper().strip()
+            if not s:
+                return
+            book_syms.add(s)
+            base = (
+                s.replace("_USDT", "")
+                .replace("USDT", "")
+                .replace("_USD", "")
+                .replace("STOCK", "")
+                .strip("_")
+            )
+            if base:
+                book_bases.add(base)
+
         for a in alerts:
-            book_syms.add((a.get("symbol") or "").upper())
+            _add_book_sym(a.get("symbol") or "")
         try:
             for w in actions.list_watchlist(uid) if uid else []:
-                book_syms.add((w.get("symbol") or "").upper())
+                _add_book_sym(w.get("symbol") or "")
         except Exception:
             pass
         positions = actions.list_positions(uid) if uid else []
         for p in positions:
-            book_syms.add((p.get("symbol") or "").upper())
+            _add_book_sym(p.get("symbol") or "")
 
-        def _in_book(sym: str) -> bool:
-            s = (sym or "").upper()
-            if s in book_syms:
-                return True
-            base = s.replace("_USDT", "").replace("USDT", "")
-            return any(base and base in b for b in book_syms)
+        def _in_book(sym: str, title: str = "") -> bool:
+            """True only if news/intel touches a book symbol (target/mover/position)."""
+            if not book_bases and not book_syms:
+                return False
+            s = (sym or "").upper().strip()
+            t = (title or "").upper()
+            if s:
+                if s in book_syms:
+                    return True
+                base = (
+                    s.replace("_USDT", "")
+                    .replace("USDT", "")
+                    .replace("_USD", "")
+                    .replace("STOCK", "")
+                    .strip("_")
+                )
+                if base and base in book_bases:
+                    return True
+            # Title mention of a book base (whole-ish token)
+            for b in book_bases:
+                if len(b) < 2:
+                    continue
+                if b in t.split() or f" {b} " in f" {t} " or t.startswith(b + " ") or t.endswith(" " + b):
+                    return True
+            return False
 
         recent_inv = (
             db.fetch_all(
@@ -247,19 +284,26 @@ def create_app() -> FastAPI:
             if uid
             else []
         )
+        # Never pad with unrelated intel — empty is fine
         book_intel = [i for i in recent_inv if _in_book(i.get("symbol") or "")][:6]
-        if not book_intel:
-            book_intel = recent_inv[:3]
 
+        # Recent only (48h) — and only book-linked. No filler headlines.
+        now_ts = time.time()
+        news_horizon = now_ts - 48 * 3600
         news_rows = db.fetch_all(
             """
             SELECT id, symbol, class, severity, title, source, ts
-            FROM news_events ORDER BY ts DESC LIMIT 30
-            """
+            FROM news_events
+            WHERE ts IS NULL OR ts >= ?
+            ORDER BY ts DESC LIMIT 40
+            """,
+            (news_horizon,),
         )
-        book_news = [n for n in news_rows if _in_book(n.get("symbol") or "")][:5]
-        if not book_news:
-            book_news = news_rows[:2]
+        book_news = [
+            n
+            for n in news_rows
+            if _in_book(n.get("symbol") or "", n.get("title") or "")
+        ][:8]
 
         # Learning snapshot
         labels_recent = (
