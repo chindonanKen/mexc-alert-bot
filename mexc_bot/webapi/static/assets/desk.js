@@ -121,14 +121,16 @@
     const el = $(`#view-${name}`);
     if (el) el.classList.add("on");
     const meta = {
-      overview: ["Overview", "Regime · fires · positions"],
-      positions: ["Positions", "Journal of open AD trades"],
-      tape: ["Tape", "Watchlist · live marks · mover settings"],
-      targets: ["Targets", "Add · edit · delete one-shot alerts"],
-      memory: ["Memory", "Fires + labels"],
-      intel: ["Intel", "News · delist radar · source weights"],
-      voice: ["Voice Agent", "Mic on HTTPS · Grok tools control the desk"],
-      roadmap: ["Roadmap", "Where the platform is going"],
+      overview: ["Overview", "Targets · movers · intel · positions · learning"],
+      positions: ["Positions", "Journal · mark · time in trade"],
+      tape: ["Tape", "Full watchlist · live marks"],
+      targets: ["Targets", "All one-shot alarms"],
+      memory: ["Learning", "Teach · labels · outcomes"],
+      intel: ["Intel", "Book-filtered news · delist"],
+      planner: ["AD Layers", "Shared human + agent ladder"],
+      paper: ["Paper Arena", "Fictive agents · real marks"],
+      voice: ["Voice log", "Transcript of the call"],
+      roadmap: ["Roadmap", "Vision & phases"],
       playbook: ["Playbook", "AD strategy encoded"],
     }[name] || ["Desk", ""];
     $("#title").textContent = meta[0];
@@ -154,59 +156,157 @@
       .join("");
   }
 
+  function rankEmpty(msg) {
+    return `<div class="rank-empty">${msg}</div>`;
+  }
+
   async function loadOverview() {
     const d = await api("/api/overview");
+    const h = d.hierarchy || {};
     renderMajors(d.market?.majors || []);
     $("#regimeValue").textContent = d.pulse?.regime || "—";
     $("#regimeBias").textContent = d.pulse?.ad_bias || "";
+    const rr = $("#regimeRule");
+    if (rr) rr.textContent = d.pulse?.rule || "";
     const c = d.counts || {};
     $("#counters").innerHTML = [
       ["Targets", c.alerts_enabled],
       ["Watch", c.watchlist],
-      ["Events", c.events],
+      ["Fires", c.events],
       ["Open", c.open_positions],
-      ["Intel", c.investigations],
-      ["News", c.news],
     ]
       .map(
         ([k, v]) =>
           `<div class="metric"><span>${k}</span><b>${v ?? 0}</b></div>`
       )
       .join("");
-    const pos = d.positions || [];
+
+    const pnl = h.pnl || {};
+    const strip = $("#pnlStrip");
+    if (strip) {
+      strip.textContent =
+        `PnL · open ${pnl.open_n ?? 0} · closed ${pnl.closed_n ?? 0}` +
+        (pnl.realized_avg_pct != null
+          ? ` · avg realized ${pnl.realized_avg_pct}%`
+          : " · avg realized —") +
+        " · journal";
+    }
+
+    // 1 Targets top 3
+    const tt = h.top_targets || [];
+    $("#ovTopTargets").innerHTML = tt.length
+      ? tt
+          .map(
+            (a, i) => `<div class="rank-row">
+            <span class="idx">${i + 1}</span>
+            <span class="sym">${a.market?.[0]?.toUpperCase() || "?"} ${a.symbol}</span>
+            <span class="meta">${a.enabled ? "armed" : "off"}</span>
+            <span class="meta">${fmtPx(a.price)}</span>
+          </div>`
+          )
+          .join("")
+      : rankEmpty("No targets — voice: add alert BTC 95000");
+
+    // 2 Movers top 3
+    const tm = h.top_movers || [];
+    $("#ovTopMovers").innerHTML = tm.length
+      ? tm
+          .map(
+            (e, i) => `<div class="rank-row">
+            <span class="idx">${i + 1}</span>
+            <span class="sym">${e.symbol}</span>
+            <span class="dn">${e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—"}</span>
+            <span class="meta">${e.velocity_band || e.mode || "—"}</span>
+          </div>`
+          )
+          .join("")
+      : rankEmpty("No recent mover fires in memory");
+
+    // 3 Book intel
+    const bi = h.book_intel || [];
+    const bn = h.book_news || [];
+    const intelParts = [];
+    bi.forEach((i) => {
+      intelParts.push(`<div class="rank-row">
+        <span class="idx">I</span>
+        <span class="sym">${i.symbol}</span>
+        <span class="meta">${i.verdict || "—"}</span>
+        <span class="meta">${i.confidence != null ? Math.round(i.confidence * 100) + "%" : ""}</span>
+      </div>`);
+    });
+    bn.forEach((n) => {
+      intelParts.push(`<div class="rank-row">
+        <span class="idx">N</span>
+        <span class="sym">${(n.title || "").slice(0, 48)}</span>
+        <span class="meta">${n.severity || ""}</span>
+        <span class="meta">${n.symbol || ""}</span>
+      </div>`);
+    });
+    $("#ovBookIntel").innerHTML = intelParts.length
+      ? intelParts.join("")
+      : rankEmpty("No book-linked intel — clean tape");
+
+    // 4 Positions
+    const pos = h.positions || d.positions || [];
     $("#ovPos").innerHTML = pos.length
       ? pos
           .map(
-            (p) =>
-              `<div>#${p.id} ${p.symbol} ${p.market} @ ${
-                p.entry_avg != null ? fmtPx(p.entry_avg) : "—"
-              }</div>`
+            (p, i) => `<div class="rank-row">
+            <span class="idx">${i + 1}</span>
+            <span class="sym">${p.symbol}</span>
+            <span class="meta">avg ${p.entry_avg != null ? fmtPx(p.entry_avg) : "—"}</span>
+            <span class="meta">${p.open_hours != null ? p.open_hours + "h" : fmtTime(p.opened_at)}</span>
+          </div>`
           )
           .join("")
-      : "<div>No open journal trades</div>";
+      : rankEmpty("No open positions (journal / MEXC when linked)");
 
-    $("#ovEvents").innerHTML = table(
-      ["ID", "Sym", "Drop", "Band", "When"],
-      (d.recent_events || [])
-        .map(
-          (e) => `<tr>
-          <td>#${e.id}</td><td>${e.symbol}</td>
-          <td class="dn">${e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—"}</td>
-          <td>${e.velocity_band || "—"}</td><td>${fmtTime(e.ts)}</td></tr>`
+    // 5 Learning
+    const learn = h.learning || {};
+    const need = learn.needs_label || [];
+    const labs = learn.recent_labels || [];
+    const learnHtml = [];
+    if (need.length) {
+      learnHtml.push(
+        ...need.map(
+          (e) => `<div class="rank-row">
+          <span class="idx">?</span>
+          <span class="sym">${e.symbol}</span>
+          <span class="meta">needs label</span>
+          <span class="dn">${e.velocity_band || ""}</span>
+        </div>`
         )
-        .join("")
-    );
-    $("#ovInv").innerHTML = table(
-      ["ID", "Sym", "Verdict", "Conf", "When"],
-      (d.recent_investigations || [])
-        .map(
-          (i) => `<tr>
-          <td>#${i.id}</td><td>${i.symbol}</td><td>${i.verdict}</td>
-          <td>${i.confidence != null ? Math.round(i.confidence * 100) + "%" : "—"}</td>
-          <td>${fmtTime(i.ts)}</td></tr>`
-        )
-        .join("")
-    );
+      );
+    }
+    labs.slice(0, 4).forEach((l) => {
+      learnHtml.push(`<div class="rank-row">
+        <span class="idx">✓</span>
+        <span class="sym">${l.symbol || "—"}</span>
+        <span class="meta">${l.action || ""}</span>
+        <span class="meta">${l.bounce_quality || ""}</span>
+      </div>`);
+    });
+    $("#ovLearning").innerHTML = learnHtml.length
+      ? learnHtml.join("")
+      : rankEmpty("Label fires to teach the coach");
+
+    const acts = $("#ovLearnActions");
+    if (acts) {
+      acts.innerHTML = need.length
+        ? need
+            .slice(0, 2)
+            .map(
+              (e) =>
+                `<button type="button" class="chip-btn" data-agent="label latest fire as took">Took ${e.symbol}</button>
+                 <button type="button" class="chip-btn" data-agent="label latest fire as skip">Skip ${e.symbol}</button>`
+            )
+            .join("")
+        : `<button type="button" class="chip-btn" data-agent="get overview of the desk">Voice: desk status</button>
+           <button type="button" class="chip-btn" data-agent="am I following my AD strategy?">Voice: discipline check</button>`;
+      acts.querySelectorAll("[data-agent]").forEach((b) => {
+        b.addEventListener("click", () => runAgentText(b.getAttribute("data-agent")));
+      });
+    }
   }
 
   async function loadPositions() {
@@ -1358,6 +1458,8 @@
       targets: loadTargets,
       memory: loadMemory,
       intel: loadIntel,
+      planner: async () => {},
+      paper: async () => {},
       roadmap: loadRoadmap,
       playbook: loadPlaybook,
       voice: async () => {
@@ -1385,6 +1487,59 @@
     })
   );
   $("#btnRefresh").addEventListener("click", refreshAll);
+
+  // Overview jump buttons + layer planner scaffold
+  document.body.addEventListener("click", (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLElement)) return;
+    const jump = t.getAttribute("data-jump");
+    if (jump) {
+      setView(jump);
+      refreshAll();
+    }
+  });
+
+  const planForm = $("#planForm");
+  if (planForm) {
+    planForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const sym = (f.symbol.value || "").toUpperCase().trim();
+      const layers = Math.max(3, Math.min(12, parseInt(f.layers.value || "6", 10)));
+      const ad = parseFloat(f.ad_pct.value || "8");
+      const inv = f.invalidation.value || "structure break / below last layer";
+      const mkt = f.market.value || "futures";
+      // Exponential ladder sketch (sizes as fractions of risk unit)
+      const lines = [];
+      lines.push(`AD PLAN · ${mkt} ${sym}`);
+      lines.push(`AD length ≈ ${ad}% · layers ${layers} · powder reserve ~30%`);
+      lines.push(`Invalidation: ${inv}`);
+      lines.push("");
+      let size = 1;
+      let sum = 0;
+      const sizes = [];
+      for (let i = 0; i < layers; i++) {
+        sizes.push(size);
+        sum += size;
+        size *= 1.6;
+      }
+      const norm = sizes.map((s) => s / sum);
+      for (let i = 0; i < layers; i++) {
+        const drop = (ad * (i + 1)) / layers;
+        lines.push(
+          `L${i + 1}  −${drop.toFixed(1)}% from ref  · size ${(norm[i] * 100).toFixed(1)}% of risk unit`
+        );
+      }
+      lines.push("");
+      lines.push("Voice: “propose trade on " + sym + " with " + layers + " layers” to journal thesis.");
+      lines.push("Next: save_plan API will persist for agent learning.");
+      $("#planOut").textContent = lines.join("\n");
+      // Also ask agent to propose (optional continuity)
+      runAgentText(
+        `propose_trade for ${sym}: thesis AD scale-in ${layers} layers about ${ad}% AD, invalidation ${inv}`
+      );
+    });
+  }
 
   setView("overview");
   updateMicUi();

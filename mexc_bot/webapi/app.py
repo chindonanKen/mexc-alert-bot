@@ -158,6 +158,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/overview")
     def overview(_: bool = Depends(require_auth)):
+        """Ranked Overview stack — see docs/AD_DESK_VISION.md hierarchy."""
         uid = db.default_user_id()
         ctx = market_context()
         counts = {
@@ -184,38 +185,170 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.debug("counts: %s", e)
 
+        alerts = actions.list_alerts(uid) if uid else []
+        # Top 3 targets: enabled first, then by id (stable). Noise cut for Overview.
+        enabled = [a for a in alerts if a.get("enabled")]
+        disabled = [a for a in alerts if not a.get("enabled")]
+        top_targets = (enabled + disabled)[:3]
+
         recent_events = (
             db.fetch_all(
                 """
                 SELECT id, source, symbol, market, drop_pct, velocity_band, mode, ts, price
-                FROM learning_events WHERE user_id = ? ORDER BY ts DESC LIMIT 12
+                FROM learning_events WHERE user_id = ? ORDER BY ts DESC LIMIT 40
                 """,
                 (uid,),
             )
             if uid
             else []
         )
+        # Top 3 movers: deepest recent dumps, prefer PANIC/FAST
+        def _mover_score(e: dict) -> float:
+            drop = abs(float(e.get("drop_pct") or 0))
+            band = (e.get("velocity_band") or "").upper()
+            boost = 3.0 if band == "PANIC" else 1.5 if band == "FAST" else 0.0
+            return drop + boost
+
+        mover_like = [
+            e
+            for e in recent_events
+            if (e.get("source") or "").startswith("mover") or e.get("drop_pct") is not None
+        ]
+        top_movers = sorted(mover_like, key=_mover_score, reverse=True)[:3]
+
+        book_syms = set()
+        for a in alerts:
+            book_syms.add((a.get("symbol") or "").upper())
+        try:
+            for w in actions.list_watchlist(uid) if uid else []:
+                book_syms.add((w.get("symbol") or "").upper())
+        except Exception:
+            pass
+        positions = actions.list_positions(uid) if uid else []
+        for p in positions:
+            book_syms.add((p.get("symbol") or "").upper())
+
+        def _in_book(sym: str) -> bool:
+            s = (sym or "").upper()
+            if s in book_syms:
+                return True
+            base = s.replace("_USDT", "").replace("USDT", "")
+            return any(base and base in b for b in book_syms)
+
         recent_inv = (
             db.fetch_all(
                 """
                 SELECT id, symbol, market, drop_pct, velocity_band, heat_breadth,
                        verdict, confidence, ts
-                FROM investigations WHERE user_id = ? ORDER BY ts DESC LIMIT 8
+                FROM investigations WHERE user_id = ? ORDER BY ts DESC LIMIT 30
                 """,
                 (uid,),
             )
             if uid
             else []
         )
-        positions = actions.list_positions(uid) if uid else []
+        book_intel = [i for i in recent_inv if _in_book(i.get("symbol") or "")][:6]
+        if not book_intel:
+            book_intel = recent_inv[:3]
+
+        news_rows = db.fetch_all(
+            """
+            SELECT id, symbol, class, severity, title, source, ts
+            FROM news_events ORDER BY ts DESC LIMIT 30
+            """
+        )
+        book_news = [n for n in news_rows if _in_book(n.get("symbol") or "")][:5]
+        if not book_news:
+            book_news = news_rows[:2]
+
+        # Learning snapshot
+        labels_recent = (
+            db.fetch_all(
+                """
+                SELECT l.action, l.bounce_quality, l.ts, e.symbol, e.velocity_band
+                FROM learning_labels l
+                JOIN learning_events e ON e.id = l.event_id
+                WHERE l.user_id = ?
+                ORDER BY l.ts DESC LIMIT 8
+                """,
+                (uid,),
+            )
+            if uid
+            else []
+        )
+        unlabeled = [
+            e
+            for e in recent_events[:8]
+            if not any(
+                True
+                for x in db.fetch_all(
+                    "SELECT 1 FROM learning_labels WHERE event_id=? LIMIT 1",
+                    (e["id"],),
+                )
+            )
+        ][:3] if uid else []
+
+        # Simple journal PnL sketch (closed trades with entry+exit)
+        closed = (
+            db.fetch_all(
+                """
+                SELECT entry_avg, exit_avg, symbol, closed_at
+                FROM journal_trades
+                WHERE user_id=? AND status='closed' AND entry_avg IS NOT NULL AND exit_avg IS NOT NULL
+                ORDER BY closed_at DESC LIMIT 50
+                """,
+                (uid,),
+            )
+            if uid
+            else []
+        )
+        realized_pct = []
+        for t in closed:
+            try:
+                en, ex = float(t["entry_avg"]), float(t["exit_avg"])
+                if en > 0:
+                    realized_pct.append((ex - en) / en * 100.0)
+            except Exception:
+                pass
+        pnl = {
+            "mode": "journal",
+            "open_n": len(positions),
+            "closed_n": len(closed),
+            "realized_avg_pct": (
+                round(sum(realized_pct) / len(realized_pct), 2) if realized_pct else None
+            ),
+            "note": "Mark-to-market + MEXC fills when private read is on",
+        }
+
+        # Enrich open positions with rough time open
+        now = time.time()
+        for p in positions:
+            oa = p.get("opened_at")
+            try:
+                p["open_hours"] = round((now - float(oa)) / 3600.0, 1) if oa else None
+            except Exception:
+                p["open_hours"] = None
+
         regime = ctx.get("regime", "UNKNOWN")
         return {
             "user_id": uid,
             "market": ctx,
             "counts": counts,
+            "hierarchy": {
+                "top_targets": top_targets,
+                "top_movers": top_movers,
+                "book_intel": book_intel,
+                "book_news": book_news,
+                "positions": positions,
+                "learning": {
+                    "recent_labels": labels_recent,
+                    "needs_label": unlabeled,
+                },
+                "pnl": pnl,
+            },
             "positions": positions,
-            "recent_events": recent_events,
-            "recent_investigations": recent_inv,
+            "recent_events": recent_events[:12],
+            "recent_investigations": recent_inv[:8],
             "pulse": {
                 "regime": regime,
                 "ad_bias": (
@@ -227,6 +360,7 @@ def create_app() -> FastAPI:
                 ),
                 "rule": "Panic + breadth + volume. Isolated + news → no-trade bias.",
             },
+            "vision": "docs/AD_DESK_VISION.md",
             "ts": time.time(),
         }
 

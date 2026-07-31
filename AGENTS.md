@@ -10,6 +10,22 @@ Guide for humans and coding agents. **Read this before changing production behav
 **Owner use case:** daytrading MEXC; primary edge is **sharp downside / panic dumps** (AD / average-drop style scale-ins). Movers are the high-value feature.  
 **Dev vs prod:** Grok Build on the **laptop** is for code; **live bot stays on DigitalOcean**. Grok sessions are **not** portable between machines — **git + these docs** are.
 
+### AD Desk product north star (voice-first)
+
+Full vision: **[docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md)** — read before large desk UI / voice / learning changes.
+
+| Principle | Detail |
+|-----------|--------|
+| **Voice first** | Grok call dock is the main control plane for desk data + coach (not a side feature) |
+| **Overview hierarchy** | Top-3 targets · top-3 movers · book-filtered intel · positions · learning — kill noise |
+| **Learn before recommend** | Labels + outcomes → coach → paper agents → recs; **no silent live risk** |
+| **Layer planner** | Shared human/agent AD ladder object (plan → journal → learn) |
+| **PnL** | Journal now; private fills when flagged; paper ledger separate |
+| **Live orders** | Monitor/read first; place only with `DESK_ALLOW_LIVE_ORDERS` + explicit confirm |
+| **Security** | Never commit secrets; additive DB; live defaults OFF; voice auth required |
+
+**Local desk:** `make desk-dev` · seed: `make desk-seed` · HTTPS droplet: `./scripts/desk_https_up.sh`
+
 ---
 
 ## What this project is
@@ -230,10 +246,20 @@ Message shapes:
 ### Not shipped (do not assume present)
 
 - Per-coin named **buckets** (different %/lookback per group)  
-- Bounce/reclaim alerts, layer planner, defensive-mode messaging  
-- Telegram inline buttons / deep links / web UI  
+- Bounce/reclaim alerts, full AD layer planner persistence  
+- Telegram inline buttons / deep links  
 - Full kline **OHLC fire path** (only optional red tags)  
+- Paper agent arena (fictive capital on real marks)  
+- Autonomous trade placement / unsupervised live orders  
 - Separate strategy bots (see `docs/FUTURE_STRATEGY_BOTS.md`)  
+
+### Shipped / in progress (AD Desk path)
+
+- FastAPI desk + futuristic SPA; global voice call dock  
+- Voice STT → tools → TTS; history persists in browser localStorage  
+- Desk CRUD: alerts, watchlist, movers, journal, labels  
+- Overview moving toward ranked hierarchy (see AD_DESK_VISION.md)  
+
 
 ---
 

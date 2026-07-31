@@ -26,9 +26,11 @@
         <button data-view="positions"><i></i>Positions</button>
         <button data-view="tape"><i></i>Tape</button>
         <button data-view="targets"><i></i>Targets</button>
-        <button data-view="memory"><i></i>Memory</button>
+        <button data-view="memory"><i></i>Learning</button>
         <button data-view="intel"><i></i>Intel</button>
-        <button data-view="voice"><i></i>Voice Agent</button>
+        <button data-view="planner"><i></i>AD Layers</button>
+        <button data-view="paper"><i></i>Paper Arena</button>
+        <button data-view="voice"><i></i>Voice log</button>
         <button data-view="roadmap"><i></i>Roadmap</button>
         <button data-view="playbook"><i></i>Playbook</button>
       </nav>
@@ -55,30 +57,62 @@
         </div>
       </header>
 
-      <!-- OVERVIEW -->
+      <!-- OVERVIEW — ranked hierarchy (AD_DESK_VISION) -->
       <section class="view on" id="view-overview">
-        <div class="bento">
-          <div class="tile hero">
-            <span class="lbl">Market regime</span>
+        <div class="hero-band">
+          <div class="hero-core">
+            <span class="lbl">Signal core</span>
             <div class="hero-val" id="regimeValue">—</div>
             <p id="regimeBias" class="muted"></p>
+            <p id="regimeRule" class="hint tight"></p>
           </div>
-          <div class="tile">
+          <div class="hero-pulse">
             <span class="lbl">Pulse</span>
             <div id="counters" class="metrics"></div>
+            <div id="pnlStrip" class="pnl-strip"></div>
           </div>
-          <div class="tile glass">
-            <span class="lbl">Open positions</span>
-            <div id="ovPos" class="mini-list"></div>
+        </div>
+
+        <div class="rank-grid">
+          <div class="panel rank-card">
+            <div class="panel-h">
+              <h3>1 · Targets <span class="soft">top 3</span></h3>
+              <button type="button" class="btn soft sm" data-jump="targets">All</button>
+            </div>
+            <div id="ovTopTargets" class="rank-list"></div>
           </div>
-          <div class="tile span2">
-            <div class="tile-h"><h3>Recent fires</h3></div>
-            <div id="ovEvents" class="scroll"></div>
+          <div class="panel rank-card">
+            <div class="panel-h">
+              <h3>2 · Movers <span class="soft">top 3</span></h3>
+              <button type="button" class="btn soft sm" data-jump="tape">Tape</button>
+            </div>
+            <div id="ovTopMovers" class="rank-list"></div>
           </div>
-          <div class="tile span2">
-            <div class="tile-h"><h3>Isolated intel</h3></div>
-            <div id="ovInv" class="scroll"></div>
+        </div>
+
+        <div class="panel rank-card mt">
+          <div class="panel-h">
+            <h3>3 · Intel <span class="soft">book only</span></h3>
+            <button type="button" class="btn soft sm" data-jump="intel">Intel</button>
           </div>
+          <div id="ovBookIntel" class="rank-list"></div>
+        </div>
+
+        <div class="panel rank-card mt">
+          <div class="panel-h">
+            <h3>4 · Positions <span class="soft">entry · mark · time</span></h3>
+            <button type="button" class="btn soft sm" data-jump="positions">Manage</button>
+          </div>
+          <div id="ovPos" class="rank-list"></div>
+        </div>
+
+        <div class="panel rank-card mt">
+          <div class="panel-h">
+            <h3>5 · Learning <span class="soft">teach the system</span></h3>
+            <button type="button" class="btn soft sm" data-jump="memory">Open</button>
+          </div>
+          <div id="ovLearning" class="rank-list"></div>
+          <div class="learn-actions" id="ovLearnActions"></div>
         </div>
       </section>
 
@@ -168,6 +202,53 @@
         <div class="panel mt">
           <div class="panel-h"><h3>Source expertise</h3></div>
           <div id="sourcesTable" class="scroll"></div>
+        </div>
+      </section>
+
+      <!-- AD LAYER PLANNER -->
+      <section class="view" id="view-planner">
+        <div class="panel">
+          <div class="panel-h">
+            <h3>AD layer planner</h3>
+            <span class="badge">human + agent</span>
+          </div>
+          <p class="hint">
+            Shared ladder for panic scale-ins. Voice can propose layers; you confirm and journal.
+            Plans become learning labels when price tags a layer or you skip.
+          </p>
+          <form id="planForm" class="form-row wrap">
+            <input name="symbol" placeholder="Symbol e.g. SOL" required />
+            <select name="market"><option value="futures">Futures</option><option value="spot">Spot</option></select>
+            <input name="ad_pct" type="number" step="any" placeholder="AD % e.g. 8" />
+            <input name="layers" type="number" min="3" max="12" value="6" placeholder="Layers" />
+            <input name="invalidation" placeholder="Invalidation note" />
+            <button class="btn" type="submit">Build ladder</button>
+          </form>
+          <div id="planOut" class="plan-out"></div>
+          <p class="hint mt">Persistence API lands next — voice <code>propose_trade</code> journals a paper thesis today.</p>
+        </div>
+      </section>
+
+      <!-- PAPER ARENA -->
+      <section class="view" id="view-paper">
+        <div class="panel">
+          <div class="panel-h">
+            <h3>Paper arena</h3>
+            <span class="badge">agents · fictive capital</span>
+          </div>
+          <p class="lead">Train agents on <strong>real</strong> marks from your targets &amp; movers — no live risk.</p>
+          <ul class="bul good">
+            <li>Same AD playbook rules (panic &gt; grind, layers, powder)</li>
+            <li>Decisions logged vs your took/skip labels</li>
+            <li>Promote to recommendations only after soak metrics</li>
+            <li>Cannot flip live order flags</li>
+          </ul>
+          <p class="hint">Scaffold UI — sim engine is the next build phase (see AD_DESK_VISION.md P5).</p>
+          <div class="metrics" id="paperPlaceholder">
+            <div class="metric"><span>Paper equity</span><b>—</b></div>
+            <div class="metric"><span>Open sims</span><b>0</b></div>
+            <div class="metric"><span>Win rate</span><b>—</b></div>
+          </div>
         </div>
       </section>
 
