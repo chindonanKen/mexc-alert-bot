@@ -23,9 +23,9 @@
       </div>
       <nav id="nav" class="nav">
         <button data-view="overview" class="active"><i></i>Overview</button>
-        <button data-view="positions"><i></i>Positions</button>
-        <button data-view="tape"><i></i>Tape</button>
         <button data-view="targets"><i></i>Targets</button>
+        <button data-view="movers"><i></i>Movers</button>
+        <button data-view="positions"><i></i>Positions</button>
         <button data-view="memory"><i></i>Learning</button>
         <button data-view="intel"><i></i>Intel</button>
         <button data-view="planner"><i></i>AD Layers</button>
@@ -57,62 +57,73 @@
         </div>
       </header>
 
-      <!-- OVERVIEW — ranked hierarchy (AD_DESK_VISION) -->
+      <!-- OVERVIEW — command triad: Targets · Movers · Positions -->
       <section class="view on" id="view-overview">
-        <div class="hero-band">
-          <div class="hero-core">
-            <span class="lbl">Signal core</span>
-            <div class="hero-val" id="regimeValue">—</div>
+        <div class="ov-status-bar">
+          <div class="ov-regime">
+            <span class="lbl">Regime</span>
+            <div class="hero-val sm" id="regimeValue">—</div>
             <p id="regimeBias" class="muted"></p>
-            <p id="regimeRule" class="hint tight"></p>
           </div>
-          <div class="hero-pulse">
-            <span class="lbl">Pulse</span>
-            <div id="counters" class="metrics"></div>
-            <div id="pnlStrip" class="pnl-strip"></div>
-          </div>
+          <div id="counters" class="metrics ov-metrics"></div>
+          <div id="pnlStrip" class="pnl-strip ov-pnl"></div>
+          <p id="regimeRule" class="hint tight ov-rule"></p>
         </div>
 
-        <div class="rank-grid">
+        <div class="command-triad">
+          <article class="cmd-panel cmd-targets">
+            <header class="cmd-h">
+              <div>
+                <span class="cmd-kicker">Priority 1</span>
+                <h3>Targets</h3>
+                <p class="cmd-sub">One-shot price alarms · armed levels</p>
+              </div>
+              <button type="button" class="btn soft sm" data-jump="targets">All targets →</button>
+            </header>
+            <div id="ovTopTargets" class="cmd-list"></div>
+          </article>
+
+          <article class="cmd-panel cmd-movers">
+            <header class="cmd-h">
+              <div>
+                <span class="cmd-kicker">Priority 2</span>
+                <h3>Movers</h3>
+                <p class="cmd-sub">Downside fires · watchlist heat</p>
+              </div>
+              <button type="button" class="btn soft sm" data-jump="movers">All movers →</button>
+            </header>
+            <div id="ovTopMovers" class="cmd-list"></div>
+          </article>
+
+          <article class="cmd-panel cmd-positions">
+            <header class="cmd-h">
+              <div>
+                <span class="cmd-kicker">Priority 3</span>
+                <h3>Positions</h3>
+                <p class="cmd-sub">Open journal · layers · time in trade</p>
+              </div>
+              <button type="button" class="btn soft sm" data-jump="positions">Manage →</button>
+            </header>
+            <div id="ovPos" class="cmd-list"></div>
+          </article>
+        </div>
+
+        <div class="ov-secondary">
           <div class="panel rank-card">
             <div class="panel-h">
-              <h3>1 · Targets <span class="soft">top 3</span></h3>
-              <button type="button" class="btn soft sm" data-jump="targets">All</button>
+              <h3>Intel <span class="soft">book-linked</span></h3>
+              <button type="button" class="btn soft sm" data-jump="intel">Open</button>
             </div>
-            <div id="ovTopTargets" class="rank-list"></div>
+            <div id="ovBookIntel" class="rank-list"></div>
           </div>
           <div class="panel rank-card">
             <div class="panel-h">
-              <h3>2 · Movers <span class="soft">top 3</span></h3>
-              <button type="button" class="btn soft sm" data-jump="tape">Tape</button>
+              <h3>Learning <span class="soft">labels</span></h3>
+              <button type="button" class="btn soft sm" data-jump="memory">Open</button>
             </div>
-            <div id="ovTopMovers" class="rank-list"></div>
+            <div id="ovLearning" class="rank-list"></div>
+            <div class="learn-actions" id="ovLearnActions"></div>
           </div>
-        </div>
-
-        <div class="panel rank-card mt">
-          <div class="panel-h">
-            <h3>3 · Intel <span class="soft">book only</span></h3>
-            <button type="button" class="btn soft sm" data-jump="intel">Intel</button>
-          </div>
-          <div id="ovBookIntel" class="rank-list"></div>
-        </div>
-
-        <div class="panel rank-card mt">
-          <div class="panel-h">
-            <h3>4 · Positions <span class="soft">entry · mark · time</span></h3>
-            <button type="button" class="btn soft sm" data-jump="positions">Manage</button>
-          </div>
-          <div id="ovPos" class="rank-list"></div>
-        </div>
-
-        <div class="panel rank-card mt">
-          <div class="panel-h">
-            <h3>5 · Learning <span class="soft">teach the system</span></h3>
-            <button type="button" class="btn soft sm" data-jump="memory">Open</button>
-          </div>
-          <div id="ovLearning" class="rank-list"></div>
-          <div class="learn-actions" id="ovLearnActions"></div>
         </div>
       </section>
 
@@ -135,14 +146,15 @@
         </div>
       </section>
 
-      <!-- TAPE -->
-      <section class="view" id="view-tape">
+      <!-- MOVERS (was "Tape" — same watchlist / downside scanner) -->
+      <section class="view" id="view-movers">
         <div class="split">
           <div class="panel grow">
             <div class="panel-h">
-              <h3>Watchlist</h3>
+              <h3>Mover watchlist</h3>
               <span class="badge" id="mwBadge">movers</span>
             </div>
+            <p class="hint">Downside scanner symbols — peak/step fires show here and on Overview.</p>
             <form id="watchForm" class="form-row">
               <input name="symbol" placeholder="BTC / SIREN" required />
               <select name="market"><option value="futures">Futures</option><option value="spot">Spot</option></select>
@@ -154,7 +166,7 @@
               <input name="lookback_minutes" type="number" step="1" placeholder="Lookback m" />
               <button class="btn soft" type="submit">Save</button>
             </form>
-            <div id="tapeTable" class="scroll"></div>
+            <div id="moversTable" class="scroll"></div>
           </div>
         </div>
       </section>

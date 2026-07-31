@@ -121,10 +121,10 @@
     const el = $(`#view-${name}`);
     if (el) el.classList.add("on");
     const meta = {
-      overview: ["Overview", "Targets · movers · intel · positions · learning"],
+      overview: ["Overview", "Targets · Movers · Positions — command deck"],
+      targets: ["Targets", "One-shot price alarms"],
+      movers: ["Movers", "Watchlist · downside scanner · live marks"],
       positions: ["Positions", "Journal · mark · time in trade"],
-      tape: ["Tape", "Full watchlist · live marks"],
-      targets: ["Targets", "All one-shot alarms"],
       memory: ["Learning", "Teach · labels · outcomes"],
       intel: ["Intel", "Book-filtered news · delist"],
       planner: ["AD Layers", "Shared human + agent ladder"],
@@ -192,37 +192,77 @@
         " · journal";
     }
 
-    // 1 Targets top 3
+    // Priority 1 — Targets
     const tt = h.top_targets || [];
     $("#ovTopTargets").innerHTML = tt.length
       ? tt
           .map(
-            (a, i) => `<div class="rank-row">
-            <span class="idx">${i + 1}</span>
-            <span class="sym">${a.market?.[0]?.toUpperCase() || "?"} ${a.symbol}</span>
-            <span class="meta">${a.enabled ? "armed" : "off"}</span>
-            <span class="meta">${fmtPx(a.price)}</span>
+            (a, i) => `<div class="cmd-row">
+            <div class="cmd-row-main">
+              <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
+              <div>
+                <div class="cmd-sym">${a.symbol}</div>
+                <div class="cmd-meta">${(a.market || "spot").toUpperCase()} · ${
+              a.enabled ? "ARMED" : "OFF"
+            }</div>
+              </div>
+            </div>
+            <div class="cmd-px">${fmtPx(a.price)}</div>
           </div>`
           )
           .join("")
-      : rankEmpty("No targets — voice: add alert BTC 95000");
+      : rankEmpty("No targets — add via Targets or voice: add alert BTC 95000");
 
-    // 2 Movers top 3
+    // Priority 2 — Movers
     const tm = h.top_movers || [];
     $("#ovTopMovers").innerHTML = tm.length
       ? tm
           .map(
-            (e, i) => `<div class="rank-row">
-            <span class="idx">${i + 1}</span>
-            <span class="sym">${e.symbol}</span>
-            <span class="dn">${e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—"}</span>
-            <span class="meta">${e.velocity_band || e.mode || "—"}</span>
+            (e, i) => `<div class="cmd-row hot">
+            <div class="cmd-row-main">
+              <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
+              <div>
+                <div class="cmd-sym">${e.symbol}</div>
+                <div class="cmd-meta">${e.velocity_band || e.mode || "mover"} · ${
+              e.market || "—"
+            }</div>
+              </div>
+            </div>
+            <div class="cmd-px dn">${
+              e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—"
+            }</div>
           </div>`
           )
           .join("")
-      : rankEmpty("No recent mover fires in memory");
+      : rankEmpty("No recent mover fires — watchlist quiet");
 
-    // 3 Book intel
+    // Priority 3 — Positions
+    const pos = h.positions || d.positions || [];
+    $("#ovPos").innerHTML = pos.length
+      ? pos
+          .map(
+            (p, i) => `<div class="cmd-row pos">
+            <div class="cmd-row-main">
+              <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
+              <div>
+                <div class="cmd-sym">${p.symbol}</div>
+                <div class="cmd-meta">${(p.notes || "journal").slice(0, 36)}</div>
+              </div>
+            </div>
+            <div class="cmd-side">
+              <div class="cmd-px">${
+                p.entry_avg != null ? fmtPx(p.entry_avg) : "—"
+              }</div>
+              <div class="cmd-meta">${
+                p.open_hours != null ? p.open_hours + "h open" : fmtTime(p.opened_at)
+              }</div>
+            </div>
+          </div>`
+          )
+          .join("")
+      : rankEmpty("No open positions — journal a layer or voice open position");
+
+    // Secondary — book intel
     const bi = h.book_intel || [];
     const bn = h.book_news || [];
     const intelParts = [];
@@ -244,22 +284,7 @@
     });
     $("#ovBookIntel").innerHTML = intelParts.length
       ? intelParts.join("")
-      : rankEmpty("No book-linked intel — clean tape");
-
-    // 4 Positions
-    const pos = h.positions || d.positions || [];
-    $("#ovPos").innerHTML = pos.length
-      ? pos
-          .map(
-            (p, i) => `<div class="rank-row">
-            <span class="idx">${i + 1}</span>
-            <span class="sym">${p.symbol}</span>
-            <span class="meta">avg ${p.entry_avg != null ? fmtPx(p.entry_avg) : "—"}</span>
-            <span class="meta">${p.open_hours != null ? p.open_hours + "h" : fmtTime(p.opened_at)}</span>
-          </div>`
-          )
-          .join("")
-      : rankEmpty("No open positions (journal / MEXC when linked)");
+      : rankEmpty("No book-linked intel");
 
     // 5 Learning
     const learn = h.learning || {};
@@ -345,7 +370,7 @@
     );
   }
 
-  async function loadTape() {
+  async function loadMovers() {
     const d = await api("/api/watchlist");
     const s = d.settings;
     $("#mwBadge").textContent = s
@@ -377,7 +402,8 @@
         </tr>`;
       })
       .join("");
-    $("#tapeTable").innerHTML = table(["M", "Symbol", "Mark", "24h", ""], rows);
+    const tableEl = $("#moversTable") || $("#tapeTable");
+    if (tableEl) tableEl.innerHTML = table(["M", "Symbol", "Mark", "24h", ""], rows);
     $$("[data-unwatch]").forEach((b) =>
       b.addEventListener("click", async () => {
         try {
@@ -386,7 +412,7 @@
             { method: "DELETE" }
           );
           toast("Removed from watchlist");
-          loadTape();
+          loadMovers();
         } catch (e) {
           toast(e.message);
         }
@@ -1375,7 +1401,7 @@
       });
       f.reset();
       toast("Watch added");
-      loadTape();
+      loadMovers();
     } catch (err) {
       toast(err.message);
     }
@@ -1398,7 +1424,7 @@
         }),
       });
       toast("Movers settings saved");
-      loadTape();
+      loadMovers();
     } catch (err) {
       toast(err.message);
     }
@@ -1454,7 +1480,7 @@
     const map = {
       overview: loadOverview,
       positions: loadPositions,
-      tape: loadTape,
+      movers: loadMovers,
       targets: loadTargets,
       memory: loadMemory,
       intel: loadIntel,
