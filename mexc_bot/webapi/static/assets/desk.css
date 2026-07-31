@@ -123,35 +123,6 @@ body::before {
 .stage { padding: 1.15rem 1.4rem 7.5rem; max-width: 1440px; }
 
 /* ---- Overview command deck ---- */
-.ov-status-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem 1.5rem;
-  align-items: flex-end;
-  margin-bottom: 1.15rem;
-  padding: 0.95rem 1.15rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background:
-    radial-gradient(ellipse at 0% 50%, rgba(56, 189, 248, 0.1), transparent 50%),
-    var(--panel);
-  box-shadow: var(--glow);
-}
-.ov-regime .lbl { display: block; margin-bottom: 0.2rem; }
-.hero-val {
-  font-size: 2rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  background: linear-gradient(90deg, #e8f4ff, #34d399);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-.hero-val.sm { font-size: 1.45rem; }
-.ov-metrics { display: flex; gap: 0.65rem; flex-wrap: wrap; }
-.ov-pnl { margin: 0; align-self: center; }
-.ov-rule { flex-basis: 100%; margin: 0; }
-
 .command-triad {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

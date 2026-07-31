@@ -121,7 +121,7 @@
     const el = $(`#view-${name}`);
     if (el) el.classList.add("on");
     const meta = {
-      overview: ["Overview", "Targets · Movers · Positions — command deck"],
+      overview: ["Overview", "Targets · Movers · Positions"],
       targets: ["Targets", "One-shot price alarms"],
       movers: ["Movers", "Watchlist · downside scanner · live marks"],
       positions: ["Positions", "Journal · mark · time in trade"],
@@ -164,33 +164,6 @@
     const d = await api("/api/overview");
     const h = d.hierarchy || {};
     renderMajors(d.market?.majors || []);
-    $("#regimeValue").textContent = d.pulse?.regime || "—";
-    $("#regimeBias").textContent = d.pulse?.ad_bias || "";
-    const rr = $("#regimeRule");
-    if (rr) rr.textContent = d.pulse?.rule || "";
-    const c = d.counts || {};
-    $("#counters").innerHTML = [
-      ["Targets", c.alerts_enabled],
-      ["Watch", c.watchlist],
-      ["Fires", c.events],
-      ["Open", c.open_positions],
-    ]
-      .map(
-        ([k, v]) =>
-          `<div class="metric"><span>${k}</span><b>${v ?? 0}</b></div>`
-      )
-      .join("");
-
-    const pnl = h.pnl || {};
-    const strip = $("#pnlStrip");
-    if (strip) {
-      strip.textContent =
-        `PnL · open ${pnl.open_n ?? 0} · closed ${pnl.closed_n ?? 0}` +
-        (pnl.realized_avg_pct != null
-          ? ` · avg realized ${pnl.realized_avg_pct}%`
-          : " · avg realized —") +
-        " · journal";
-    }
 
     // Priority 1 — Targets
     const tt = h.top_targets || [];
