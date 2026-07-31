@@ -660,28 +660,18 @@
     }
   }
 
-  /**
-   * Fast path: decode mic blob → mono PCM WAV at native rate (no Offline resample).
-   * xAI STT accepts common rates; skipping 16k resample cuts hundreds of ms.
-   */
-  async function blobToWav16k(blob) {
-    const ab = await blob.arrayBuffer();
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    const ctx = new Ctx();
-    let decoded;
-    try {
-      decoded = await ctx.decodeAudioData(ab.slice(0));
-    } catch (e) {
-      await ctx.close().catch(() => {});
-      throw new Error("Could not decode mic audio: " + (e.message || e));
+  /** Build mono 16-bit PCM WAV from Float32 samples (no ffmpeg / no MediaRecorder). */
+  function pcmFloatToWavBlob(floatChunks, sampleRate) {
+    let total = 0;
+    for (const c of floatChunks) total += c.length;
+    if (!total) throw new Error("Empty PCM capture");
+    // Downsample toward ~16 kHz for smaller/faster STT
+    const stride = sampleRate > 24000 ? Math.max(1, Math.round(sampleRate / 16000)) : 1;
+    const outRate = Math.round(sampleRate / stride);
+    let outLen = 0;
+    for (const chunk of floatChunks) {
+      for (let i = 0; i < chunk.length; i += stride) outLen++;
     }
-    const rate = decoded.sampleRate || 48000;
-    const nCh = decoded.numberOfChannels;
-    const samples = decoded.length;
-    // Downsample in one pass if > 24 kHz (cheap every-N pick, not full resampler)
-    const stride = rate > 24000 ? Math.max(1, Math.round(rate / 16000)) : 1;
-    const outRate = Math.round(rate / stride);
-    const outLen = Math.floor(samples / stride);
     const buf = new ArrayBuffer(44 + outLen * 2);
     const view = new DataView(buf);
     const wstr = (o, s) => {
@@ -701,17 +691,40 @@
     wstr(36, "data");
     view.setUint32(40, outLen * 2, true);
     let off = 44;
-    for (let i = 0; i < outLen; i++) {
-      const idx = i * stride;
+    for (const chunk of floatChunks) {
+      for (let i = 0; i < chunk.length; i += stride) {
+        let s = Math.max(-1, Math.min(1, chunk[i]));
+        view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        off += 2;
+      }
+    }
+    return new Blob([buf], { type: "audio/wav" });
+  }
+
+  /**
+   * Fallback: decode MediaRecorder blob → WAV (may fail on some browsers).
+   */
+  async function blobToWav16k(blob) {
+    const ab = await blob.arrayBuffer();
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    let decoded;
+    try {
+      decoded = await ctx.decodeAudioData(ab.slice(0));
+    } catch (e) {
+      await ctx.close().catch(() => {});
+      throw new Error("Could not decode mic audio: " + (e.message || e));
+    }
+    const rate = decoded.sampleRate || 48000;
+    const nCh = decoded.numberOfChannels;
+    const mono = new Float32Array(decoded.length);
+    for (let i = 0; i < decoded.length; i++) {
       let s = 0;
-      for (let c = 0; c < nCh; c++) s += decoded.getChannelData(c)[idx];
-      s /= nCh;
-      s = Math.max(-1, Math.min(1, s));
-      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-      off += 2;
+      for (let c = 0; c < nCh; c++) s += decoded.getChannelData(c)[i];
+      mono[i] = s / nCh;
     }
     await ctx.close().catch(() => {});
-    return new Blob([buf], { type: "audio/wav" });
+    return pcmFloatToWavBlob([mono], rate);
   }
 
   function setLevelBar(rms) {
@@ -768,7 +781,7 @@
   async function sendAudioBlob(blob) {
     if (!state.inCall) return;
     // Guard: tiny blobs are noise, not speech — never hit the API
-    if (!blob || blob.size < 2500) {
+    if (!blob || blob.size < 1500) {
       $("#voiceStatus").textContent = "Idle — listening for your voice";
       await resumeListening(VAD.emptyBackoffMs);
       return;
@@ -776,17 +789,22 @@
     state.busy = true;
     updateMicUi();
     $("#voiceStatus").textContent = "Grok is thinking…";
+    // Always upload WAV — never WebM (local desk has no ffmpeg)
     let wavBlob = blob;
-    let fname = "voice.wav";
-    try {
-      if (!blob.type.includes("wav")) wavBlob = await blobToWav16k(blob);
-    } catch (e) {
-      fname = "voice.webm";
-      wavBlob = blob;
-      console.warn("client WAV convert failed", e);
+    if (!(blob.type || "").includes("wav")) {
+      try {
+        wavBlob = await blobToWav16k(blob);
+      } catch (e) {
+        state.busy = false;
+        updateMicUi();
+        throw new Error(
+          "Could not encode mic to WAV (no ffmpeg on this machine). " +
+            (e.message || e)
+        );
+      }
     }
     const fd = new FormData();
-    fd.append("file", wavBlob, fname);
+    fd.append("file", wavBlob, "voice.wav");
     fd.append("history", JSON.stringify(state.agentHistory || []));
     const res = await fetch("/api/voice", {
       method: "POST",
@@ -799,9 +817,11 @@
         msg = JSON.parse(msg).detail || msg;
       } catch (_) {}
       // Silence / empty STT: stay calm, no toast spam
-      if (isEmptySpeechError(msg)) {
+      if (isEmptySpeechError(msg) || String(msg).toLowerCase().includes("ffmpeg")) {
         state.busy = false;
-        $("#voiceStatus").textContent = "Idle — listening (no clear speech)";
+        $("#voiceStatus").textContent = String(msg).toLowerCase().includes("ffmpeg")
+          ? "Mic encode issue — retrying listen"
+          : "Idle — listening (no clear speech)";
         updateMicUi();
         await resumeListening(VAD.emptyBackoffMs);
         return;
@@ -850,13 +870,15 @@
     await resumeListening(VAD.postReplyCooldownMs);
   }
 
-  let recorder = null;
   let mediaStream = null;
   let audioCtx = null;
   let analyser = null;
+  let scriptNode = null;
   let vadTimer = null;
   let turnStartedAt = 0;
   let speechStartedAt = 0;
+  let pcmChunks = []; // Float32Array pieces while speaking
+  let pcmPreRoll = []; // recent idle buffers for pre-roll
 
   function clearVad() {
     if (vadTimer) {
@@ -868,13 +890,14 @@
 
   function stopListenOnly() {
     clearVad();
-    if (recorder && state.recording) {
-      try {
-        recorder.onstop = null;
-        if (recorder.state !== "inactive") recorder.stop();
-      } catch (_) {}
-    }
     state.recording = false;
+    if (scriptNode) {
+      try {
+        scriptNode.disconnect();
+        scriptNode.onaudioprocess = null;
+      } catch (_) {}
+      scriptNode = null;
+    }
     if (mediaStream) {
       mediaStream.getTracks().forEach((t) => t.stop());
       mediaStream = null;
@@ -884,7 +907,8 @@
       audioCtx = null;
       analyser = null;
     }
-    recorder = null;
+    pcmChunks = [];
+    pcmPreRoll = [];
     $("#btnMic")?.classList.remove("rec");
   }
 
@@ -941,85 +965,101 @@
 
       const Ctx = window.AudioContext || window.webkitAudioContext;
       audioCtx = new Ctx();
+      if (audioCtx.state === "suspended") {
+        try {
+          await audioCtx.resume();
+        } catch (_) {}
+      }
       const source = audioCtx.createMediaStreamSource(mediaStream);
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
       source.connect(analyser);
 
-      state.chunks = [];
+      // Direct PCM capture → WAV (no WebM, no ffmpeg needed on Mac)
+      const bufferSize = 4096;
+      scriptNode = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+      const silent = audioCtx.createGain();
+      silent.gain.value = 0;
+      source.connect(scriptNode);
+      scriptNode.connect(silent);
+      silent.connect(audioCtx.destination);
+
+      pcmChunks = [];
+      pcmPreRoll = [];
       state.speakingHeard = false;
       state.silenceMs = 0;
       turnStartedAt = Date.now();
       speechStartedAt = 0;
-      let speechArmedMs = 0; // continuous loud frames
-      let speechTotalMs = 0; // cumulative loud frames this arm
-
-      const mimeCandidates = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-        "audio/mp4",
-        "audio/ogg;codecs=opus",
-      ];
-      let mime = "";
-      for (const c of mimeCandidates) {
-        if (MediaRecorder.isTypeSupported(c)) {
-          mime = c;
-          break;
-        }
-      }
-      recorder = mime
-        ? new MediaRecorder(mediaStream, { mimeType: mime })
-        : new MediaRecorder(mediaStream);
-
-      // Only keep audio after speech is armed — cuts empty uploads
+      let speechArmedMs = 0;
+      let speechTotalMs = 0;
       let captureArmed = false;
-      recorder.ondataavailable = (e) => {
-        if (!e.data || !e.data.size) return;
-        if (captureArmed || state.speakingHeard) state.chunks.push(e.data);
+      const sampleRate = audioCtx.sampleRate || 48000;
+      const maxPreChunks = Math.max(3, Math.ceil((0.45 * sampleRate) / bufferSize));
+
+      scriptNode.onaudioprocess = (ev) => {
+        if (!state.inCall || state.muteMic) return;
+        const input = ev.inputBuffer.getChannelData(0);
+        const copy = new Float32Array(input.length);
+        copy.set(input);
+        if (captureArmed || state.speakingHeard) {
+          pcmChunks.push(copy);
+        } else {
+          pcmPreRoll.push(copy);
+          if (pcmPreRoll.length > maxPreChunks) pcmPreRoll.shift();
+        }
       };
 
       const teardownCapture = () => {
         clearVad();
-        try {
-          if (recorder && recorder.state !== "inactive") {
-            recorder.onstop = null;
-            recorder.stop();
-          }
-        } catch (_) {}
+        if (scriptNode) {
+          try {
+            scriptNode.disconnect();
+            scriptNode.onaudioprocess = null;
+          } catch (_) {}
+          scriptNode = null;
+        }
         if (mediaStream) {
           mediaStream.getTracks().forEach((t) => t.stop());
           mediaStream = null;
         }
+        // Keep sampleRate before closing ctx
         if (audioCtx) {
           audioCtx.close().catch(() => {});
           audioCtx = null;
           analyser = null;
         }
-        recorder = null;
         state.recording = false;
         $("#btnMic")?.classList.remove("rec");
       };
 
-      const finishTurn = async (reason) => {
-        const type = recorder?.mimeType || mime || "audio/webm";
-        const blob = new Blob(state.chunks, { type });
+      const finishTurn = async () => {
         const heard = state.speakingHeard && speechTotalMs >= VAD.minSpeechMs;
+        // Snapshot PCM before teardown
+        const chunks = pcmChunks.slice();
+        const rate = sampleRate;
         teardownCapture();
+        pcmChunks = [];
+        pcmPreRoll = [];
         if (!state.inCall) return;
 
-        // Idle / no real speech → quietly keep listening (not pushy)
-        if (!heard || blob.size < 2500) {
+        if (!heard || !chunks.length) {
           $("#voiceStatus").textContent = "Idle — listening for your voice";
           updateMicUi();
           await resumeListening(350);
           return;
         }
         try {
-          await sendAudioBlob(blob);
+          const wav = pcmFloatToWavBlob(chunks, rate);
+          if (wav.size < 1500) {
+            $("#voiceStatus").textContent = "Idle — listening for your voice";
+            await resumeListening(VAD.emptyBackoffMs);
+            return;
+          }
+          await sendAudioBlob(wav);
         } catch (e) {
           const msg = String(e.message || e);
           state.busy = false;
-          if (isEmptySpeechError(msg)) {
+          if (isEmptySpeechError(msg) || msg.toLowerCase().includes("ffmpeg")) {
             $("#voiceStatus").textContent = "Idle — listening (no clear speech)";
             updateMicUi();
             await resumeListening(VAD.emptyBackoffMs);
@@ -1031,12 +1071,6 @@
         }
       };
 
-      recorder.onerror = () => {
-        toast("Recorder error");
-        endCall();
-      };
-
-      recorder.start(200);
       state.recording = true;
       $("#btnMic")?.classList.add("rec");
       $("#voiceStatus").textContent = "Idle — listening for your voice";
@@ -1063,12 +1097,13 @@
           speechArmedMs += VAD.pollMs;
           speechTotalMs += VAD.pollMs;
           state.silenceMs = 0;
-          // Arm only after sustained speech (not a cough/click)
           if (!state.speakingHeard && speechArmedMs >= VAD.speechHoldMs) {
             state.speakingHeard = true;
             captureArmed = true;
             speechStartedAt = now - speechArmedMs;
-            // Include a bit of pre-roll by starting to keep chunks now
+            // Pre-roll: include last ~0.45s so first words aren't cut
+            pcmChunks = pcmPreRoll.map((c) => new Float32Array(c));
+            pcmPreRoll = [];
             $("#voiceStatus").textContent = "Hearing you… pause when done";
             updateMicUi();
           }
@@ -1076,9 +1111,6 @@
           speechArmedMs = 0;
           if (state.speakingHeard) {
             state.silenceMs += VAD.pollMs;
-          } else {
-            // Truly idle — drop buffered noise so we never upload it
-            if (state.chunks.length > 40) state.chunks = state.chunks.slice(-8);
           }
         }
 
@@ -1086,38 +1118,19 @@
           state.speakingHeard && speechTotalMs >= VAD.minSpeechMs;
         const silenceDone = state.silenceMs >= VAD.endSilenceMs;
 
-        // Only finish when user spoke enough AND then paused.
-        // Never send on max-time alone (that was the "pushy" loop).
         if (spokenLongEnough && silenceDone) {
           clearVad();
-          try {
-            if (recorder && recorder.state !== "inactive") {
-              recorder.onstop = () => finishTurn("vad");
-              recorder.stop();
-            } else {
-              finishTurn("vad");
-            }
-          } catch (_) {
-            finishTurn("vad");
-          }
+          finishTurn();
           return;
         }
 
-        // Safety: if armed forever without silence, force after maxTurn
         if (
           state.speakingHeard &&
           spokenLongEnough &&
           now - turnStartedAt >= VAD.maxTurnMs
         ) {
           clearVad();
-          try {
-            if (recorder && recorder.state !== "inactive") {
-              recorder.onstop = () => finishTurn("max");
-              recorder.stop();
-            } else finishTurn("max");
-          } catch (_) {
-            finishTurn("max");
-          }
+          finishTurn();
         }
       }, VAD.pollMs);
     } catch (e) {
