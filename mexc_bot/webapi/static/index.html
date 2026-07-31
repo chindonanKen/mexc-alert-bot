@@ -17,27 +17,25 @@
       <div class="brand">
         <div class="logo">AD</div>
         <div>
-          <div class="brand-title">Command Desk</div>
-          <div class="brand-ver">v2.1 · agent platform</div>
+          <div class="brand-title">AD Desk</div>
         </div>
       </div>
       <nav id="nav" class="nav">
-        <button data-view="overview" class="active"><i></i>Overview</button>
-        <button data-view="targets"><i></i>Targets</button>
-        <button data-view="movers"><i></i>Movers</button>
-        <button data-view="positions"><i></i>Positions</button>
-        <button data-view="memory"><i></i>Learning</button>
-        <button data-view="intel"><i></i>Intel</button>
-        <button data-view="planner"><i></i>AD Layers</button>
-        <button data-view="paper"><i></i>Paper Arena</button>
-        <button data-view="voice"><i></i>Voice log</button>
-        <button data-view="roadmap"><i></i>Roadmap</button>
-        <button data-view="playbook"><i></i>Playbook</button>
+        <button data-view="overview" class="active">Overview</button>
+        <button data-view="targets">Targets</button>
+        <button data-view="movers">Movers</button>
+        <button data-view="positions">Positions</button>
+        <div class="nav-sep">More</div>
+        <button data-view="memory" class="nav-dim">Learning</button>
+        <button data-view="intel" class="nav-dim">Intel</button>
+        <button data-view="voice" class="nav-dim">Voice log</button>
+        <button data-view="planner" class="nav-dim">AD Layers</button>
+        <button data-view="paper" class="nav-dim">Paper</button>
+        <button data-view="playbook" class="nav-dim">Playbook</button>
+        <button data-view="roadmap" class="nav-dim">Roadmap</button>
       </nav>
       <div class="rail-meta">
         <div id="connStatus" class="pill">…</div>
-        <div id="callRailPill" class="pill call-pill">voice idle</div>
-        <p>Telegram = push · Desk = control</p>
         <button type="button" class="btn soft rail-voice-btn" id="btnRailCall">Start call</button>
       </div>
     </aside>
@@ -46,129 +44,83 @@
       <header class="top">
         <div>
           <h1 id="title">Overview</h1>
-          <p id="subtitle" class="sub">Regime · heat · memory</p>
+          <p id="subtitle" class="sub"></p>
         </div>
         <div class="top-actions">
-          <div id="majors" class="majors"></div>
-          <div class="top-voice" id="topVoiceMini" title="Voice call controls also in the dock below">
-            <span id="topVoiceState" class="top-voice-state">Voice idle</span>
-          </div>
           <button type="button" class="btn soft" id="btnRefresh">Refresh</button>
         </div>
       </header>
 
-      <!-- OVERVIEW — command triad: Targets · Movers · Positions -->
+      <!-- OVERVIEW — Targets · Movers · Positions only -->
       <section class="view on" id="view-overview">
         <div class="command-triad">
           <article class="cmd-panel cmd-targets">
             <header class="cmd-h">
-              <div>
-                <span class="cmd-kicker">Priority 1</span>
-                <h3>Targets</h3>
-                <p class="cmd-sub">One-shot price alarms · armed levels</p>
-              </div>
-              <button type="button" class="btn soft sm" data-jump="targets">All targets →</button>
+              <h3>Targets</h3>
+              <button type="button" class="btn soft sm" data-jump="targets">Open</button>
             </header>
             <div id="ovTopTargets" class="cmd-list"></div>
           </article>
 
           <article class="cmd-panel cmd-movers">
             <header class="cmd-h">
-              <div>
-                <span class="cmd-kicker">Priority 2</span>
-                <h3>Movers</h3>
-                <p class="cmd-sub">Downside fires · watchlist heat</p>
-              </div>
-              <button type="button" class="btn soft sm" data-jump="movers">All movers →</button>
+              <h3>Movers</h3>
+              <button type="button" class="btn soft sm" data-jump="movers">Open</button>
             </header>
             <div id="ovTopMovers" class="cmd-list"></div>
           </article>
 
           <article class="cmd-panel cmd-positions">
             <header class="cmd-h">
-              <div>
-                <span class="cmd-kicker">Priority 3</span>
-                <h3>Positions</h3>
-                <p class="cmd-sub">Open journal · layers · time in trade</p>
-              </div>
-              <button type="button" class="btn soft sm" data-jump="positions">Manage →</button>
+              <h3>Positions</h3>
+              <button type="button" class="btn soft sm" data-jump="positions">Open</button>
             </header>
             <div id="ovPos" class="cmd-list"></div>
           </article>
-        </div>
-
-        <div class="ov-secondary">
-          <div class="panel rank-card">
-            <div class="panel-h">
-              <h3>Intel <span class="soft">book-linked</span></h3>
-              <button type="button" class="btn soft sm" data-jump="intel">Open</button>
-            </div>
-            <div id="ovBookIntel" class="rank-list"></div>
-          </div>
-          <div class="panel rank-card">
-            <div class="panel-h">
-              <h3>Learning <span class="soft">labels</span></h3>
-              <button type="button" class="btn soft sm" data-jump="memory">Open</button>
-            </div>
-            <div id="ovLearning" class="rank-list"></div>
-            <div class="learn-actions" id="ovLearnActions"></div>
-          </div>
         </div>
       </section>
 
       <!-- POSITIONS -->
       <section class="view" id="view-positions">
-        <div class="panel">
-          <div class="panel-h">
-            <h3>Open trades (journal)</h3>
-            <span class="badge" id="posMode">paper journal</span>
-          </div>
-          <p class="hint">Track AD layers here. Live MEXC fills &amp; gated orders land in V2.1+ — voice can open/close journal rows now.</p>
+        <div class="panel clean">
           <form id="posForm" class="form-row">
-            <input name="symbol" placeholder="Symbol e.g. SIREN" required />
+            <input name="symbol" placeholder="Symbol" required />
             <select name="market"><option value="futures">Futures</option><option value="spot">Spot</option></select>
             <input name="entry_avg" type="number" step="any" placeholder="Entry" />
-            <input name="notes" placeholder="Notes / thesis" />
+            <input name="notes" placeholder="Notes" />
             <button class="btn" type="submit">Open</button>
           </form>
           <div id="posTable" class="scroll"></div>
         </div>
       </section>
 
-      <!-- MOVERS (was "Tape" — same watchlist / downside scanner) -->
+      <!-- MOVERS -->
       <section class="view" id="view-movers">
-        <div class="split">
-          <div class="panel grow">
-            <div class="panel-h">
-              <h3>Mover watchlist</h3>
-              <span class="badge" id="mwBadge">movers</span>
-            </div>
-            <p class="hint">Downside scanner symbols — peak/step fires show here and on Overview.</p>
-            <form id="watchForm" class="form-row">
-              <input name="symbol" placeholder="BTC / SIREN" required />
-              <select name="market"><option value="futures">Futures</option><option value="spot">Spot</option></select>
-              <button class="btn" type="submit">Add</button>
-            </form>
-            <form id="moversForm" class="form-row tight">
-              <label class="chk"><input type="checkbox" name="enabled" /> Movers on</label>
-              <input name="threshold_percent" type="number" step="0.1" placeholder="Thr %" />
-              <input name="lookback_minutes" type="number" step="1" placeholder="Lookback m" />
-              <button class="btn soft" type="submit">Save</button>
-            </form>
-            <div id="moversTable" class="scroll"></div>
-          </div>
+        <div class="panel clean grow">
+          <form id="watchForm" class="form-row">
+            <input name="symbol" placeholder="Symbol" required />
+            <select name="market"><option value="futures">Futures</option><option value="spot">Spot</option></select>
+            <button class="btn" type="submit">Add</button>
+          </form>
+          <form id="moversForm" class="form-row tight">
+            <label class="chk"><input type="checkbox" name="enabled" /> On</label>
+            <input name="threshold_percent" type="number" step="0.1" placeholder="%" />
+            <input name="lookback_minutes" type="number" step="1" placeholder="min" />
+            <button class="btn soft" type="submit">Save</button>
+            <span class="badge quiet" id="mwBadge"></span>
+          </form>
+          <div id="moversTable" class="scroll"></div>
         </div>
       </section>
 
       <!-- TARGETS -->
       <section class="view" id="view-targets">
-        <div class="panel">
-          <div class="panel-h"><h3>Target alerts</h3><span class="badge">one-shot</span></div>
+        <div class="panel clean">
           <form id="alertForm" class="form-row">
-            <input name="symbol" placeholder="BTC" required />
-            <input name="price" type="number" step="any" placeholder="Target price" required />
+            <input name="symbol" placeholder="Symbol" required />
+            <input name="price" type="number" step="any" placeholder="Price" required />
             <select name="market"><option value="spot">Spot</option><option value="futures">Futures</option></select>
-            <button class="btn" type="submit">Add alert</button>
+            <button class="btn" type="submit">Add</button>
           </form>
           <div id="alertsTable" class="scroll"></div>
         </div>
@@ -253,52 +205,17 @@
         </div>
       </section>
 
-      <!-- VOICE (transcript + type; call controls live in the global dock) -->
+      <!-- VOICE log (controls in dock) -->
       <section class="view" id="view-voice">
-        <div class="split">
-          <div class="panel voice-panel">
-            <div class="panel-h">
-              <h3>Conversation transcript</h3>
-              <span class="badge" id="xaiBadge">XAI key?</span>
-            </div>
-            <div id="secureBox" class="secure-box" hidden></div>
-            <p class="hint">
-              Call controls stay on every page (dock below). Use this tab for full transcript
-              and typed commands in the same conversation.
-            </p>
-            <form id="agentForm" class="chat-line">
-              <input id="agentInput" placeholder="Type in the same conversation…" autocomplete="off" />
-              <button class="btn" type="submit">Run</button>
-            </form>
-            <div class="quick-asks" id="voiceQuick">
-              <button type="button" class="chip-btn" data-agent="get overview of the desk">Overview</button>
-              <button type="button" class="chip-btn" data-agent="list my open positions">Positions</button>
-              <button type="button" class="chip-btn" data-agent="list my mover watchlist">Watchlist</button>
-              <button type="button" class="chip-btn" data-agent="list my target alerts">Alerts</button>
-              <button type="button" class="chip-btn" data-agent="list recent fires">Fires</button>
-              <button type="button" class="chip-btn" data-agent="label latest fire as took">Took last</button>
-              <button type="button" class="chip-btn" data-agent="label latest fire as skip">Skip last</button>
-            </div>
-            <div class="panel-h mt"><h3>Live log</h3>
-              <button type="button" id="btnClearHist" class="btn soft">Clear chat</button>
-            </div>
-            <div id="agentLog" class="agent-log"></div>
-          </div>
-          <div class="panel">
-            <div class="panel-h"><h3>Tools the agent can use</h3></div>
-            <ul class="tool-list">
-              <li>list / add / update / delete target alerts</li>
-              <li>list / add / remove mover watchlist</li>
-              <li>movers on/off · threshold · lookback</li>
-              <li>list / open / close journal positions</li>
-              <li>list fires · label took/skip · intel/news</li>
-              <li>desk overview · propose AD trade (paper)</li>
-            </ul>
-            <p class="hint mt">
-              Grok-app style: Start call once, talk freely, mute mic/speaker anytime.
-              No live exchange orders — journal/propose only.
-            </p>
-          </div>
+        <div class="panel clean voice-panel">
+          <div id="secureBox" class="secure-box" hidden></div>
+          <form id="agentForm" class="chat-line">
+            <input id="agentInput" placeholder="Type a command…" autocomplete="off" />
+            <button class="btn" type="submit">Run</button>
+            <button type="button" id="btnClearHist" class="btn soft">Clear</button>
+          </form>
+          <div id="agentLog" class="agent-log"></div>
+          <span id="xaiBadge" class="badge quiet" hidden></span>
         </div>
       </section>
 
@@ -342,23 +259,20 @@
     </div>
   </div>
 
-  <!-- Global voice dock — always visible on every page -->
+  <!-- Global voice dock -->
   <div id="voiceDock" class="voice-dock" aria-label="Grok voice call">
     <div class="voice-dock-inner">
       <div class="voice-dock-brand">
         <span class="vd-dot" id="vdDot"></span>
-        <div>
-          <div class="vd-title">Grok voice</div>
-          <div id="voiceStatus" class="vd-status">Ready — Start call to talk</div>
-        </div>
+        <div id="voiceStatus" class="vd-status">Ready</div>
       </div>
       <div id="voiceLevel" class="voice-level dock-level" hidden><span></span></div>
       <div class="voice-dock-actions">
         <button type="button" id="btnMic" class="mic dock-mic">Start call</button>
-        <button type="button" id="btnMuteMic" class="btn soft" hidden>Mic on</button>
-        <button type="button" id="btnMuteSpk" class="btn soft" hidden>Speaker on</button>
+        <button type="button" id="btnMuteMic" class="btn soft" hidden>Mic</button>
+        <button type="button" id="btnMuteSpk" class="btn soft" hidden>Speaker</button>
         <button type="button" id="btnEndCall" class="btn soft danger" hidden>End</button>
-        <button type="button" class="btn soft" id="btnDockTranscript" title="Open transcript">Log</button>
+        <button type="button" class="btn soft" id="btnDockTranscript">Log</button>
       </div>
     </div>
     <audio id="voiceAudio" playsinline></audio>

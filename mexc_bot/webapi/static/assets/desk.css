@@ -53,10 +53,7 @@ body::before {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background-image:
-    radial-gradient(rgba(56, 189, 248, 0.04) 1px, transparent 1px);
-  background-size: 28px 28px;
-  opacity: 0.5;
+  opacity: 0;
 }
 
 .app {
@@ -89,20 +86,34 @@ body::before {
   box-shadow: 0 0 32px rgba(56, 189, 248, 0.35);
 }
 .brand-title { font-weight: 700; font-size: 0.98rem; }
-.brand-ver { font-size: 0.68rem; color: var(--mute); font-family: var(--mono); }
 
-.nav { display: flex; flex-direction: column; gap: 0.2rem; flex: 1; }
+.nav { display: flex; flex-direction: column; gap: 0.15rem; flex: 1; }
+.nav-sep {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mute);
+  opacity: 0.55;
+  padding: 0.85rem 0.8rem 0.25rem;
+}
 .nav button {
   appearance: none; border: 1px solid transparent; background: transparent;
-  color: var(--mute); text-align: left; padding: 0.72rem 0.8rem;
-  border-radius: 12px; font: inherit; font-weight: 550; cursor: pointer;
+  color: var(--mute); text-align: left; padding: 0.68rem 0.8rem;
+  border-radius: 12px; font: inherit; font-weight: 600; cursor: pointer;
   transition: .15s ease;
 }
-.nav button:hover { color: var(--text); background: rgba(255,255,255,.03); }
+.nav button.nav-dim {
+  font-weight: 500;
+  font-size: 0.88rem;
+  opacity: 0.72;
+}
+.nav button:hover { color: var(--text); background: rgba(255,255,255,.03); opacity: 1; }
 .nav button.active {
   color: var(--sky);
   background: rgba(56,189,248,.1);
   border-color: rgba(56,189,248,.25);
+  opacity: 1;
 }
 
 .rail-meta { margin-top: auto; }
@@ -131,21 +142,19 @@ body::before {
 }
 .cmd-panel {
   position: relative;
-  border-radius: calc(var(--radius) + 4px);
+  border-radius: var(--radius);
   border: 1px solid var(--line);
   background: var(--panel);
-  box-shadow: var(--glow);
+  box-shadow: none;
   padding: 1rem 1.05rem 1.1rem;
   overflow: hidden;
-  min-height: 280px;
+  min-height: 260px;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+  transition: border-color 0.15s;
 }
 .cmd-panel:hover {
-  transform: translateY(-2px);
   border-color: rgba(56, 189, 248, 0.28);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35), 0 0 40px rgba(56, 189, 248, 0.08);
 }
 .cmd-panel::before {
   content: "";
@@ -181,31 +190,15 @@ body::before {
 .cmd-h {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.75rem;
-  margin-bottom: 0.95rem;
+  margin-bottom: 0.85rem;
 }
-.cmd-kicker {
-  display: block;
-  font-family: var(--mono);
-  font-size: 0.65rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--sky);
-  margin-bottom: 0.25rem;
-}
-.cmd-movers .cmd-kicker { color: var(--rose); }
-.cmd-positions .cmd-kicker { color: var(--mint); }
 .cmd-h h3 {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: 1.15rem;
   letter-spacing: -0.02em;
   font-weight: 700;
-}
-.cmd-sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.78rem;
-  color: var(--mute);
 }
 .cmd-list {
   display: flex;
@@ -467,9 +460,24 @@ body::before {
   display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start;
   margin-bottom: 1.15rem;
 }
-.top h1 { margin: 0; font-size: 1.55rem; letter-spacing: -0.03em; font-weight: 700; }
-.sub { margin: 0.25rem 0 0; color: var(--mute); font-size: 0.9rem; }
+.top h1 { margin: 0; font-size: 1.4rem; letter-spacing: -0.03em; font-weight: 700; }
+.sub { display: none; }
 .top-actions { display: flex; gap: 0.65rem; align-items: center; flex-wrap: wrap; }
+.panel.clean {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  box-shadow: none;
+}
+.panel.clean .form-row { margin-bottom: 0.85rem; }
+.badge.quiet {
+  background: transparent;
+  border: none;
+  color: var(--mute);
+  font-weight: 500;
+  padding: 0.2rem 0.4rem;
+}
 
 .majors { display: flex; gap: 0.45rem; flex-wrap: wrap; }
 .major {

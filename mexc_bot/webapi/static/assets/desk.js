@@ -120,40 +120,29 @@
     );
     const el = $(`#view-${name}`);
     if (el) el.classList.add("on");
-    const meta = {
-      overview: ["Overview", "Targets · Movers · Positions"],
-      targets: ["Targets", "One-shot price alarms"],
-      movers: ["Movers", "Watchlist · downside scanner · live marks"],
-      positions: ["Positions", "Journal · mark · time in trade"],
-      memory: ["Learning", "Teach · labels · outcomes"],
-      intel: ["Intel", "Book-filtered news · delist"],
-      planner: ["AD Layers", "Shared human + agent ladder"],
-      paper: ["Paper Arena", "Fictive agents · real marks"],
-      voice: ["Voice log", "Transcript of the call"],
-      roadmap: ["Roadmap", "Vision & phases"],
-      playbook: ["Playbook", "AD strategy encoded"],
-    }[name] || ["Desk", ""];
-    $("#title").textContent = meta[0];
-    $("#subtitle").textContent = meta[1];
+    const titles = {
+      overview: "Overview",
+      targets: "Targets",
+      movers: "Movers",
+      positions: "Positions",
+      memory: "Learning",
+      intel: "Intel",
+      planner: "AD Layers",
+      paper: "Paper",
+      voice: "Voice log",
+      roadmap: "Roadmap",
+      playbook: "Playbook",
+    };
+    $("#title").textContent = titles[name] || "Desk";
+    const sub = $("#subtitle");
+    if (sub) {
+      sub.textContent = "";
+      sub.hidden = true;
+    }
   }
 
-  function renderMajors(majors) {
-    const el = $("#majors");
-    if (!majors?.length) {
-      el.innerHTML = "";
-      return;
-    }
-    el.innerHTML = majors
-      .map((m) => {
-        const up = Number(m.changePercent) >= 0;
-        return `<div class="major"><span>${m.symbol.replace(
-          "USDT",
-          ""
-        )}</span> <b>${fmtPx(m.price)}</b> <span class="${up ? "up" : "dn"}">${fmtChg(
-          m.changePercent
-        )}</span></div>`;
-      })
-      .join("");
+  function renderMajors(_majors) {
+    /* majors strip removed for a cleaner focus UI */
   }
 
   function rankEmpty(msg) {
@@ -163,9 +152,7 @@
   async function loadOverview() {
     const d = await api("/api/overview");
     const h = d.hierarchy || {};
-    renderMajors(d.market?.majors || []);
 
-    // Priority 1 — Targets
     const tt = h.top_targets || [];
     $("#ovTopTargets").innerHTML = tt.length
       ? tt
@@ -176,7 +163,7 @@
               <div>
                 <div class="cmd-sym">${a.symbol}</div>
                 <div class="cmd-meta">${(a.market || "spot").toUpperCase()} · ${
-              a.enabled ? "ARMED" : "OFF"
+              a.enabled ? "armed" : "off"
             }</div>
               </div>
             </div>
@@ -184,9 +171,8 @@
           </div>`
           )
           .join("")
-      : rankEmpty("No targets — add via Targets or voice: add alert BTC 95000");
+      : rankEmpty("No targets");
 
-    // Priority 2 — Movers
     const tm = h.top_movers || [];
     $("#ovTopMovers").innerHTML = tm.length
       ? tm
@@ -196,9 +182,7 @@
               <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
               <div>
                 <div class="cmd-sym">${e.symbol}</div>
-                <div class="cmd-meta">${e.velocity_band || e.mode || "mover"} · ${
-              e.market || "—"
-            }</div>
+                <div class="cmd-meta">${e.velocity_band || e.mode || "mover"}</div>
               </div>
             </div>
             <div class="cmd-px dn">${
@@ -207,9 +191,8 @@
           </div>`
           )
           .join("")
-      : rankEmpty("No recent mover fires — watchlist quiet");
+      : rankEmpty("No recent fires");
 
-    // Priority 3 — Positions
     const pos = h.positions || d.positions || [];
     $("#ovPos").innerHTML = pos.length
       ? pos
@@ -219,7 +202,7 @@
               <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
               <div>
                 <div class="cmd-sym">${p.symbol}</div>
-                <div class="cmd-meta">${(p.notes || "journal").slice(0, 36)}</div>
+                <div class="cmd-meta">${(p.notes || "").slice(0, 32) || "—"}</div>
               </div>
             </div>
             <div class="cmd-side">
@@ -227,89 +210,17 @@
                 p.entry_avg != null ? fmtPx(p.entry_avg) : "—"
               }</div>
               <div class="cmd-meta">${
-                p.open_hours != null ? p.open_hours + "h open" : fmtTime(p.opened_at)
+                p.open_hours != null ? p.open_hours + "h" : fmtTime(p.opened_at)
               }</div>
             </div>
           </div>`
           )
           .join("")
-      : rankEmpty("No open positions — journal a layer or voice open position");
-
-    // Secondary — book intel
-    const bi = h.book_intel || [];
-    const bn = h.book_news || [];
-    const intelParts = [];
-    bi.forEach((i) => {
-      intelParts.push(`<div class="rank-row">
-        <span class="idx">I</span>
-        <span class="sym">${i.symbol}</span>
-        <span class="meta">${i.verdict || "—"}</span>
-        <span class="meta">${i.confidence != null ? Math.round(i.confidence * 100) + "%" : ""}</span>
-      </div>`);
-    });
-    bn.forEach((n) => {
-      intelParts.push(`<div class="rank-row">
-        <span class="idx">N</span>
-        <span class="sym">${(n.title || "").slice(0, 48)}</span>
-        <span class="meta">${n.severity || ""}</span>
-        <span class="meta">${n.symbol || ""}</span>
-      </div>`);
-    });
-    $("#ovBookIntel").innerHTML = intelParts.length
-      ? intelParts.join("")
-      : rankEmpty("No book-linked intel");
-
-    // 5 Learning
-    const learn = h.learning || {};
-    const need = learn.needs_label || [];
-    const labs = learn.recent_labels || [];
-    const learnHtml = [];
-    if (need.length) {
-      learnHtml.push(
-        ...need.map(
-          (e) => `<div class="rank-row">
-          <span class="idx">?</span>
-          <span class="sym">${e.symbol}</span>
-          <span class="meta">needs label</span>
-          <span class="dn">${e.velocity_band || ""}</span>
-        </div>`
-        )
-      );
-    }
-    labs.slice(0, 4).forEach((l) => {
-      learnHtml.push(`<div class="rank-row">
-        <span class="idx">✓</span>
-        <span class="sym">${l.symbol || "—"}</span>
-        <span class="meta">${l.action || ""}</span>
-        <span class="meta">${l.bounce_quality || ""}</span>
-      </div>`);
-    });
-    $("#ovLearning").innerHTML = learnHtml.length
-      ? learnHtml.join("")
-      : rankEmpty("Label fires to teach the coach");
-
-    const acts = $("#ovLearnActions");
-    if (acts) {
-      acts.innerHTML = need.length
-        ? need
-            .slice(0, 2)
-            .map(
-              (e) =>
-                `<button type="button" class="chip-btn" data-agent="label latest fire as took">Took ${e.symbol}</button>
-                 <button type="button" class="chip-btn" data-agent="label latest fire as skip">Skip ${e.symbol}</button>`
-            )
-            .join("")
-        : `<button type="button" class="chip-btn" data-agent="get overview of the desk">Voice: desk status</button>
-           <button type="button" class="chip-btn" data-agent="am I following my AD strategy?">Voice: discipline check</button>`;
-      acts.querySelectorAll("[data-agent]").forEach((b) => {
-        b.addEventListener("click", () => runAgentText(b.getAttribute("data-agent")));
-      });
-    }
+      : rankEmpty("No open positions");
   }
 
   async function loadPositions() {
     const d = await api("/api/positions");
-    $("#posMode").textContent = d.mode || "journal";
     const rows = (d.positions || [])
       .map(
         (p) => `<tr>
@@ -1333,15 +1244,7 @@
     runAgentText(v);
   });
 
-  const quick = $("#voiceQuick");
-  if (quick) {
-    quick.addEventListener("click", (e) => {
-      const t = e.target;
-      if (!(t instanceof HTMLElement)) return;
-      const msg = t.getAttribute("data-agent");
-      if (msg) runAgentText(msg);
-    });
-  }
+
 
   $("#posForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1471,8 +1374,6 @@
     };
     try {
       await (map[state.view] || loadOverview)();
-      const p = await api("/api/prices");
-      renderMajors(p.context?.majors || p.tickers || []);
     } catch (e) {
       console.error(e);
       toast(String(e.message || e).slice(0, 140));
