@@ -563,9 +563,7 @@
     const muteSpk = $("#btnMuteSpk");
     const level = $("#voiceLevel");
     const dock = $("#voiceDock");
-    const railPill = $("#callRailPill");
     const railCall = $("#btnRailCall");
-    const topState = $("#topVoiceState");
 
     if (dock) {
       dock.classList.toggle("in-call", state.inCall);
@@ -574,18 +572,17 @@
     if (endBtn) endBtn.hidden = !state.inCall;
     if (muteMic) {
       muteMic.hidden = !state.inCall;
-      muteMic.textContent = state.muteMic ? "Mic muted" : "Mic on";
+      muteMic.textContent = state.muteMic ? "Mic muted" : "Mic";
       muteMic.classList.toggle("muted-on", state.muteMic);
     }
     if (muteSpk) {
       muteSpk.hidden = !state.inCall;
-      muteSpk.textContent = state.muteSpk ? "Speaker muted" : "Speaker on";
+      muteSpk.textContent = state.muteSpk ? "Speaker muted" : "Speaker";
       muteSpk.classList.toggle("muted-on", state.muteSpk);
     }
     if (level) level.hidden = !(state.inCall && state.recording && !state.muteMic);
 
-    let statusLine = "Ready — Start call to talk";
-    let pillText = "voice idle";
+    let statusLine = "Ready";
     let mainLabel = "Start call";
     let mainDisabled = false;
 
@@ -593,52 +590,41 @@
     if (!secure) {
       if (box) {
         box.hidden = false;
-        box.innerHTML =
-          "<strong>Mic needs HTTPS</strong> on plain http://IP.<br/>" +
-          "Local: <code>http://127.0.0.1:8080</code>. Droplet: <code>https://IP/</code>.";
+        box.innerHTML = "Mic needs HTTPS (or localhost).";
       }
       mainLabel = "Need HTTPS";
       mainDisabled = true;
-      statusLine = "Voice needs secure context";
-      pillText = "voice blocked";
+      statusLine = "Mic blocked";
     } else if (!micSupported()) {
       if (box) {
         box.hidden = false;
-        box.innerHTML = "This browser cannot record audio. Try Chrome or Safari.";
+        box.innerHTML = "Mic not available.";
       }
       mainLabel = "Mic N/A";
       mainDisabled = true;
-      statusLine = "Mic not available";
-      pillText = "no mic";
+      statusLine = "No mic";
     } else {
       if (box) box.hidden = true;
       if (!state.inCall) {
         mainLabel = "Start call";
         mainDisabled = false;
-        statusLine = "Ready — Start call anytime (any page)";
-        pillText = "voice idle";
+        statusLine = "Ready";
       } else if (state.busy) {
-        mainLabel = "Grok…";
+        mainLabel = "…";
         mainDisabled = true;
-        statusLine = "Working · STT + tools + speaking";
-        pillText = "call · busy";
+        statusLine = "Working";
       } else if (state.muteMic) {
         mainLabel = "In call";
         mainDisabled = true;
-        statusLine = "Call live · mic muted";
-        pillText = "call · muted";
+        statusLine = "Mic muted";
       } else if (state.recording) {
-        mainLabel = state.speakingHeard ? "Hearing you" : "Idle";
+        mainLabel = "Listening";
         mainDisabled = true;
-        statusLine = state.speakingHeard
-          ? "Hearing you — pause when finished"
-          : "Idle — listening for your voice";
-        pillText = state.speakingHeard ? "call · speak" : "call · idle";
+        statusLine = state.speakingHeard ? "Hearing you…" : "Listening";
       } else {
         mainLabel = "In call";
         mainDisabled = true;
-        statusLine = "Call live";
-        pillText = "call · live";
+        statusLine = "Live";
       }
     }
 
@@ -649,24 +635,10 @@
     }
     const vs = $("#voiceStatus");
     if (vs) vs.textContent = statusLine;
-    if (railPill) {
-      railPill.textContent = pillText;
-      railPill.classList.toggle("live", state.inCall);
-    }
     if (railCall) {
       railCall.textContent = state.inCall ? "End call" : "Start call";
       railCall.classList.toggle("danger", state.inCall);
       railCall.disabled = !secure || !micSupported();
-    }
-    if (topState) {
-      topState.textContent = state.inCall
-        ? state.muteMic
-          ? "Voice · mic muted"
-          : state.busy
-            ? "Voice · Grok busy"
-            : "Voice · live"
-        : "Voice idle";
-      topState.classList.toggle("live", state.inCall);
     }
   }
 
