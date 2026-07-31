@@ -17,14 +17,18 @@
     silenceMs: 0,
   };
 
-  // Grok-app style VAD: end turn after short silence once user has spoken
+  // Calmer VAD: only commit a turn after sustained real speech + silence.
+  // Avoids spam on ambient noise / empty STT loops.
   const VAD = {
-    speakRms: 0.018,
-    silenceRms: 0.011,
-    endSilenceMs: 700, // snappier end-of-turn (was ~1.1s)
-    minSpeechMs: 350,
-    maxTurnMs: 22000,
-    pollMs: 60,
+    speakRms: 0.045, // higher — room noise should not count as speech
+    silenceRms: 0.02,
+    endSilenceMs: 900, // pause after you finish talking
+    minSpeechMs: 700, // must talk this long before we consider a turn
+    speechHoldMs: 280, // need continuous speech this long to arm "heard you"
+    maxTurnMs: 45000, // safety cap only (never sends without real speech)
+    pollMs: 70,
+    postReplyCooldownMs: 900, // ignore mic right after Grok speaks (echo)
+    emptyBackoffMs: 1200,
   };
 
   const HIST_KEY = "desk_agent_history_v1";
@@ -614,12 +618,12 @@
         statusLine = "Call live · mic muted";
         pillText = "call · muted";
       } else if (state.recording) {
-        mainLabel = "Listening…";
+        mainLabel = state.speakingHeard ? "Hearing you" : "Idle";
         mainDisabled = true;
         statusLine = state.speakingHeard
           ? "Hearing you — pause when finished"
-          : "Listening — start talking";
-        pillText = "call · live";
+          : "Idle — listening for your voice";
+        pillText = state.speakingHeard ? "call · speak" : "call · idle";
       } else {
         mainLabel = "In call";
         mainDisabled = true;
@@ -741,8 +745,34 @@
     }
   }
 
+  function isEmptySpeechError(msg) {
+    const m = String(msg || "").toLowerCase();
+    return (
+      m.includes("empty text") ||
+      m.includes("silence") ||
+      m.includes("too-short") ||
+      m.includes("empty or too-short") ||
+      m.includes("speak clearly") ||
+      m.includes("stt empty")
+    );
+  }
+
+  async function resumeListening(delayMs) {
+    if (!state.inCall || state.muteMic || state.busy) {
+      updateMicUi();
+      return;
+    }
+    setTimeout(() => listenTurn(), delayMs || 400);
+  }
+
   async function sendAudioBlob(blob) {
     if (!state.inCall) return;
+    // Guard: tiny blobs are noise, not speech — never hit the API
+    if (!blob || blob.size < 2500) {
+      $("#voiceStatus").textContent = "Idle — listening for your voice";
+      await resumeListening(VAD.emptyBackoffMs);
+      return;
+    }
     state.busy = true;
     updateMicUi();
     $("#voiceStatus").textContent = "Grok is thinking…";
@@ -768,6 +798,14 @@
       try {
         msg = JSON.parse(msg).detail || msg;
       } catch (_) {}
+      // Silence / empty STT: stay calm, no toast spam
+      if (isEmptySpeechError(msg)) {
+        state.busy = false;
+        $("#voiceStatus").textContent = "Idle — listening (no clear speech)";
+        updateMicUi();
+        await resumeListening(VAD.emptyBackoffMs);
+        return;
+      }
       throw new Error(msg || res.statusText);
     }
     const out = await res.json();
@@ -781,7 +819,6 @@
           .join("\n")
       );
     }
-    // Text is secondary transcript; voice is primary
     if (out.reply) agentMsg("bot", "🔊 " + out.reply);
     if (out.timing_ms) {
       const t = out.timing_ms;
@@ -809,11 +846,8 @@
         }
       } catch (_) {}
     }
-    if (state.inCall && !state.muteMic) {
-      setTimeout(() => listenTurn(), 250);
-    } else {
-      updateMicUi();
-    }
+    // Cooldown so we don't pick up Grok's own voice as the next turn
+    await resumeListening(VAD.postReplyCooldownMs);
   }
 
   let recorder = null;
@@ -879,8 +913,11 @@
     state.inCall = true;
     state.muteMic = false;
     updateMicUi();
-    $("#voiceStatus").textContent = "Call started — start talking";
-    agentMsg("bot", "🔊 Call live. Just talk — I'll reply by voice.");
+    $("#voiceStatus").textContent = "Idle — talk when ready (I won't interrupt)";
+    agentMsg(
+      "bot",
+      "🔊 Call live. I'll wait until you speak clearly, then reply. Silence is fine."
+    );
     await listenTurn();
   }
 
@@ -898,7 +935,6 @@
           channelCount: 1,
         },
       });
-      // Apply mute if toggled mid-acquire
       mediaStream.getAudioTracks().forEach((t) => {
         t.enabled = !state.muteMic;
       });
@@ -915,6 +951,8 @@
       state.silenceMs = 0;
       turnStartedAt = Date.now();
       speechStartedAt = 0;
+      let speechArmedMs = 0; // continuous loud frames
+      let speechTotalMs = 0; // cumulative loud frames this arm
 
       const mimeCandidates = [
         "audio/webm;codecs=opus",
@@ -933,14 +971,21 @@
         ? new MediaRecorder(mediaStream, { mimeType: mime })
         : new MediaRecorder(mediaStream);
 
+      // Only keep audio after speech is armed — cuts empty uploads
+      let captureArmed = false;
       recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size) state.chunks.push(e.data);
+        if (!e.data || !e.data.size) return;
+        if (captureArmed || state.speakingHeard) state.chunks.push(e.data);
       };
 
-      const finishTurn = async () => {
+      const teardownCapture = () => {
         clearVad();
-        const type = recorder?.mimeType || mime || "audio/webm";
-        const blob = new Blob(state.chunks, { type });
+        try {
+          if (recorder && recorder.state !== "inactive") {
+            recorder.onstop = null;
+            recorder.stop();
+          }
+        } catch (_) {}
         if (mediaStream) {
           mediaStream.getTracks().forEach((t) => t.stop());
           mediaStream = null;
@@ -950,21 +995,39 @@
           audioCtx = null;
           analyser = null;
         }
+        recorder = null;
         state.recording = false;
         $("#btnMic")?.classList.remove("rec");
+      };
+
+      const finishTurn = async (reason) => {
+        const type = recorder?.mimeType || mime || "audio/webm";
+        const blob = new Blob(state.chunks, { type });
+        const heard = state.speakingHeard && speechTotalMs >= VAD.minSpeechMs;
+        teardownCapture();
         if (!state.inCall) return;
-        if (!blob.size || !state.speakingHeard) {
-          // no speech — keep listening
-          setTimeout(() => listenTurn(), 200);
+
+        // Idle / no real speech → quietly keep listening (not pushy)
+        if (!heard || blob.size < 2500) {
+          $("#voiceStatus").textContent = "Idle — listening for your voice";
+          updateMicUi();
+          await resumeListening(350);
           return;
         }
         try {
           await sendAudioBlob(blob);
         } catch (e) {
-          $("#voiceStatus").textContent = "Voice failed";
-          toast(String(e.message || e).slice(0, 160));
+          const msg = String(e.message || e);
           state.busy = false;
-          if (state.inCall && !state.muteMic) setTimeout(() => listenTurn(), 600);
+          if (isEmptySpeechError(msg)) {
+            $("#voiceStatus").textContent = "Idle — listening (no clear speech)";
+            updateMicUi();
+            await resumeListening(VAD.emptyBackoffMs);
+            return;
+          }
+          $("#voiceStatus").textContent = "Voice failed";
+          toast(msg.slice(0, 140));
+          await resumeListening(1000);
         }
       };
 
@@ -973,13 +1036,10 @@
         endCall();
       };
 
-      recorder.onstop = () => {
-        /* finishTurn called from VAD / max timer */
-      };
-
       recorder.start(200);
       state.recording = true;
       $("#btnMic")?.classList.add("rec");
+      $("#voiceStatus").textContent = "Idle — listening for your voice";
       updateMicUi();
 
       const timeData = new Uint8Array(analyser.fftSize);
@@ -997,35 +1057,66 @@
         setLevelBar(rms);
 
         const now = Date.now();
-        if (rms >= VAD.speakRms) {
-          if (!state.speakingHeard) {
+        const loud = rms >= VAD.speakRms;
+
+        if (loud) {
+          speechArmedMs += VAD.pollMs;
+          speechTotalMs += VAD.pollMs;
+          state.silenceMs = 0;
+          // Arm only after sustained speech (not a cough/click)
+          if (!state.speakingHeard && speechArmedMs >= VAD.speechHoldMs) {
             state.speakingHeard = true;
-            speechStartedAt = now;
+            captureArmed = true;
+            speechStartedAt = now - speechArmedMs;
+            // Include a bit of pre-roll by starting to keep chunks now
+            $("#voiceStatus").textContent = "Hearing you… pause when done";
             updateMicUi();
           }
-          state.silenceMs = 0;
-        } else if (state.speakingHeard) {
-          state.silenceMs += VAD.pollMs;
+        } else {
+          speechArmedMs = 0;
+          if (state.speakingHeard) {
+            state.silenceMs += VAD.pollMs;
+          } else {
+            // Truly idle — drop buffered noise so we never upload it
+            if (state.chunks.length > 40) state.chunks = state.chunks.slice(-8);
+          }
         }
 
         const spokenLongEnough =
-          state.speakingHeard &&
-          speechStartedAt &&
-          now - speechStartedAt >= VAD.minSpeechMs;
+          state.speakingHeard && speechTotalMs >= VAD.minSpeechMs;
         const silenceDone = state.silenceMs >= VAD.endSilenceMs;
-        const maxed = now - turnStartedAt >= VAD.maxTurnMs;
 
-        if ((spokenLongEnough && silenceDone) || maxed) {
+        // Only finish when user spoke enough AND then paused.
+        // Never send on max-time alone (that was the "pushy" loop).
+        if (spokenLongEnough && silenceDone) {
           clearVad();
           try {
             if (recorder && recorder.state !== "inactive") {
-              recorder.onstop = finishTurn;
+              recorder.onstop = () => finishTurn("vad");
               recorder.stop();
             } else {
-              finishTurn();
+              finishTurn("vad");
             }
           } catch (_) {
-            finishTurn();
+            finishTurn("vad");
+          }
+          return;
+        }
+
+        // Safety: if armed forever without silence, force after maxTurn
+        if (
+          state.speakingHeard &&
+          spokenLongEnough &&
+          now - turnStartedAt >= VAD.maxTurnMs
+        ) {
+          clearVad();
+          try {
+            if (recorder && recorder.state !== "inactive") {
+              recorder.onstop = () => finishTurn("max");
+              recorder.stop();
+            } else finishTurn("max");
+          } catch (_) {
+            finishTurn("max");
           }
         }
       }, VAD.pollMs);
