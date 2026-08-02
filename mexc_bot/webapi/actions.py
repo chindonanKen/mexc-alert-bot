@@ -169,11 +169,32 @@ def _norm_sym(s: str) -> str:
     )
 
 
+def _base_asset(norm: str) -> str:
+    """Strip a single trailing USDT only (BTCUSDT→BTC). No substring matching."""
+    n = (norm or "").upper()
+    if n.endswith("USDT") and len(n) > 4:
+        return n[:-4]
+    return n
+
+
+def watch_symbols_match(query: str, row_symbol: str) -> bool:
+    """True if query and row are the same book id under compact/underscore forms.
+
+    BTC == BTCUSDT == BTC_USDT. ETH does NOT match ETHFI_USDT. SOL does NOT match SOLV.
+    """
+    q = _norm_sym(query)
+    r = _norm_sym(row_symbol)
+    if not q or not r:
+        return False
+    if q == r:
+        return True
+    return _base_asset(q) == _base_asset(r) and bool(_base_asset(q))
+
+
 def remove_watch(symbol: str, market: Optional[str] = None, user_id: Optional[int] = None) -> dict:
-    """Remove watchlist row(s). Matches compact / underscore / STOCK forms."""
+    """Remove watchlist row(s). Matches compact / underscore / STOCK forms only (exact base)."""
     uid = _uid(user_id)
     sym = symbol.upper().strip()
-    norm = _norm_sym(sym)
     conn = db.connect()
     try:
         rows = conn.execute(
@@ -186,16 +207,8 @@ def remove_watch(symbol: str, market: Optional[str] = None, user_id: Optional[in
             rmkt = r["market"] if hasattr(r, "keys") else r[1]
             if market and (rmkt or "").lower() != market.lower():
                 continue
-            if _norm_sym(str(rsym)) != norm and norm not in _norm_sym(str(rsym)):
-                # allow base match: BTC vs BTCUSDT
-                rn = _norm_sym(str(rsym))
-                if not (
-                    rn == norm
-                    or rn.rstrip("USDT") == norm.rstrip("USDT")
-                    or rn.endswith(norm)
-                    or norm.endswith(rn.rstrip("USDT") or rn)
-                ):
-                    continue
+            if not watch_symbols_match(sym, str(rsym)):
+                continue
             conn.execute(
                 "DELETE FROM mover_watchlist WHERE user_id = ? AND symbol = ? AND market = ?",
                 (uid, rsym, rmkt),

@@ -282,37 +282,68 @@ def tag_trade(
     notes: Optional[str] = None,
     user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Attach behavior to linked event and/or trade notes."""
+    """Attach behavior to linked event and always persist on journal trade notes.
+
+    Behavior-only tags (no linked fire, no free-text notes) still write
+    ``[behavior]`` onto journal_trades.notes so learning is not lost.
+    """
     uid = int(user_id or uid_or_raise())
     store = event_store()
     d = get_trade_dossier(store, uid, int(trade_id))
     if not d:
         raise ValueError("Trade not found")
+    beh = (behavior or "").strip() or None
+    note = (notes or "").strip() or None
+    if not beh and not note:
+        raise ValueError("Provide behavior and/or notes to tag")
+
+    wrote = False
     eid = d.get("primary_event_id")
-    if eid and behavior:
-        store.label_event(
+    if eid and beh:
+        ok = store.label_event(
             int(eid),
             uid,
-            behavior=behavior,
-            notes=notes,
+            behavior=beh,
+            notes=note,
             source="human",
             confidence=1.0,
         )
-    if notes:
-        # append journal notes via SQL
-        with store._lock:
-            conn = store._get_conn()
-            row = conn.execute(
-                "SELECT notes FROM journal_trades WHERE id = ? AND user_id = ?",
-                (int(trade_id), uid),
-            ).fetchone()
-            if row:
-                old = row["notes"] or ""
-                merged = (old + " | " + notes).strip(" |") if old else notes
-                if behavior:
-                    merged = f"[{behavior}] {merged}"
-                conn.execute(
-                    "UPDATE journal_trades SET notes = ? WHERE id = ?",
-                    (merged, int(trade_id)),
-                )
-    return {"ok": True, "trade_id": trade_id, "behavior": behavior}
+        wrote = wrote or bool(ok)
+
+    # Always mirror onto journal so process tags survive without a linked fire
+    with store._lock:
+        conn = store._get_conn()
+        row = conn.execute(
+            "SELECT notes FROM journal_trades WHERE id = ? AND user_id = ?",
+            (int(trade_id), uid),
+        ).fetchone()
+        if not row:
+            raise ValueError("Trade not found")
+        old = (row["notes"] or "").strip()
+        pieces: List[str] = []
+        if beh:
+            tag = f"[{beh}]"
+            # avoid stacking identical behavior tags
+            if tag not in old:
+                pieces.append(tag)
+        if note:
+            pieces.append(note)
+        if pieces:
+            merged = (old + " | " + " ".join(pieces)).strip(" |") if old else " ".join(pieces)
+            conn.execute(
+                "UPDATE journal_trades SET notes = ? WHERE id = ? AND user_id = ?",
+                (merged, int(trade_id), uid),
+            )
+            wrote = True
+        elif beh and f"[{beh}]" in old:
+            wrote = True  # already tagged
+
+    if not wrote:
+        raise ValueError("Tag not persisted")
+    return {
+        "ok": True,
+        "trade_id": trade_id,
+        "behavior": beh,
+        "notes": note,
+        "linked_event_id": eid,
+    }

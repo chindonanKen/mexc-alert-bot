@@ -209,11 +209,78 @@ class TestWatchRemoveParity(unittest.TestCase):
         )
         self.assertEqual(left, [])
 
+    def test_remove_watch_does_not_overmatch_ethfi_solv(self):
+        """ETH must not delete ETHFI; SOL must not delete SOLV."""
+        from mexc_bot.webapi import actions, db as desk_db
+        from mexc_bot.webapi.actions import watch_symbols_match
+
+        self.assertTrue(watch_symbols_match("BTC", "BTC_USDT"))
+        self.assertTrue(watch_symbols_match("BTCUSDT", "BTC_USDT"))
+        self.assertFalse(watch_symbols_match("ETH", "ETHFI_USDT"))
+        self.assertFalse(watch_symbols_match("ETH", "ETHFIUSDT"))
+        self.assertFalse(watch_symbols_match("SOL", "SOLV_USDT"))
+        self.assertFalse(watch_symbols_match("SOL", "SOLVUSDT"))
+
+        conn = desk_db.connect()
+        conn.execute(
+            "INSERT INTO mover_watchlist VALUES (8630949601, 'ETH_USDT', 'futures')"
+        )
+        conn.execute(
+            "INSERT INTO mover_watchlist VALUES (8630949601, 'ETHFI_USDT', 'futures')"
+        )
+        conn.execute(
+            "INSERT INTO mover_watchlist VALUES (8630949601, 'SOL_USDT', 'futures')"
+        )
+        conn.execute(
+            "INSERT INTO mover_watchlist VALUES (8630949601, 'SOLV_USDT', 'futures')"
+        )
+        conn.commit()
+        conn.close()
+
+        actions.remove_watch("ETH", market="futures", user_id=8630949601)
+        left = {
+            r["symbol"]
+            for r in desk_db.fetch_all(
+                "SELECT symbol FROM mover_watchlist WHERE user_id=8630949601"
+            )
+        }
+        self.assertNotIn("ETH_USDT", left)
+        self.assertIn("ETHFI_USDT", left)
+        self.assertIn("SOL_USDT", left)
+        self.assertIn("SOLV_USDT", left)
+
+        actions.remove_watch("SOL", market="futures", user_id=8630949601)
+        left2 = {
+            r["symbol"]
+            for r in desk_db.fetch_all(
+                "SELECT symbol FROM mover_watchlist WHERE user_id=8630949601"
+            )
+        }
+        self.assertNotIn("SOL_USDT", left2)
+        self.assertIn("SOLV_USDT", left2)
+        self.assertIn("ETHFI_USDT", left2)
+
     def test_remove_missing_errors(self):
         from mexc_bot.webapi import actions
 
         with self.assertRaises(ValueError):
             actions.remove_watch("NOPE_COIN", user_id=8630949601)
+
+    def test_tag_trade_behavior_without_linked_fire(self):
+        from mexc_bot.webapi import learning_api
+
+        store = EventStore(self.db)
+        tid = store.journal_open(
+            8630949601, "ORPHAN_USDT", "futures", entry_avg=1.0
+        )
+        # no nearby fire → no primary_event_id
+        out = learning_api.tag_trade(tid, behavior="fomo", user_id=8630949601)
+        self.assertTrue(out["ok"])
+        notes = store.journal_list(8630949601, open_only=True)
+        row = next(t for t in notes if int(t["id"]) == int(tid))
+        self.assertIn("[fomo]", row.get("notes") or "")
+        with self.assertRaises(ValueError):
+            learning_api.tag_trade(tid, behavior=None, notes=None, user_id=8630949601)
 
 
 class TestAlertDeleteParity(unittest.TestCase):
