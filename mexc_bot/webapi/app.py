@@ -698,6 +698,60 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(400, str(e))
 
+    @app.get("/api/learning/trades")
+    def learning_trades(
+        closed_only: bool = Query(False),
+        symbol: Optional[str] = Query(None),
+        limit: int = Query(30, ge=1, le=100),
+        _: bool = Depends(require_auth),
+    ):
+        from .learning_api import trades_api
+
+        try:
+            return trades_api(
+                closed_only=closed_only, symbol=symbol, limit=limit
+            )
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/learning/trades/{trade_id}")
+    def learning_trade_one(trade_id: int, _: bool = Depends(require_auth)):
+        from .learning_api import trade_api
+
+        try:
+            return trade_api(trade_id)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    class TagTradeBody(BaseModel):
+        trade_id: int
+        behavior: Optional[str] = None
+        notes: Optional[str] = None
+
+    @app.post("/api/learning/trades/tag")
+    def learning_trade_tag(body: TagTradeBody, _: bool = Depends(require_auth)):
+        from .learning_api import tag_trade
+
+        try:
+            return tag_trade(
+                body.trade_id, behavior=body.behavior, notes=body.notes
+            )
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/learning/ticker/{symbol}")
+    def learning_ticker(
+        symbol: str,
+        market: Optional[str] = Query(None),
+        _: bool = Depends(require_auth),
+    ):
+        from .learning_api import ticker_api
+
+        try:
+            return ticker_api(symbol, market=market)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
     @app.post("/api/coach")
     def coach(body: CoachBody, _: bool = Depends(require_auth)):
         from .learning_api import coach_ask
@@ -712,6 +766,8 @@ def create_app() -> FastAPI:
             "stats": out.get("stats"),
             "draft_id": out.get("draft_id"),
             "pulse": out.get("pulse"),
+            "ticker": out.get("ticker"),
+            "closed_trades": out.get("closed_trades"),
             "market": market_context(),
             "ts": time.time(),
         }

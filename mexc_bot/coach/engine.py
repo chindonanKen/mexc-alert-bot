@@ -247,7 +247,10 @@ def format_coach_reply(
         lines.append("Latest event: (none logged yet)")
 
     lines.append("")
-    lines.append("Desk: teach · approve drafts · answer Needs you. Voice uses same memory.")
+    lines.append(
+        "Desk Learning: Needs you · trade reviews (PnL/layers/hold) · "
+        "by ticker · teach · approve drafts. Voice uses the same memory."
+    )
     return "\n".join(lines)
 
 

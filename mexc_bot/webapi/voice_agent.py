@@ -41,7 +41,9 @@ You fully control desk data via tools (call them; do not only describe):
 - Mover watchlist + movers on/off / threshold / lookback
 - Journal positions: list / open / close
 - Learning: list_fires, label_fire, list_pending_questions, answer_question,
-  teach, approve_draft, learning_stats, coach_ask
+  teach, approve_draft, learning_stats, coach_ask,
+  list_trade_reviews, get_trade_review, ticker_stats, tag_trade
+- Prefer trade dossiers + ticker_stats when discussing what worked; cite real PnL/hold/layers only from tools.
 - Intel: investigations + news (prefer book symbols)
 - Overview + propose_trade (paper AD plan / layers thesis)
 

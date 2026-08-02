@@ -140,9 +140,12 @@ sqlite3 data/alerts.db "SELECT COUNT(*) FROM journal_fills WHERE user_id=8630949
 
 1. **Alarms** still on Telegram.  
 2. Open **AD Desk** (HTTPS if voice).  
-3. **Needs you** / Learning badge when back from sleep.  
-4. **Teach** + **Ask coach** on desk; voice uses same memory.  
-5. Open positions on MEXC → after grace, fires should label **took** when fills/journal match; flat → **skip**.
+3. **Needs you** cards show symbol · band · drop · fire price · time · system inference — answer when back.  
+4. **Trade reviews:** closed positions with hold time, PnL %, buy/sell layers, linked fire; tag plan_ok / fomo / pride / …  
+5. **By ticker:** click a chip for that chart’s fires/trades/win-rate; ask coach “SIREN process?”  
+6. **Teach** + **Ask coach**; voice tools use the same memory.  
+7. MEXC fills → journal → after **1h** grace, auto **took** / **skip**.  
+8. Desk delete target/mover should match Telegram `/l` `/mw` (same DB + `DESK_USER_ID=8630949601`).
 
 ---
 

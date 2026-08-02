@@ -15,17 +15,18 @@ This file is a **dated snapshot** so the next human/agent (including a **new Mac
 
 Shared SQLite is plumbing (same book/fires). Learning UX is desk-only. Future multi-device alarms come from desk (`/api/notify/stub` placeholder).
 
-### Learning spine (shipped 2026-08-02) · tip `209c070`
+### Learning (top-tier desk loop)
 
-- Auto engagement: journal/fills → took|skip|partial|late after **1h** grace (`EngagementBridge`)
-- Max **2** pending questions on desk **Needs you** (Overview + Learning)
-- Teach lessons + coach drafts (approve/dismiss); coach API/pulse tool-backed from EventStore
-- Voice tools: `teach`, `coach_ask`, `list_pending_questions`, `answer_question`, `learning_stats`, …
-- Owner id: `DESK_USER_ID=8630949601`
-- Flags: `FEATURE_LEARNING`, `LEARNING_AUTO_FROM_POSITIONS`, `LEARNING_GRACE_SECONDS=3600`
-- UI: **AD Layers + Paper Arena removed** from desk nav
-- Droplet real-data guide: **[DROPLET_DESK_LEARNING.md](DROPLET_DESK_LEARNING.md)** — no seed/dummy data
-- Tests: `tests/test_desk_learning_spine.py` + existing suite via `make test`
+- **Signal + trade + ticker:** fires, closed-position dossiers (PnL, hold, buy/sell layers, linked fires), per-ticker profiles
+- Rich **Needs you** cards (symbol, time, fire price, band, inference)
+- Auto engagement 1h grace; max 2 pending; symbol coalesce; draft dedupe
+- Coach/voice cite trades + ticker stats; soft candle reds; never invent fills
+- Watchlist delete matches compact/underscore symbol forms (desk ↔ Telegram same DB)
+- UI: Learning = Needs you · trade reviews · by ticker · teach · coach · fires
+- **No** AD Layers / Paper Arena
+- Owner: `DESK_USER_ID=8630949601`
+- Guide: **[DROPLET_DESK_LEARNING.md](DROPLET_DESK_LEARNING.md)**
+- Tests: `test_desk_learning_spine.py`, `test_trade_learning.py`
 
 ### AD Desk (explore fully)
 

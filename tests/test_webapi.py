@@ -167,6 +167,8 @@ class TestWebApi(unittest.TestCase):
         self.assertIn("needs_you", body)
         self.assertIn("stats", body)
         self.assertIn("coach_pulse", body)
+        self.assertIn("trades", body)
+        self.assertIn("tickers", body)
         r2 = self.client.post(
             "/api/learning/teach",
             json={"text": "webapi test lesson no full size on grind"},
@@ -181,6 +183,16 @@ class TestWebApi(unittest.TestCase):
         r4 = self.client.get("/api/notify/stub")
         self.assertEqual(r4.status_code, 200)
         self.assertEqual(r4.json().get("status"), "stub")
+        r5 = self.client.get("/api/learning/trades")
+        self.assertEqual(r5.status_code, 200)
+        self.assertIn("trades", r5.json())
+        # open a journal trade via API then dossier
+        self.client.post(
+            "/api/positions",
+            json={"symbol": "TESTCOIN", "market": "futures", "entry_avg": 1.0},
+        )
+        trades = self.client.get("/api/learning/trades").json()["trades"]
+        self.assertTrue(any(t.get("symbol") == "TESTCOIN" for t in trades))
 
 
 if __name__ == "__main__":

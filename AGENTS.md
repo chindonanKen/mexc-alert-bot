@@ -273,6 +273,7 @@ Message shapes:
 - Overview moving toward ranked hierarchy (see AD_DESK_VISION.md)  
 - Learning V1 tables + outcome poller + journal (flagged)  
 - **Engagement bridge** (1h grace → took|skip|partial|late), pending Qs (max 2), lessons/teach, coach desk+voice  
+- **Trade dossiers** (PnL, hold, buy/sell layers, linked fires) + **per-ticker** profiles + rich Needs you cards  
 
 ### Not shipped (learning path — later)
 

@@ -181,11 +181,32 @@
         needsEl.hidden = false;
         let html = `<div class="ov-needs-h">Needs you <button type="button" class="btn soft sm" data-jump="memory">Learning</button></div>`;
         qs.forEach((q) => {
+          const meta = [
+            q.symbol || (q.event && q.event.symbol) || "—",
+            q.velocity_band || (q.event && q.event.velocity_band) || "",
+            q.drop_pct != null
+              ? Number(q.drop_pct).toFixed(1) + "%"
+              : q.event && q.event.drop_pct != null
+                ? Number(q.event.drop_pct).toFixed(1) + "%"
+                : "",
+            q.fire_price != null
+              ? "@" + q.fire_price
+              : q.event && q.event.price != null
+                ? "@" + q.event.price
+                : "",
+            q.fire_ts || (q.event && q.event.ts)
+              ? fmtTime(q.fire_ts || q.event.ts)
+              : "",
+            q.inferred_action ? "→ " + q.inferred_action : "",
+          ]
+            .filter(Boolean)
+            .join(" · ");
           html += `<div class="ov-needs-row">
-            <div class="ov-needs-q">${(q.question || "").slice(0, 160)}</div>
+            <div class="ov-needs-meta">${meta}</div>
+            <div class="ov-needs-q">${(q.question || "").slice(0, 180)}</div>
             <div class="row-gap">
-              <button type="button" class="btn sm" data-ans="${q.id}" data-act="skip">Skip why later</button>
-              <button type="button" class="btn soft sm" data-ans="${q.id}" data-act="took">Took</button>
+              <button type="button" class="btn sm" data-ans="${q.id}" data-act="skip">Confirm skip</button>
+              <button type="button" class="btn soft sm" data-ans="${q.id}" data-act="took">I took it</button>
               <button type="button" class="btn soft sm" data-dismiss-q="${q.id}">Dismiss</button>
             </div>
           </div>`;
@@ -559,21 +580,47 @@
     const db = $("#learnDraftBadge");
     if (db) db.textContent = String(drafts.length);
 
+    function pendingCard(q) {
+      const sym = q.symbol || (q.event && q.event.symbol) || "—";
+      const band = q.velocity_band || (q.event && q.event.velocity_band) || "—";
+      const drop =
+        q.drop_pct != null
+          ? Number(q.drop_pct).toFixed(1) + "%"
+          : q.event && q.event.drop_pct != null
+            ? Number(q.event.drop_pct).toFixed(1) + "%"
+            : "—";
+      const px =
+        q.fire_price != null
+          ? q.fire_price
+          : q.event && q.event.price != null
+            ? q.event.price
+            : "—";
+      const when = fmtTime(q.fire_ts || (q.event && q.event.ts) || q.created_at);
+      const inf = q.inferred_action
+        ? `${q.inferred_action}${
+            q.inferred_confidence != null
+              ? " (" + Math.round(Number(q.inferred_confidence) * 100) + "%)"
+              : ""
+          }`
+        : "—";
+      return `<div class="learn-card rich">
+        <div class="learn-card-h">${sym} · ${band} · ${drop}</div>
+        <div class="learn-card-meta">Fire ${px} · ${when} · system: ${inf}</div>
+        <div class="learn-card-t">${(q.question || "").slice(0, 220)}</div>
+        <div class="learn-card-meta">${(q.inferred_reason || "").slice(0, 120)}</div>
+        <div class="row-gap mt">
+          <button type="button" class="btn sm" data-pq="${q.id}" data-act="took">Took</button>
+          <button type="button" class="btn soft sm" data-pq="${q.id}" data-act="skip">Skip</button>
+          <button type="button" class="btn soft sm" data-pq="${q.id}" data-act="late">Late/FOMO</button>
+          <button type="button" class="btn soft sm" data-pq-dismiss="${q.id}">Dismiss</button>
+        </div>
+      </div>`;
+    }
+
     const pendEl = $("#learnPending");
     if (pendEl) {
       pendEl.innerHTML = pending.length
-        ? pending
-            .map(
-              (q) => `<div class="learn-card">
-              <div class="learn-card-t">${(q.question || "").slice(0, 200)}</div>
-              <div class="row-gap mt">
-                <button type="button" class="btn sm" data-pq="${q.id}" data-act="took">Took</button>
-                <button type="button" class="btn soft sm" data-pq="${q.id}" data-act="skip">Skip</button>
-                <button type="button" class="btn soft sm" data-pq-dismiss="${q.id}">Dismiss</button>
-              </div>
-            </div>`
-            )
-            .join("")
+        ? pending.map(pendingCard).join("")
         : `<div class="rank-empty">Nothing pending — you're clear</div>`;
       $$("[data-pq]", pendEl).forEach((b) =>
         b.addEventListener("click", async () => {
@@ -681,6 +728,174 @@
         `median_bounce=${med} lessons=${stats.approved_lessons || 0}`;
     }
     if (stB) stB.textContent = String(stats.events || 0);
+
+    // Trade dossiers
+    const trades = bundle.trades || bundle.closed_trades || [];
+    const trEl = $("#learnTrades");
+    if (trEl) {
+      trEl.innerHTML = trades.length
+        ? trades
+            .map((t) => {
+              const pnl = t.pnl_pct;
+              const pnlS =
+                pnl != null
+                  ? `<span class="${pnl >= 0 ? "up" : "dn"}">${
+                      pnl >= 0 ? "+" : ""
+                    }${Number(pnl).toFixed(2)}%</span>`
+                  : t.status === "open"
+                    ? "<span class='badge'>open</span>"
+                    : "—";
+              const buys = (t.buy_layers || [])
+                .slice(0, 6)
+                .map(
+                  (l) =>
+                    `B ${l.price != null ? l.price : "—"}`
+                )
+                .join(" · ");
+              const sells = (t.sell_layers || [])
+                .slice(0, 6)
+                .map(
+                  (l) =>
+                    `S ${l.price != null ? l.price : "—"}`
+                )
+                .join(" · ");
+              const linked = (t.linked_events || [])[0];
+              const fireS = linked
+                ? `Fire #${linked.id} ${linked.velocity_band || ""} ${
+                    linked.drop_pct != null
+                      ? Number(linked.drop_pct).toFixed(1) + "%"
+                      : ""
+                  }`
+                : "No linked fire";
+              return `<div class="learn-card rich">
+                <div class="learn-card-h">#${t.id} ${t.symbol} [${(
+                t.market || "?"
+              )
+                .toString()
+                .slice(0, 1)
+                .toUpperCase()}] ${pnlS}</div>
+                <div class="learn-card-meta">Hold ${
+                  t.hold_hours != null ? t.hold_hours + "h" : "—"
+                } · ${fmtTime(t.opened_at)} → ${
+                t.closed_at ? fmtTime(t.closed_at) : "now"
+              }</div>
+                <div class="learn-card-meta">Entry ${
+                  t.entry_avg != null ? t.entry_avg : "—"
+                } · Exit ${t.exit_avg != null ? t.exit_avg : "—"}</div>
+                <div class="learn-card-meta">Layers: ${buys || "—"} ${
+                sells ? " | " + sells : ""
+              }</div>
+                <div class="learn-card-meta">${fireS}</div>
+                <div class="row-gap mt">
+                  <button type="button" class="btn soft sm" data-tag-tr="${
+                    t.id
+                  }" data-beh="plan_ok">plan_ok</button>
+                  <button type="button" class="btn soft sm" data-tag-tr="${
+                    t.id
+                  }" data-beh="fomo">fomo</button>
+                  <button type="button" class="btn soft sm" data-tag-tr="${
+                    t.id
+                  }" data-beh="pride">pride</button>
+                  <button type="button" class="btn soft sm" data-tag-tr="${
+                    t.id
+                  }" data-beh="hesitant">hesitant</button>
+                  <button type="button" class="btn soft sm" data-coach-tr="${
+                    t.symbol
+                  }">Coach</button>
+                </div>
+              </div>`;
+            })
+            .join("")
+        : `<div class="rank-empty">No journal trades yet — closes/fills appear here</div>`;
+      $$("[data-tag-tr]", trEl).forEach((b) =>
+        b.addEventListener("click", async () => {
+          try {
+            await api("/api/learning/trades/tag", {
+              method: "POST",
+              body: JSON.stringify({
+                trade_id: +b.dataset.tagTr,
+                behavior: b.dataset.beh,
+                notes: "desk tag",
+              }),
+            });
+            toast("Tagged " + b.dataset.beh);
+            loadMemory();
+          } catch (err) {
+            toast(err.message);
+          }
+        })
+      );
+      $$("[data-coach-tr]", trEl).forEach((b) =>
+        b.addEventListener("click", async () => {
+          try {
+            const r = await api("/api/coach", {
+              method: "POST",
+              body: JSON.stringify({
+                question: `Review my ${b.dataset.coachTr} trades and process`,
+              }),
+            });
+            const pre = $("#coachReply");
+            if (pre) pre.textContent = r.reply || "";
+          } catch (err) {
+            toast(err.message);
+          }
+        })
+      );
+    }
+
+    // Ticker chips
+    const tickers = bundle.tickers || [];
+    const tkEl = $("#learnTickers");
+    const tdEl = $("#learnTickerDetail");
+    if (tkEl) {
+      tkEl.innerHTML = tickers.length
+        ? tickers
+            .map(
+              (t) =>
+                `<button type="button" class="chip" data-tk="${t.symbol}" data-mkt="${
+                  t.market || ""
+                }">${t.symbol} <span class="mute">f${t.fires || 0}/t${
+                  t.trades || 0
+                }</span></button>`
+            )
+            .join("")
+        : `<span class="mute">No ticker activity yet</span>`;
+      $$("[data-tk]", tkEl).forEach((b) =>
+        b.addEventListener("click", async () => {
+          try {
+            const m = b.dataset.mkt
+              ? `?market=${encodeURIComponent(b.dataset.mkt)}`
+              : "";
+            const r = await api(
+              `/api/learning/ticker/${encodeURIComponent(b.dataset.tk)}${m}`
+            );
+            const tk = r.ticker || {};
+            if (tdEl) {
+              tdEl.innerHTML = `<strong>${tk.symbol}</strong> fires=${tk.fires} took=${
+                tk.took
+              } skip=${tk.skip} late=${tk.late}<br/>
+                trades closed=${tk.closed_trades} win_rate=${
+                tk.win_rate != null ? (tk.win_rate * 100).toFixed(0) + "%" : "—"
+              }
+                avg_pnl=${tk.avg_pnl_pct != null ? tk.avg_pnl_pct + "%" : "—"}
+                avg_hold=${tk.avg_hold_hours != null ? tk.avg_hold_hours + "h" : "—"}<br/>
+                median bounce=${
+                  tk.median_outcome_bounce_pct != null
+                    ? tk.median_outcome_bounce_pct
+                    : "—"
+                }
+                reds=${
+                  tk.candle_features && tk.candle_features.consecutive_reds
+                    ? JSON.stringify(tk.candle_features.consecutive_reds)
+                    : "—"
+                }`;
+            }
+          } catch (err) {
+            toast(err.message);
+          }
+        })
+      );
+    }
 
     const rows = (fires.length ? fires : [])
       .map(

@@ -342,14 +342,34 @@ class EngagementBridge:
                         self._labeled += 1
                     continue
                 if inf.get("needs_question") and inf.get("question"):
+                    rich_q = (
+                        f"{e.get('symbol')} [{(e.get('market') or '?')[:1].upper()}] "
+                        f"{e.get('velocity_band') or '—'} "
+                        f"drop={e.get('drop_pct')} @ {e.get('price')} · "
+                        f"{inf.get('question')}"
+                    )
                     qid = self.event_store.enqueue_pending_question(
                         uid,
                         event_id=int(e["id"]),
                         symbol=str(e.get("symbol") or ""),
-                        question=str(inf["question"]),
+                        question=rich_q[:500],
                         kind="engagement",
                         max_open=self.max_pending,
-                        payload={"inference": inf},
+                        payload={
+                            "inference": inf,
+                            "event": {
+                                "id": e.get("id"),
+                                "symbol": e.get("symbol"),
+                                "market": e.get("market"),
+                                "ts": e.get("ts"),
+                                "price": e.get("price"),
+                                "ref_price": e.get("ref_price"),
+                                "drop_pct": e.get("drop_pct"),
+                                "velocity_band": e.get("velocity_band"),
+                                "mode": e.get("mode"),
+                                "source": e.get("source"),
+                            },
+                        },
                     )
                     if qid:
                         queued += 1

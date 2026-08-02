@@ -158,23 +158,57 @@ def add_watch(symbol: str, market: str = "futures", user_id: Optional[int] = Non
         conn.close()
 
 
+def _norm_sym(s: str) -> str:
+    return (
+        (s or "")
+        .upper()
+        .replace("_", "")
+        .replace("-", "")
+        .replace("STOCK", "")
+        .strip()
+    )
+
+
 def remove_watch(symbol: str, market: Optional[str] = None, user_id: Optional[int] = None) -> dict:
+    """Remove watchlist row(s). Matches compact / underscore / STOCK forms."""
     uid = _uid(user_id)
     sym = symbol.upper().strip()
+    norm = _norm_sym(sym)
     conn = db.connect()
     try:
-        if market:
+        rows = conn.execute(
+            "SELECT symbol, market FROM mover_watchlist WHERE user_id = ?",
+            (uid,),
+        ).fetchall()
+        removed: List[str] = []
+        for r in rows:
+            rsym = r["symbol"] if hasattr(r, "keys") else r[0]
+            rmkt = r["market"] if hasattr(r, "keys") else r[1]
+            if market and (rmkt or "").lower() != market.lower():
+                continue
+            if _norm_sym(str(rsym)) != norm and norm not in _norm_sym(str(rsym)):
+                # allow base match: BTC vs BTCUSDT
+                rn = _norm_sym(str(rsym))
+                if not (
+                    rn == norm
+                    or rn.rstrip("USDT") == norm.rstrip("USDT")
+                    or rn.endswith(norm)
+                    or norm.endswith(rn.rstrip("USDT") or rn)
+                ):
+                    continue
             conn.execute(
                 "DELETE FROM mover_watchlist WHERE user_id = ? AND symbol = ? AND market = ?",
-                (uid, sym, market.lower()),
+                (uid, rsym, rmkt),
             )
-        else:
-            conn.execute(
-                "DELETE FROM mover_watchlist WHERE user_id = ? AND (symbol = ? OR symbol LIKE ?)",
-                (uid, sym, f"%{sym.replace('_', '')}%"),
-            )
+            removed.append(f"{rsym}:{rmkt}")
         conn.commit()
-        return {"ok": True, "removed": sym}
+        if not removed:
+            raise ValueError(
+                f"No watchlist row matched {sym!r}"
+                + (f" market={market}" if market else "")
+                + " — check symbol form (e.g. BTC_USDT vs BTCUSDT)"
+            )
+        return {"ok": True, "removed": removed, "symbol": sym}
     finally:
         conn.close()
 
@@ -560,6 +594,40 @@ TOOL_DEFS = [
         ["question"],
     ),
     _tool(
+        "list_trade_reviews",
+        "List trade dossiers (PnL, hold, buy/sell layers, linked fires)",
+        {
+            "closed_only": {"type": "boolean"},
+            "symbol": {"type": "string"},
+            "limit": {"type": "integer"},
+        },
+    ),
+    _tool(
+        "get_trade_review",
+        "One trade dossier by journal trade id",
+        {"trade_id": {"type": "integer"}},
+        ["trade_id"],
+    ),
+    _tool(
+        "ticker_stats",
+        "Per-ticker learning profile (fires, trades, win rate, notes)",
+        {
+            "symbol": {"type": "string"},
+            "market": {"type": "string"},
+        },
+        ["symbol"],
+    ),
+    _tool(
+        "tag_trade",
+        "Tag a closed/open trade with behavior code + notes for learning",
+        {
+            "trade_id": {"type": "integer"},
+            "behavior": {"type": "string"},
+            "notes": {"type": "string"},
+        },
+        ["trade_id"],
+    ),
+    _tool(
         "list_intel",
         "List isolated-dump investigations and recent news",
         {},
@@ -687,6 +755,32 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             from .learning_api import coach_ask
 
             return coach_ask(str(args.get("question") or "brief"))
+        if name == "list_trade_reviews":
+            from .learning_api import trades_api
+
+            return trades_api(
+                closed_only=bool(args.get("closed_only")),
+                symbol=args.get("symbol"),
+                limit=int(args.get("limit") or 20),
+            )
+        if name == "get_trade_review":
+            from .learning_api import trade_api
+
+            return trade_api(int(args["trade_id"]))
+        if name == "ticker_stats":
+            from .learning_api import ticker_api
+
+            return ticker_api(
+                str(args["symbol"]), market=args.get("market")
+            )
+        if name == "tag_trade":
+            from .learning_api import tag_trade
+
+            return tag_trade(
+                int(args["trade_id"]),
+                behavior=args.get("behavior"),
+                notes=args.get("notes"),
+            )
         if name == "list_intel":
             return {"investigations": list_investigations(), "news": list_news()}
         if name == "get_overview":

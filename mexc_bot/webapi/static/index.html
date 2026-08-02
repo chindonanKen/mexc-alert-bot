@@ -127,45 +127,57 @@
         </div>
       </section>
 
-      <!-- LEARNING — pending · drafts · teach · fires · stats · coach -->
+      <!-- LEARNING — needs you · trades · ticker · teach · coach · fires -->
       <section class="view" id="view-memory">
         <div class="learn-grid">
           <div class="panel">
             <div class="panel-h">
-              <h3>Pending answers</h3>
+              <h3>Needs you</h3>
               <span class="badge quiet" id="learnPendingBadge">0</span>
             </div>
-            <div id="learnPending" class="scroll learn-block"></div>
+            <div id="learnPending" class="scroll learn-block tall"></div>
           </div>
           <div class="panel">
             <div class="panel-h">
-              <h3>Approve drafts</h3>
+              <h3>Coach drafts</h3>
               <span class="badge quiet" id="learnDraftBadge">0</span>
             </div>
-            <div id="learnDrafts" class="scroll learn-block"></div>
+            <div id="learnDrafts" class="scroll learn-block tall"></div>
           </div>
+        </div>
+        <div class="panel mt">
+          <div class="panel-h">
+            <h3>Trade reviews</h3>
+            <span class="badge quiet">closed + open</span>
+          </div>
+          <div id="learnTrades" class="scroll learn-block tall"></div>
+        </div>
+        <div class="panel mt">
+          <div class="panel-h">
+            <h3>By ticker</h3>
+          </div>
+          <div id="learnTickers" class="ticker-chips"></div>
+          <div id="learnTickerDetail" class="hint mt"></div>
         </div>
         <div class="panel mt">
           <div class="panel-h"><h3>Teach</h3></div>
           <form id="teachForm" class="form-row">
-            <input name="text" placeholder="Durable lesson (e.g. no full size on GRIND)" required class="grow" />
+            <input name="text" placeholder="Lesson for a chart or rule (tag ticker in text)" required class="grow" />
             <button class="btn" type="submit">Save lesson</button>
           </form>
           <div id="learnLessons" class="hint mt"></div>
         </div>
         <div class="panel mt">
-          <div class="panel-h">
-            <h3>Ask coach</h3>
-          </div>
+          <div class="panel-h"><h3>Ask coach</h3></div>
           <form id="coachForm" class="form-row">
-            <input name="question" placeholder="panic | pride | brief | size…" class="grow" />
+            <input name="question" placeholder="SIREN last trade? · panic · pride · brief…" class="grow" />
             <button class="btn soft" type="submit">Ask</button>
           </form>
           <pre id="coachReply" class="coach-reply scroll"></pre>
         </div>
         <div class="panel mt">
           <div class="panel-h">
-            <h3>Stats</h3>
+            <h3>Book stats</h3>
             <span class="badge quiet" id="learnStatsBadge"></span>
           </div>
           <div id="learnStats" class="hint"></div>
