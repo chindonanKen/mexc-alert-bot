@@ -745,19 +745,22 @@
                   : t.status === "open"
                     ? "<span class='badge'>open</span>"
                     : "—";
+              const usd =
+                t.pnl_usd != null
+                  ? ` · $${Number(t.pnl_usd).toFixed(2)}`
+                  : "";
+              const layerFmt = (side, l) => {
+                const q = l.qty != null ? "×" + l.qty : "";
+                const tm = l.ts ? " " + fmtTime(l.ts) : "";
+                return `${side} ${l.price != null ? l.price : "—"}${q}${tm}`;
+              };
               const buys = (t.buy_layers || [])
                 .slice(0, 6)
-                .map(
-                  (l) =>
-                    `B ${l.price != null ? l.price : "—"}`
-                )
+                .map((l) => layerFmt("B", l))
                 .join(" · ");
               const sells = (t.sell_layers || [])
                 .slice(0, 6)
-                .map(
-                  (l) =>
-                    `S ${l.price != null ? l.price : "—"}`
-                )
+                .map((l) => layerFmt("S", l))
                 .join(" · ");
               const linked = (t.linked_events || [])[0];
               const fireS = linked
@@ -765,15 +768,31 @@
                     linked.drop_pct != null
                       ? Number(linked.drop_pct).toFixed(1) + "%"
                       : ""
-                  }`
+                  } ${linked.ts ? fmtTime(linked.ts) : ""}`
                 : "No linked fire";
+              const behs = [
+                "plan_ok",
+                "pride",
+                "greed",
+                "hesitant",
+                "fomo",
+                "rule_break",
+                "false_panic",
+                "process_skip",
+              ];
+              const tagBtns = behs
+                .map(
+                  (beh) =>
+                    `<button type="button" class="btn soft sm" data-tag-tr="${t.id}" data-beh="${beh}">${beh}</button>`
+                )
+                .join("");
               return `<div class="learn-card rich">
                 <div class="learn-card-h">#${t.id} ${t.symbol} [${(
                 t.market || "?"
               )
                 .toString()
                 .slice(0, 1)
-                .toUpperCase()}] ${pnlS}</div>
+                .toUpperCase()}] ${pnlS}${usd}</div>
                 <div class="learn-card-meta">Hold ${
                   t.hold_hours != null ? t.hold_hours + "h" : "—"
                 } · ${fmtTime(t.opened_at)} → ${
@@ -786,19 +805,7 @@
                 sells ? " | " + sells : ""
               }</div>
                 <div class="learn-card-meta">${fireS}</div>
-                <div class="row-gap mt">
-                  <button type="button" class="btn soft sm" data-tag-tr="${
-                    t.id
-                  }" data-beh="plan_ok">plan_ok</button>
-                  <button type="button" class="btn soft sm" data-tag-tr="${
-                    t.id
-                  }" data-beh="fomo">fomo</button>
-                  <button type="button" class="btn soft sm" data-tag-tr="${
-                    t.id
-                  }" data-beh="pride">pride</button>
-                  <button type="button" class="btn soft sm" data-tag-tr="${
-                    t.id
-                  }" data-beh="hesitant">hesitant</button>
+                <div class="row-gap mt wrap">${tagBtns}
                   <button type="button" class="btn soft sm" data-coach-tr="${
                     t.symbol
                   }">Coach</button>

@@ -172,6 +172,24 @@ def build_trade_dossier(
         opened_at=_f(opened),
     )
     hold_h = round(hold / 3600.0, 2) if hold is not None else None
+    # Realized $ when we have fill qtys (long: sells - buys quote)
+    buy_notional = 0.0
+    buy_qty = 0.0
+    sell_notional = 0.0
+    sell_qty = 0.0
+    for b in layers["buys"]:
+        p, q = _f(b.get("price")), _f(b.get("qty"))
+        if p is not None and q is not None:
+            buy_notional += p * q
+            buy_qty += q
+    for s in layers["sells"]:
+        p, q = _f(s.get("price")), _f(s.get("qty"))
+        if p is not None and q is not None:
+            sell_notional += p * q
+            sell_qty += q
+    pnl_usd = None
+    if trade.get("status") == "closed" and buy_notional > 0 and sell_notional > 0:
+        pnl_usd = round(sell_notional - buy_notional, 4)
     return {
         "id": trade.get("id"),
         "symbol": trade.get("symbol"),
@@ -184,6 +202,9 @@ def build_trade_dossier(
         "hold_seconds": hold,
         "hold_hours": hold_h,
         "pnl_pct": round(pnl, 3) if pnl is not None else None,
+        "pnl_usd": pnl_usd,
+        "buy_qty": buy_qty or None,
+        "sell_qty": sell_qty or None,
         "notes": trade.get("notes"),
         "buy_layers": layers["buys"],
         "sell_layers": layers["sells"],

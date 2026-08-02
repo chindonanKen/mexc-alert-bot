@@ -34,7 +34,7 @@ Full vision: **[docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md)** · strategy: *
 | **Future desk push** | Design notify so alarms can leave Telegram later |
 | **Security** | Never commit secrets; additive DB; live defaults OFF; voice auth required |
 
-**Learning loop:** see **[Learning environment](#learning-environment-feedback--coach)**.
+**Learning loop:** **signal** (fires) + **trade** (dossiers: PnL, hold, layers) + **ticker** (per-chart stats) — desk primary; see **[Learning environment](#learning-environment-feedback--coach)**.
 
 **Local desk:** `make desk-dev` · seed: `make desk-seed` · HTTPS droplet: `./scripts/desk_https_up.sh`
 

@@ -103,6 +103,9 @@ class TestTradeDossiers(unittest.TestCase):
         self.assertGreaterEqual(d["n_sells"], 1)
         self.assertTrue(d["linked_events"])
         self.assertEqual(d["primary_event_id"], eid)
+        # fills: buy 1000*0.10+2000*0.09=280, sell 3000*0.12=360 → +80
+        self.assertIsNotNone(d.get("pnl_usd"))
+        self.assertGreater(d["pnl_usd"], 50)
 
     def test_ticker_profile(self):
         now = time.time()
@@ -211,6 +214,75 @@ class TestWatchRemoveParity(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             actions.remove_watch("NOPE_COIN", user_id=8630949601)
+
+
+class TestAlertDeleteParity(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Path(self.tmp.name) / "a.db"
+        os.environ["ALERTS_FILE"] = str(self.db)
+        os.environ["DESK_USER_ID"] = "8630949601"
+        EventStore(self.db)
+        from mexc_bot.webapi import db as desk_db
+
+        conn = desk_db.connect()
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                price REAL NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                market TEXT NOT NULL DEFAULT 'spot'
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO alerts (user_id, symbol, price, enabled, market) VALUES (8630949601, 'BTCUSDT', 1, 1, 'spot')"
+        )
+        conn.execute(
+            "INSERT INTO alerts (user_id, symbol, price, enabled, market) VALUES (999, 'ETHUSDT', 2, 1, 'spot')"
+        )
+        conn.commit()
+        conn.close()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_delete_alert_owner_only(self):
+        from mexc_bot.webapi import actions, db as desk_db
+
+        rows = desk_db.fetch_all(
+            "SELECT id, user_id FROM alerts ORDER BY id"
+        )
+        owner = [r for r in rows if int(r["user_id"]) == 8630949601][0]
+        other = [r for r in rows if int(r["user_id"]) == 999][0]
+        actions.delete_alert(int(owner["id"]), user_id=8630949601)
+        left = desk_db.fetch_all("SELECT id, user_id FROM alerts")
+        self.assertEqual(len(left), 1)
+        self.assertEqual(int(left[0]["user_id"]), 999)
+        with self.assertRaises(ValueError):
+            actions.delete_alert(int(other["id"]), user_id=8630949601)
+        with self.assertRaises(ValueError):
+            actions.delete_alert(999999, user_id=8630949601)
+
+
+class TestCandleSoftFail(unittest.TestCase):
+    def test_candle_features_soft_never_raises(self):
+        from mexc_bot.learning.trades import candle_features_soft
+        from unittest.mock import patch
+
+        with patch(
+            "mexc_bot.movers.klines.KlineClient.consecutive_reds",
+            side_effect=RuntimeError("network down"),
+        ):
+            out = candle_features_soft("futures", "BTC_USDT")
+        self.assertFalse(out.get("ok"))
+        self.assertIn("error", out)
+        # also offline empty market does not raise
+        out2 = candle_features_soft("futures", "")
+        self.assertIsInstance(out2, dict)
 
 
 class TestLearningApiBundle(unittest.TestCase):
