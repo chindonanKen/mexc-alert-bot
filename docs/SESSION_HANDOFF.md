@@ -15,7 +15,7 @@ This file is a **dated snapshot** so the next human/agent (including a **new Mac
 
 Shared SQLite is plumbing (same book/fires). Learning UX is desk-only. Future multi-device alarms come from desk (`/api/notify/stub` placeholder).
 
-### Learning spine (shipped 2026-08-02)
+### Learning spine (shipped 2026-08-02) · tip `209c070`
 
 - Auto engagement: journal/fills → took|skip|partial|late after **1h** grace (`EngagementBridge`)
 - Max **2** pending questions on desk **Needs you** (Overview + Learning)
@@ -23,6 +23,8 @@ Shared SQLite is plumbing (same book/fires). Learning UX is desk-only. Future mu
 - Voice tools: `teach`, `coach_ask`, `list_pending_questions`, `answer_question`, `learning_stats`, …
 - Owner id: `DESK_USER_ID=8630949601`
 - Flags: `FEATURE_LEARNING`, `LEARNING_AUTO_FROM_POSITIONS`, `LEARNING_GRACE_SECONDS=3600`
+- UI: **AD Layers + Paper Arena removed** from desk nav
+- Droplet real-data guide: **[DROPLET_DESK_LEARNING.md](DROPLET_DESK_LEARNING.md)** — no seed/dummy data
 - Tests: `tests/test_desk_learning_spine.py` + existing suite via `make test`
 
 ### AD Desk (explore fully)
