@@ -103,6 +103,25 @@ class TtsBody(BaseModel):
     text: str = ""
 
 
+class TeachBody(BaseModel):
+    text: str = ""
+    tags: Optional[List[str]] = None
+    needs_approval: bool = False
+
+
+class ApproveBody(BaseModel):
+    lesson_id: int
+    dismiss: bool = False
+
+
+class AnswerBody(BaseModel):
+    question_id: int
+    answer_text: Optional[str] = None
+    action: Optional[str] = None
+    behavior: Optional[str] = None
+    dismiss: bool = False
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="AD Desk", version="2.1.0-beta")
 
@@ -305,7 +324,7 @@ def create_app() -> FastAPI:
             if _in_book(n.get("symbol") or "", n.get("title") or "")
         ][:8]
 
-        # Learning snapshot
+        # Learning snapshot + Needs you (desk-native)
         labels_recent = (
             db.fetch_all(
                 """
@@ -320,17 +339,23 @@ def create_app() -> FastAPI:
             if uid
             else []
         )
-        unlabeled = [
-            e
-            for e in recent_events[:8]
-            if not any(
-                True
-                for x in db.fetch_all(
-                    "SELECT 1 FROM learning_labels WHERE event_id=? LIMIT 1",
-                    (e["id"],),
-                )
-            )
-        ][:3] if uid else []
+        needs_you: Dict[str, Any] = {
+            "pending_questions": [],
+            "drafts": [],
+            "count": 0,
+        }
+        coach_pulse = "Memory: open Learning when ready."
+        learn_stats: Dict[str, Any] = {}
+        if uid:
+            try:
+                from .learning_api import learning_bundle
+
+                lb = learning_bundle(uid)
+                needs_you = lb.get("needs_you") or needs_you
+                coach_pulse = lb.get("coach_pulse") or coach_pulse
+                learn_stats = lb.get("stats") or {}
+            except Exception as e:
+                logger.debug("learning_bundle: %s", e)
 
         # Simple journal PnL sketch (closed trades with entry+exit)
         closed = (
@@ -379,17 +404,21 @@ def create_app() -> FastAPI:
             "market": ctx,
             "counts": counts,
             "hierarchy": {
+                "needs_you": needs_you,
                 "top_targets": top_targets,
                 "top_movers": top_movers,
                 "book_intel": book_intel,
                 "book_news": book_news,
                 "positions": positions,
+                "coach_pulse": coach_pulse,
                 "learning": {
                     "recent_labels": labels_recent,
-                    "needs_label": unlabeled,
+                    "stats": learn_stats,
                 },
                 "pnl": pnl,
             },
+            "needs_you": needs_you,
+            "coach_pulse": coach_pulse,
             "positions": positions,
             "recent_events": recent_events[:12],
             "recent_investigations": recent_inv[:8],
@@ -403,6 +432,7 @@ def create_app() -> FastAPI:
                     else "Risk-on — demand quality setups"
                 ),
                 "rule": "Panic + breadth + volume. Isolated + news → no-trade bias.",
+                "coach": coach_pulse,
             },
             "vision": "docs/AD_DESK_VISION.md",
             "ts": time.time(),
@@ -619,36 +649,82 @@ def create_app() -> FastAPI:
         syms = [s.strip() for s in symbols.split(",") if s.strip()]
         return {"tickers": watchlist_tickers(syms), "context": market_context()}
 
+    @app.get("/api/learning")
+    def learning_home(_: bool = Depends(require_auth)):
+        """Full Learning view payload: pending, drafts, teach data, fires, stats."""
+        try:
+            from .learning_api import learning_bundle
+
+            return learning_bundle()
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/learning/teach")
+    def learning_teach(body: TeachBody, _: bool = Depends(require_auth)):
+        from .learning_api import teach
+
+        if not (body.text or "").strip():
+            raise HTTPException(400, "Empty lesson text")
+        try:
+            return teach(
+                body.text,
+                tags=body.tags,
+                needs_approval=bool(body.needs_approval),
+            )
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/learning/approve")
+    def learning_approve(body: ApproveBody, _: bool = Depends(require_auth)):
+        from .learning_api import approve_draft
+
+        try:
+            return approve_draft(body.lesson_id, dismiss=bool(body.dismiss))
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/learning/answer")
+    def learning_answer(body: AnswerBody, _: bool = Depends(require_auth)):
+        from .learning_api import answer_question
+
+        try:
+            return answer_question(
+                body.question_id,
+                answer_text=body.answer_text,
+                action=body.action,
+                behavior=body.behavior,
+                dismiss=bool(body.dismiss),
+            )
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
     @app.post("/api/coach")
     def coach(body: CoachBody, _: bool = Depends(require_auth)):
-        from ..coach.engine import format_brief, format_coach_reply
+        from .learning_api import coach_ask
 
-        uid = db.default_user_id()
         q = (body.question or body.message or "checklist").strip()
-        recent, opens = [], []
-        if uid:
-            recent = db.fetch_all(
-                """
-                SELECT e.*,
-                  (SELECT action FROM learning_labels l
-                   WHERE l.event_id = e.id ORDER BY l.ts DESC LIMIT 1) AS last_action
-                FROM learning_events e WHERE e.user_id = ?
-                ORDER BY e.ts DESC LIMIT 12
-                """,
-                (uid,),
-            )
-            opens = db.fetch_all(
-                "SELECT * FROM journal_trades WHERE user_id = ? AND status = 'open'",
-                (uid,),
-            )
-        low = q.lower()
-        if low in ("brief", "desk", "summary", "overview"):
-            text = format_brief(
-                recent_events=recent, open_trades=opens, learning_on=True
-            )
-        else:
-            text = format_coach_reply(q, recent_events=recent, stats=None)
-        return {"reply": text, "market": market_context(), "ts": time.time()}
+        try:
+            out = coach_ask(q)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+        return {
+            "reply": out.get("reply"),
+            "stats": out.get("stats"),
+            "draft_id": out.get("draft_id"),
+            "pulse": out.get("pulse"),
+            "market": market_context(),
+            "ts": time.time(),
+        }
+
+    @app.get("/api/notify/stub")
+    def notify_stub(_: bool = Depends(require_auth)):
+        """Future multi-device desk push (not Telegram). Stub only."""
+        return {
+            "status": "stub",
+            "channels": ["web_push", "desktop"],
+            "note": "Alarms stay on Telegram bot until desk push ships",
+            "ready": False,
+        }
 
     @app.post("/api/agent")
     def agent_text(body: AgentBody, _: bool = Depends(require_auth)):

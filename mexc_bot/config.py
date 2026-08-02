@@ -88,6 +88,10 @@ class Settings:
     feature_learning: bool
     learning_outcome_horizons_seconds: tuple  # e.g. (900, 3600, 14400)
     learning_outcome_poll_seconds: float
+    learning_auto_from_positions: bool
+    learning_grace_seconds: float
+    learning_max_pending_questions: int
+    learning_engagement_poll_seconds: float
     feature_news_monitor: bool
     news_poll_seconds: float
     news_push_unconfirmed: bool
@@ -195,6 +199,18 @@ def load_settings() -> Settings:
         ),
         learning_outcome_poll_seconds=float(
             os.getenv("LEARNING_OUTCOME_POLL_SECONDS", "60")
+        ),
+        learning_auto_from_positions=_env_bool(
+            "LEARNING_AUTO_FROM_POSITIONS", True
+        ),
+        learning_grace_seconds=float(
+            os.getenv("LEARNING_GRACE_SECONDS", "3600")
+        ),
+        learning_max_pending_questions=int(
+            os.getenv("LEARNING_MAX_PENDING_QUESTIONS", "2")
+        ),
+        learning_engagement_poll_seconds=float(
+            os.getenv("LEARNING_ENGAGEMENT_POLL_SECONDS", "60")
         ),
         feature_news_monitor=_env_bool("FEATURE_NEWS_MONITOR", False),
         news_poll_seconds=float(os.getenv("NEWS_POLL_SECONDS", "90")),

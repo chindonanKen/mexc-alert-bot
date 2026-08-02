@@ -8,15 +8,17 @@ run:
 	python -m mexc_bot.main
 
 test:
-	python3 tests/test_crossing_and_remove_logic.py
-	python3 tests/test_v3_futures_and_movers.py
-	python3 tests/test_mover_enrichment.py
-	python3 tests/test_learning_events.py
-	python3 tests/test_assistant_ux.py
-	python3 tests/test_v1_complete.py
-	python3 tests/test_isolated_agent.py
-	python3 tests/test_webapi.py
-	python3 tests/test_audio_convert.py
+	@PY=$$(test -x .venv/bin/python3 && echo .venv/bin/python3 || echo python3); \
+	$$PY tests/test_crossing_and_remove_logic.py && \
+	$$PY tests/test_v3_futures_and_movers.py && \
+	$$PY tests/test_mover_enrichment.py && \
+	$$PY tests/test_learning_events.py && \
+	$$PY tests/test_desk_learning_spine.py && \
+	$$PY tests/test_assistant_ux.py && \
+	$$PY tests/test_v1_complete.py && \
+	$$PY tests/test_isolated_agent.py && \
+	$$PY tests/test_webapi.py && \
+	$$PY tests/test_audio_convert.py
 
 verify:
 	bash scripts/verify_build.sh

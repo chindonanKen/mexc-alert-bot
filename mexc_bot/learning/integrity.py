@@ -22,10 +22,22 @@ ALLOWED_EVENT_SOURCES = frozenset(
     }
 )
 
-ALLOWED_ACTIONS = frozenset({"took", "skip", "watch", None})
+ALLOWED_ACTIONS = frozenset(
+    {"took", "skip", "watch", "partial", "late", None}
+)
 ALLOWED_BOUNCE = frozenset({"strong", "weak", "none", "failed", None})
 ALLOWED_BEHAVIOR = frozenset(
-    {"pride", "greed", "plan_ok", "false_panic", None}
+    {
+        "pride",
+        "greed",
+        "plan_ok",
+        "false_panic",
+        "hesitant",
+        "fomo",
+        "rule_break",
+        "process_skip",
+        None,
+    }
 )
 
 

@@ -63,6 +63,7 @@ def main() -> None:
 
     event_store = None
     outcome_poller = None
+    engagement_bridge = None
     fill_sync = None
     if settings.feature_learning:
         from .learning import EventStore, OutcomePoller
@@ -84,6 +85,22 @@ def main() -> None:
             horizons_seconds=settings.learning_outcome_horizons_seconds,
             poll_seconds=settings.learning_outcome_poll_seconds,
         )
+        if settings.learning_auto_from_positions:
+            from .learning import EngagementBridge
+
+            uid_hint = settings.mexc_private_telegram_user_id
+            engagement_bridge = EngagementBridge(
+                event_store,
+                grace_seconds=settings.learning_grace_seconds,
+                max_pending=settings.learning_max_pending_questions,
+                poll_seconds=settings.learning_engagement_poll_seconds,
+                user_ids=[int(uid_hint)] if uid_hint else None,
+            )
+            logger.info(
+                "Engagement bridge ready grace=%ss max_pending=%s",
+                settings.learning_grace_seconds,
+                settings.learning_max_pending_questions,
+            )
 
     mover_store = None
     mover_scanner = None
@@ -311,6 +328,9 @@ def main() -> None:
     if outcome_poller is not None:
         outcome_poller.start()
         logger.info("Learning outcome poller started")
+    if engagement_bridge is not None:
+        engagement_bridge.start()
+        logger.info("Engagement bridge started")
     if news_watcher is not None:
         news_watcher.start()
         logger.info("News watcher started")

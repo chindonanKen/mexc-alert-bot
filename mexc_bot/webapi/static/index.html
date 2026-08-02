@@ -26,11 +26,9 @@
         <button data-view="movers">Movers</button>
         <button data-view="positions">Positions</button>
         <div class="nav-sep">More</div>
-        <button data-view="memory" class="nav-dim">Learning</button>
+        <button data-view="memory" class="nav-dim" id="navLearning">Learning <span id="navLearnBadge" class="nav-badge" hidden>0</span></button>
         <button data-view="intel" class="nav-dim">Intel</button>
         <button data-view="voice" class="nav-dim">Voice log</button>
-        <button data-view="planner" class="nav-dim">AD Layers</button>
-        <button data-view="paper" class="nav-dim">Paper</button>
         <button data-view="playbook" class="nav-dim">Playbook</button>
         <button data-view="roadmap" class="nav-dim">Roadmap</button>
       </nav>
@@ -50,8 +48,9 @@
         </div>
       </header>
 
-      <!-- OVERVIEW — Targets · Movers · Positions (+ book news only when relevant) -->
+      <!-- OVERVIEW — Needs you · Targets · Movers · Positions · Coach -->
       <section class="view on" id="view-overview">
+        <div id="ovNeedsYou" class="ov-needs-you" hidden></div>
         <div id="ovBookNews" class="ov-book-news" hidden></div>
         <div class="command-triad">
           <article class="cmd-panel cmd-targets">
@@ -78,6 +77,8 @@
             <div id="ovPos" class="cmd-list"></div>
           </article>
         </div>
+        <div id="ovBookIntel" class="ov-book-intel panel clean mt" hidden></div>
+        <div id="ovCoachPulse" class="ov-coach-pulse panel clean mt"></div>
       </section>
 
       <!-- POSITIONS -->
@@ -126,11 +127,52 @@
         </div>
       </section>
 
-      <!-- MEMORY -->
+      <!-- LEARNING — pending · drafts · teach · fires · stats · coach -->
       <section class="view" id="view-memory">
-        <div class="panel">
+        <div class="learn-grid">
+          <div class="panel">
+            <div class="panel-h">
+              <h3>Pending answers</h3>
+              <span class="badge quiet" id="learnPendingBadge">0</span>
+            </div>
+            <div id="learnPending" class="scroll learn-block"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-h">
+              <h3>Approve drafts</h3>
+              <span class="badge quiet" id="learnDraftBadge">0</span>
+            </div>
+            <div id="learnDrafts" class="scroll learn-block"></div>
+          </div>
+        </div>
+        <div class="panel mt">
+          <div class="panel-h"><h3>Teach</h3></div>
+          <form id="teachForm" class="form-row">
+            <input name="text" placeholder="Durable lesson (e.g. no full size on GRIND)" required class="grow" />
+            <button class="btn" type="submit">Save lesson</button>
+          </form>
+          <div id="learnLessons" class="hint mt"></div>
+        </div>
+        <div class="panel mt">
           <div class="panel-h">
-            <h3>Learning events</h3>
+            <h3>Ask coach</h3>
+          </div>
+          <form id="coachForm" class="form-row">
+            <input name="question" placeholder="panic | pride | brief | size…" class="grow" />
+            <button class="btn soft" type="submit">Ask</button>
+          </form>
+          <pre id="coachReply" class="coach-reply scroll"></pre>
+        </div>
+        <div class="panel mt">
+          <div class="panel-h">
+            <h3>Stats</h3>
+            <span class="badge quiet" id="learnStatsBadge"></span>
+          </div>
+          <div id="learnStats" class="hint"></div>
+        </div>
+        <div class="panel mt">
+          <div class="panel-h">
+            <h3>Recent fires</h3>
             <div class="row-gap">
               <button type="button" class="btn soft sm" data-label="took">Took latest</button>
               <button type="button" class="btn soft sm" data-label="skip">Skip latest</button>
@@ -155,53 +197,6 @@
         <div class="panel mt">
           <div class="panel-h"><h3>Source expertise</h3></div>
           <div id="sourcesTable" class="scroll"></div>
-        </div>
-      </section>
-
-      <!-- AD LAYER PLANNER -->
-      <section class="view" id="view-planner">
-        <div class="panel">
-          <div class="panel-h">
-            <h3>AD layer planner</h3>
-            <span class="badge">human + agent</span>
-          </div>
-          <p class="hint">
-            Shared ladder for panic scale-ins. Voice can propose layers; you confirm and journal.
-            Plans become learning labels when price tags a layer or you skip.
-          </p>
-          <form id="planForm" class="form-row wrap">
-            <input name="symbol" placeholder="Symbol e.g. SOL" required />
-            <select name="market"><option value="futures">Futures</option><option value="spot">Spot</option></select>
-            <input name="ad_pct" type="number" step="any" placeholder="AD % e.g. 8" />
-            <input name="layers" type="number" min="3" max="12" value="6" placeholder="Layers" />
-            <input name="invalidation" placeholder="Invalidation note" />
-            <button class="btn" type="submit">Build ladder</button>
-          </form>
-          <div id="planOut" class="plan-out"></div>
-          <p class="hint mt">Persistence API lands next — voice <code>propose_trade</code> journals a paper thesis today.</p>
-        </div>
-      </section>
-
-      <!-- PAPER ARENA -->
-      <section class="view" id="view-paper">
-        <div class="panel">
-          <div class="panel-h">
-            <h3>Paper arena</h3>
-            <span class="badge">agents · fictive capital</span>
-          </div>
-          <p class="lead">Train agents on <strong>real</strong> marks from your targets &amp; movers — no live risk.</p>
-          <ul class="bul good">
-            <li>Same AD playbook rules (panic &gt; grind, layers, powder)</li>
-            <li>Decisions logged vs your took/skip labels</li>
-            <li>Promote to recommendations only after soak metrics</li>
-            <li>Cannot flip live order flags</li>
-          </ul>
-          <p class="hint">Scaffold UI — sim engine is the next build phase (see AD_DESK_VISION.md P5).</p>
-          <div class="metrics" id="paperPlaceholder">
-            <div class="metric"><span>Paper equity</span><b>—</b></div>
-            <div class="metric"><span>Open sims</span><b>0</b></div>
-            <div class="metric"><span>Win rate</span><b>—</b></div>
-          </div>
         </div>
       </section>
 

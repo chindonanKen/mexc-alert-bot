@@ -144,6 +144,63 @@ class EventStore:
             "CREATE INDEX IF NOT EXISTS idx_journal_fills_user_ts "
             "ON journal_fills (user_id, ts DESC)"
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS learning_pending_questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                event_id INTEGER,
+                symbol TEXT,
+                question TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'engagement',
+                status TEXT NOT NULL DEFAULT 'open',
+                payload_json TEXT,
+                created_at REAL NOT NULL,
+                answered_at REAL,
+                answer_text TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_learning_pending_user_status "
+            "ON learning_pending_questions (user_id, status, created_at DESC)"
+        )
+        self._ensure_column(conn, "learning_pending_questions", "symbol", "TEXT")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS learning_lessons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                tags_json TEXT,
+                weight REAL NOT NULL DEFAULT 1.0,
+                needs_approval INTEGER NOT NULL DEFAULT 0,
+                source TEXT NOT NULL DEFAULT 'owner',
+                kind TEXT NOT NULL DEFAULT 'lesson',
+                evidence_event_ids_json TEXT,
+                created_at REAL NOT NULL,
+                approved_at REAL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_learning_lessons_user "
+            "ON learning_lessons (user_id, needs_approval, created_at DESC)"
+        )
+        # Additive columns on labels (source/confidence for auto engagement)
+        self._ensure_column(conn, "learning_labels", "source", "TEXT")
+        self._ensure_column(conn, "learning_labels", "confidence", "REAL")
+
+    @staticmethod
+    def _ensure_column(
+        conn: sqlite3.Connection, table: str, column: str, col_type: str
+    ) -> None:
+        cols = {
+            str(r[1])
+            for r in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
     def log_event(
         self,
@@ -218,6 +275,8 @@ class EventStore:
         bounce_quality: Optional[str] = None,
         behavior: Optional[str] = None,
         notes: Optional[str] = None,
+        source: Optional[str] = None,
+        confidence: Optional[float] = None,
     ) -> bool:
         if event_id <= 0:
             return False
@@ -233,8 +292,9 @@ class EventStore:
                 conn.execute(
                     """
                     INSERT INTO learning_labels (
-                        event_id, user_id, action, bounce_quality, behavior, notes, ts
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        event_id, user_id, action, bounce_quality, behavior, notes,
+                        ts, source, confidence
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         event_id,
@@ -244,15 +304,18 @@ class EventStore:
                         behavior,
                         notes,
                         time.time(),
+                        source,
+                        confidence,
                     ),
                 )
                 logger.info(
-                    "learning.label event=%s user=%s action=%s bounce=%s behavior=%s",
+                    "learning.label event=%s user=%s action=%s bounce=%s behavior=%s src=%s",
                     event_id,
                     user_id,
                     action,
                     bounce_quality,
                     behavior,
+                    source,
                 )
                 return True
         except Exception as e:
@@ -268,6 +331,8 @@ class EventStore:
         bounce_quality: Optional[str] = None,
         behavior: Optional[str] = None,
         notes: Optional[str] = None,
+        source: Optional[str] = "human",
+        confidence: Optional[float] = None,
     ) -> Optional[int]:
         """Label most recent event for user (optionally filtered by symbol)."""
         with self._lock:
@@ -300,6 +365,8 @@ class EventStore:
             bounce_quality=bounce_quality,
             behavior=behavior,
             notes=notes,
+            source=source,
+            confidence=confidence,
         )
         return eid if ok else None
 
@@ -313,7 +380,17 @@ class EventStore:
                     (SELECT action FROM learning_labels l
                      WHERE l.event_id = e.id ORDER BY l.ts DESC LIMIT 1) AS last_action,
                     (SELECT bounce_quality FROM learning_labels l
-                     WHERE l.event_id = e.id ORDER BY l.ts DESC LIMIT 1) AS last_bounce
+                     WHERE l.event_id = e.id ORDER BY l.ts DESC LIMIT 1) AS last_bounce,
+                    (SELECT behavior FROM learning_labels l
+                     WHERE l.event_id = e.id ORDER BY l.ts DESC LIMIT 1) AS last_behavior,
+                    (SELECT source FROM learning_labels l
+                     WHERE l.event_id = e.id ORDER BY l.ts DESC LIMIT 1) AS last_label_source,
+                    (SELECT max_bounce_pct FROM learning_outcomes o
+                     WHERE o.event_id = e.id
+                     ORDER BY o.horizon_seconds ASC LIMIT 1) AS outcome_bounce,
+                    (SELECT max_dd_pct FROM learning_outcomes o
+                     WHERE o.event_id = e.id
+                     ORDER BY o.horizon_seconds ASC LIMIT 1) AS outcome_dd
                 FROM learning_events e
                 WHERE e.user_id = ?
                 ORDER BY e.ts DESC
@@ -322,6 +399,455 @@ class EventStore:
                 (user_id, limit),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def unlabeled_events_for_bridge(
+        self,
+        *,
+        older_than_ts: Optional[float] = None,
+        limit: int = 80,
+        user_ids: Optional[Sequence[int]] = None,
+    ) -> List[dict]:
+        """Events with no action label yet (for engagement bridge)."""
+        limit = max(1, min(int(limit), 200))
+        with self._lock:
+            conn = self._get_conn()
+            sql = """
+                SELECT e.*,
+                    (SELECT action FROM learning_labels l
+                     WHERE l.event_id = e.id AND l.action IS NOT NULL
+                     ORDER BY l.ts DESC LIMIT 1) AS last_action
+                FROM learning_events e
+                WHERE 1=1
+            """
+            params: List[Any] = []
+            if older_than_ts is not None:
+                sql += " AND e.ts <= ?"
+                params.append(float(older_than_ts))
+            if user_ids:
+                placeholders = ",".join("?" * len(user_ids))
+                sql += f" AND e.user_id IN ({placeholders})"
+                params.extend(int(u) for u in user_ids)
+            sql += """
+                AND NOT EXISTS (
+                    SELECT 1 FROM learning_labels l
+                    WHERE l.event_id = e.id AND l.action IS NOT NULL
+                )
+                ORDER BY e.ts ASC
+                LIMIT ?
+            """
+            params.append(limit)
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(r) for r in rows]
+
+    @staticmethod
+    def _norm_symbol(symbol: Optional[str]) -> str:
+        return (
+            (symbol or "")
+            .upper()
+            .replace("_", "")
+            .replace("STOCK", "")
+            .replace("-", "")
+            .strip()
+        )
+
+    def enqueue_pending_question(
+        self,
+        user_id: int,
+        *,
+        question: str,
+        event_id: Optional[int] = None,
+        symbol: Optional[str] = None,
+        kind: str = "engagement",
+        max_open: int = 2,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> Optional[int]:
+        """Insert open pending question if under cap.
+
+        Coalesce: same event_id OR same symbol (normalized) among open rows.
+        Returns new id, existing id if coalesced, or None if cap full.
+        """
+        q = (question or "").strip()
+        if not q:
+            return None
+        max_open = max(1, int(max_open))
+        try:
+            with self._lock:
+                conn = self._get_conn()
+                sym = symbol
+                if not sym and event_id:
+                    erow = conn.execute(
+                        "SELECT symbol FROM learning_events WHERE id = ?",
+                        (int(event_id),),
+                    ).fetchone()
+                    if erow:
+                        sym = erow["symbol"]
+                norm = self._norm_symbol(sym)
+
+                if event_id:
+                    existing = conn.execute(
+                        """
+                        SELECT id FROM learning_pending_questions
+                        WHERE user_id = ? AND event_id = ? AND status = 'open'
+                        LIMIT 1
+                        """,
+                        (user_id, int(event_id)),
+                    ).fetchone()
+                    if existing:
+                        return int(existing["id"])
+
+                if norm:
+                    open_rows = conn.execute(
+                        """
+                        SELECT id, event_id, symbol FROM learning_pending_questions
+                        WHERE user_id = ? AND status = 'open'
+                        """,
+                        (user_id,),
+                    ).fetchall()
+                    for row in open_rows:
+                        if self._norm_symbol(row["symbol"]) == norm:
+                            return int(row["id"])
+                        # also match via event's symbol if pending.symbol empty
+                        if row["event_id"] and not row["symbol"]:
+                            er = conn.execute(
+                                "SELECT symbol FROM learning_events WHERE id = ?",
+                                (int(row["event_id"]),),
+                            ).fetchone()
+                            if er and self._norm_symbol(er["symbol"]) == norm:
+                                return int(row["id"])
+
+                open_n = conn.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM learning_pending_questions
+                    WHERE user_id = ? AND status = 'open'
+                    """,
+                    (user_id,),
+                ).fetchone()
+                if int(open_n["c"] if open_n else 0) >= max_open:
+                    return None
+                cur = conn.execute(
+                    """
+                    INSERT INTO learning_pending_questions (
+                        user_id, event_id, symbol, question, kind, status,
+                        payload_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, 'open', ?, ?)
+                    """,
+                    (
+                        int(user_id),
+                        int(event_id) if event_id else None,
+                        sym,
+                        q,
+                        kind,
+                        json.dumps(payload) if payload else None,
+                        time.time(),
+                    ),
+                )
+                return int(cur.lastrowid)
+        except Exception as e:
+            logger.error("enqueue_pending_question failed: %s", e)
+            return None
+
+    def list_pending_questions(
+        self, user_id: int, *, status: str = "open", limit: int = 20
+    ) -> List[dict]:
+        limit = max(1, min(int(limit), 50))
+        with self._lock:
+            rows = self._get_conn().execute(
+                """
+                SELECT * FROM learning_pending_questions
+                WHERE user_id = ? AND status = ?
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (user_id, status, limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def answer_pending_question(
+        self,
+        user_id: int,
+        question_id: int,
+        *,
+        answer_text: Optional[str] = None,
+        action: Optional[str] = None,
+        behavior: Optional[str] = None,
+        dismiss: bool = False,
+    ) -> bool:
+        try:
+            with self._lock:
+                conn = self._get_conn()
+                row = conn.execute(
+                    """
+                    SELECT * FROM learning_pending_questions
+                    WHERE id = ? AND user_id = ? AND status = 'open'
+                    """,
+                    (int(question_id), int(user_id)),
+                ).fetchone()
+                if not row:
+                    return False
+                status = "dismissed" if dismiss else "answered"
+                conn.execute(
+                    """
+                    UPDATE learning_pending_questions
+                    SET status = ?, answered_at = ?, answer_text = ?
+                    WHERE id = ?
+                    """,
+                    (status, time.time(), answer_text, int(question_id)),
+                )
+                eid = row["event_id"]
+            if not dismiss and eid and (action or behavior or answer_text):
+                self.label_event(
+                    int(eid),
+                    user_id,
+                    action=action,
+                    behavior=behavior,
+                    notes=answer_text,
+                    source="human",
+                    confidence=1.0,
+                )
+            return True
+        except Exception as e:
+            logger.error("answer_pending_question failed: %s", e)
+            return False
+
+    def find_open_draft(
+        self,
+        user_id: int,
+        *,
+        text: Optional[str] = None,
+        evidence_event_id: Optional[int] = None,
+        kind: Optional[str] = None,
+    ) -> Optional[int]:
+        """Return id of open (needs_approval) draft matching text or evidence event."""
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                """
+                SELECT id, text, evidence_event_ids_json, kind
+                FROM learning_lessons
+                WHERE user_id = ? AND needs_approval = 1
+                ORDER BY created_at DESC LIMIT 40
+                """,
+                (int(user_id),),
+            ).fetchall()
+            for r in rows:
+                if kind and (r["kind"] or "") != kind:
+                    continue
+                if text and (r["text"] or "").strip() == text.strip():
+                    return int(r["id"])
+                if evidence_event_id is not None:
+                    try:
+                        ids = json.loads(r["evidence_event_ids_json"] or "[]")
+                    except Exception:
+                        ids = []
+                    if int(evidence_event_id) in [int(x) for x in ids]:
+                        return int(r["id"])
+            return None
+
+    def teach_lesson(
+        self,
+        user_id: int,
+        text: str,
+        *,
+        tags: Optional[List[str]] = None,
+        needs_approval: bool = False,
+        source: str = "owner",
+        kind: str = "lesson",
+        evidence_event_ids: Optional[List[int]] = None,
+        weight: float = 1.0,
+        dedupe: bool = True,
+    ) -> int:
+        body = (text or "").strip()
+        if not body:
+            return 0
+        try:
+            evid = list(evidence_event_ids or [])
+            if dedupe and needs_approval:
+                existing = self.find_open_draft(
+                    user_id,
+                    text=body,
+                    evidence_event_id=int(evid[0]) if evid else None,
+                    kind=kind,
+                )
+                if existing:
+                    return int(existing)
+            with self._lock:
+                cur = self._get_conn().execute(
+                    """
+                    INSERT INTO learning_lessons (
+                        user_id, text, tags_json, weight, needs_approval,
+                        source, kind, evidence_event_ids_json, created_at,
+                        approved_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(user_id),
+                        body,
+                        json.dumps(tags or []),
+                        float(weight),
+                        1 if needs_approval else 0,
+                        source,
+                        kind,
+                        json.dumps(evid),
+                        time.time(),
+                        None if needs_approval else time.time(),
+                    ),
+                )
+                return int(cur.lastrowid)
+        except Exception as e:
+            logger.error("teach_lesson failed: %s", e)
+            return 0
+
+    def list_lessons(
+        self,
+        user_id: int,
+        *,
+        pending_only: bool = False,
+        approved_only: bool = False,
+        limit: int = 30,
+    ) -> List[dict]:
+        limit = max(1, min(int(limit), 100))
+        with self._lock:
+            sql = "SELECT * FROM learning_lessons WHERE user_id = ?"
+            params: List[Any] = [int(user_id)]
+            if pending_only:
+                sql += " AND needs_approval = 1"
+            if approved_only:
+                sql += " AND needs_approval = 0"
+            sql += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
+            return [dict(r) for r in self._get_conn().execute(sql, params).fetchall()]
+
+    def approve_lesson(
+        self, user_id: int, lesson_id: int, *, dismiss: bool = False
+    ) -> bool:
+        try:
+            with self._lock:
+                conn = self._get_conn()
+                row = conn.execute(
+                    "SELECT id FROM learning_lessons WHERE id = ? AND user_id = ?",
+                    (int(lesson_id), int(user_id)),
+                ).fetchone()
+                if not row:
+                    return False
+                if dismiss:
+                    conn.execute(
+                        "DELETE FROM learning_lessons WHERE id = ?",
+                        (int(lesson_id),),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE learning_lessons
+                        SET needs_approval = 0, approved_at = ?
+                        WHERE id = ?
+                        """,
+                        (time.time(), int(lesson_id)),
+                    )
+                return True
+        except Exception as e:
+            logger.error("approve_lesson failed: %s", e)
+            return False
+
+    def learning_stats(self, user_id: int) -> Dict[str, Any]:
+        """Aggregate stats for coach/desk — store-backed only."""
+        with self._lock:
+            conn = self._get_conn()
+            n_events = conn.execute(
+                "SELECT COUNT(*) AS c FROM learning_events WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            events_n = int(n_events["c"] if n_events else 0)
+            # latest action per event
+            rows = conn.execute(
+                """
+                SELECT e.velocity_band,
+                    (SELECT action FROM learning_labels l
+                     WHERE l.event_id = e.id AND l.action IS NOT NULL
+                     ORDER BY l.ts DESC LIMIT 1) AS action,
+                    (SELECT behavior FROM learning_labels l
+                     WHERE l.event_id = e.id AND l.behavior IS NOT NULL
+                     ORDER BY l.ts DESC LIMIT 1) AS behavior
+                FROM learning_events e
+                WHERE e.user_id = ?
+                """,
+                (user_id,),
+            ).fetchall()
+            took = skip = partial = late = panic = 0
+            by_band: Dict[str, Dict[str, int]] = {}
+            behaviors: Dict[str, int] = {}
+            for r in rows:
+                act = r["action"]
+                band = r["velocity_band"] or "—"
+                if act == "took":
+                    took += 1
+                elif act == "skip":
+                    skip += 1
+                elif act == "partial":
+                    partial += 1
+                elif act == "late":
+                    late += 1
+                if band == "PANIC":
+                    panic += 1
+                by_band.setdefault(band, {"took": 0, "skip": 0, "n": 0})
+                by_band[band]["n"] += 1
+                if act in ("took", "skip"):
+                    by_band[band][act] = by_band[band].get(act, 0) + 1
+                beh = r["behavior"]
+                if beh:
+                    behaviors[beh] = behaviors.get(beh, 0) + 1
+            bounce_rows = conn.execute(
+                """
+                SELECT o.max_bounce_pct FROM learning_outcomes o
+                JOIN learning_events e ON e.id = o.event_id
+                WHERE e.user_id = ? AND o.max_bounce_pct IS NOT NULL
+                """,
+                (user_id,),
+            ).fetchall()
+            bounces = [
+                float(r["max_bounce_pct"])
+                for r in bounce_rows
+                if r["max_bounce_pct"] is not None
+            ]
+            median_bounce = None
+            if bounces:
+                bounces.sort()
+                median_bounce = bounces[len(bounces) // 2]
+            pending_n = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM learning_pending_questions
+                WHERE user_id = ? AND status = 'open'
+                """,
+                (user_id,),
+            ).fetchone()
+            drafts_n = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM learning_lessons
+                WHERE user_id = ? AND needs_approval = 1
+                """,
+                (user_id,),
+            ).fetchone()
+            lessons_n = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM learning_lessons
+                WHERE user_id = ? AND needs_approval = 0
+                """,
+                (user_id,),
+            ).fetchone()
+            return {
+                "events": events_n,
+                "took": took,
+                "skip": skip,
+                "partial": partial,
+                "late": late,
+                "panic_band": panic,
+                "by_band": by_band,
+                "behaviors": behaviors,
+                "median_bounce_pct": median_bounce,
+                "outcome_n": len(bounces),
+                "pending_questions": int(pending_n["c"] if pending_n else 0),
+                "pending_drafts": int(drafts_n["c"] if drafts_n else 0),
+                "approved_lessons": int(lessons_n["c"] if lessons_n else 0),
+            }
 
     def count_events_since(self, user_id: int, since_ts: float) -> int:
         with self._lock:

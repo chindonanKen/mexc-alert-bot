@@ -127,8 +127,6 @@
       positions: "Positions",
       memory: "Learning",
       intel: "Intel",
-      planner: "AD Layers",
-      paper: "Paper",
       voice: "Voice log",
       roadmap: "Roadmap",
       playbook: "Playbook",
@@ -149,9 +147,128 @@
     return `<div class="rank-empty">${msg}</div>`;
   }
 
+  function updateLearningNavBadge(count) {
+    const badge = $("#navLearnBadge");
+    const btn = $("#navLearning");
+    if (!badge) return;
+    const n = Math.max(0, Number(count) || 0);
+    if (n > 0) {
+      badge.hidden = false;
+      badge.textContent = String(n > 9 ? "9+" : n);
+      if (btn) btn.classList.add("has-pending");
+    } else {
+      badge.hidden = true;
+      badge.textContent = "0";
+      if (btn) btn.classList.remove("has-pending");
+    }
+  }
+
   async function loadOverview() {
     const d = await api("/api/overview");
     const h = d.hierarchy || {};
+
+    // Needs you — pending questions + coach drafts (away-safe queue)
+    const needsEl = $("#ovNeedsYou");
+    if (needsEl) {
+      const ny = h.needs_you || d.needs_you || {};
+      const qs = ny.pending_questions || [];
+      const drafts = ny.drafts || [];
+      updateLearningNavBadge((ny.count != null ? ny.count : qs.length + drafts.length));
+      if (!qs.length && !drafts.length) {
+        needsEl.hidden = true;
+        needsEl.innerHTML = "";
+      } else {
+        needsEl.hidden = false;
+        let html = `<div class="ov-needs-h">Needs you <button type="button" class="btn soft sm" data-jump="memory">Learning</button></div>`;
+        qs.forEach((q) => {
+          html += `<div class="ov-needs-row">
+            <div class="ov-needs-q">${(q.question || "").slice(0, 160)}</div>
+            <div class="row-gap">
+              <button type="button" class="btn sm" data-ans="${q.id}" data-act="skip">Skip why later</button>
+              <button type="button" class="btn soft sm" data-ans="${q.id}" data-act="took">Took</button>
+              <button type="button" class="btn soft sm" data-dismiss-q="${q.id}">Dismiss</button>
+            </div>
+          </div>`;
+        });
+        drafts.forEach((dr) => {
+          html += `<div class="ov-needs-row draft">
+            <div class="ov-needs-q">${(dr.text || "").slice(0, 160)}</div>
+            <div class="row-gap">
+              <button type="button" class="btn sm" data-appr="${dr.id}">Approve</button>
+              <button type="button" class="btn soft sm" data-dismiss-d="${dr.id}">Dismiss</button>
+            </div>
+          </div>`;
+        });
+        needsEl.innerHTML = html;
+        $$("[data-ans]", needsEl).forEach((b) =>
+          b.addEventListener("click", async () => {
+            try {
+              await api("/api/learning/answer", {
+                method: "POST",
+                body: JSON.stringify({
+                  question_id: +b.dataset.ans,
+                  action: b.dataset.act,
+                  answer_text: "overview quick answer",
+                }),
+              });
+              toast("Answered");
+              loadOverview();
+            } catch (e) {
+              toast(e.message);
+            }
+          })
+        );
+        $$("[data-dismiss-q]", needsEl).forEach((b) =>
+          b.addEventListener("click", async () => {
+            try {
+              await api("/api/learning/answer", {
+                method: "POST",
+                body: JSON.stringify({
+                  question_id: +b.dataset.dismissQ || +b.getAttribute("data-dismiss-q"),
+                  dismiss: true,
+                }),
+              });
+              loadOverview();
+            } catch (e) {
+              toast(e.message);
+            }
+          })
+        );
+        $$("[data-appr]", needsEl).forEach((b) =>
+          b.addEventListener("click", async () => {
+            try {
+              await api("/api/learning/approve", {
+                method: "POST",
+                body: JSON.stringify({ lesson_id: +b.dataset.appr }),
+              });
+              toast("Draft approved");
+              loadOverview();
+            } catch (e) {
+              toast(e.message);
+            }
+          })
+        );
+        $$("[data-dismiss-d]", needsEl).forEach((b) =>
+          b.addEventListener("click", async () => {
+            try {
+              await api("/api/learning/approve", {
+                method: "POST",
+                body: JSON.stringify({
+                  lesson_id: +b.getAttribute("data-dismiss-d"),
+                  dismiss: true,
+                }),
+              });
+              loadOverview();
+            } catch (e) {
+              toast(e.message);
+            }
+          })
+        );
+        $$("[data-jump]", needsEl).forEach((b) =>
+          b.addEventListener("click", () => setView(b.dataset.jump))
+        );
+      }
+    }
 
     // High-priority book news only (targets / movers / positions). Hidden if none.
     const newsEl = $("#ovBookNews");
@@ -242,6 +359,48 @@
           )
           .join("")
       : rankEmpty("No open positions");
+
+    // Book-matched intel (investigations) — only when present
+    const intelEl = $("#ovBookIntel");
+    if (intelEl) {
+      const bi = h.book_intel || [];
+      if (!bi.length) {
+        intelEl.hidden = true;
+        intelEl.innerHTML = "";
+      } else {
+        intelEl.hidden = false;
+        intelEl.innerHTML =
+          `<div class="panel-h"><h3>Book intel</h3><button type="button" class="btn soft sm" data-jump="intel">Open</button></div>` +
+          bi
+            .map(
+              (i) => `<div class="cmd-row">
+              <div class="cmd-row-main">
+                <div class="cmd-sym">${i.symbol || "—"}</div>
+                <div class="cmd-meta">${i.verdict || i.velocity_band || "intel"}${
+                i.drop_pct != null ? " · " + Number(i.drop_pct).toFixed(1) + "%" : ""
+              }</div>
+              </div>
+              <div class="cmd-px">${(i.confidence != null ? Number(i.confidence).toFixed(2) : "—")}</div>
+            </div>`
+            )
+            .join("");
+        $$("[data-jump]", intelEl).forEach((b) =>
+          b.addEventListener("click", () => setView(b.dataset.jump))
+        );
+      }
+    }
+
+    const pulseEl = $("#ovCoachPulse");
+    if (pulseEl) {
+      const pulse = h.coach_pulse || d.coach_pulse || (d.pulse && d.pulse.coach) || "";
+      pulseEl.innerHTML = pulse
+        ? `<div class="panel-h"><h3>Coach</h3><button type="button" class="btn soft sm" data-jump="memory">Ask / teach</button></div>
+           <pre class="coach-pulse-text">${pulse}</pre>`
+        : "";
+      $$("[data-jump]", pulseEl).forEach((b) =>
+        b.addEventListener("click", () => setView(b.dataset.jump))
+      );
+    }
   }
 
   async function loadPositions() {
@@ -378,14 +537,161 @@
   }
 
   async function loadMemory() {
-    const d = await api("/api/events?limit=60");
-    const rows = (d.events || [])
+    let bundle = {};
+    try {
+      bundle = await api("/api/learning");
+    } catch (e) {
+      toast(e.message);
+    }
+    const pending = bundle.pending_questions || [];
+    const drafts = bundle.drafts || [];
+    const lessons = bundle.lessons || [];
+    const stats = bundle.stats || {};
+    const fires = bundle.fires || [];
+    const needsCount =
+      (bundle.needs_you && bundle.needs_you.count != null)
+        ? bundle.needs_you.count
+        : pending.length + drafts.length;
+    updateLearningNavBadge(needsCount);
+
+    const pb = $("#learnPendingBadge");
+    if (pb) pb.textContent = String(pending.length);
+    const db = $("#learnDraftBadge");
+    if (db) db.textContent = String(drafts.length);
+
+    const pendEl = $("#learnPending");
+    if (pendEl) {
+      pendEl.innerHTML = pending.length
+        ? pending
+            .map(
+              (q) => `<div class="learn-card">
+              <div class="learn-card-t">${(q.question || "").slice(0, 200)}</div>
+              <div class="row-gap mt">
+                <button type="button" class="btn sm" data-pq="${q.id}" data-act="took">Took</button>
+                <button type="button" class="btn soft sm" data-pq="${q.id}" data-act="skip">Skip</button>
+                <button type="button" class="btn soft sm" data-pq-dismiss="${q.id}">Dismiss</button>
+              </div>
+            </div>`
+            )
+            .join("")
+        : `<div class="rank-empty">Nothing pending — you're clear</div>`;
+      $$("[data-pq]", pendEl).forEach((b) =>
+        b.addEventListener("click", async () => {
+          try {
+            await api("/api/learning/answer", {
+              method: "POST",
+              body: JSON.stringify({
+                question_id: +b.dataset.pq,
+                action: b.dataset.act,
+                answer_text: "desk answer",
+              }),
+            });
+            toast("Saved");
+            loadMemory();
+          } catch (err) {
+            toast(err.message);
+          }
+        })
+      );
+      $$("[data-pq-dismiss]", pendEl).forEach((b) =>
+        b.addEventListener("click", async () => {
+          try {
+            await api("/api/learning/answer", {
+              method: "POST",
+              body: JSON.stringify({
+                question_id: +b.getAttribute("data-pq-dismiss"),
+                dismiss: true,
+              }),
+            });
+            loadMemory();
+          } catch (err) {
+            toast(err.message);
+          }
+        })
+      );
+    }
+
+    const drEl = $("#learnDrafts");
+    if (drEl) {
+      drEl.innerHTML = drafts.length
+        ? drafts
+            .map(
+              (dr) => `<div class="learn-card">
+              <div class="learn-card-t">${(dr.text || "").slice(0, 220)}</div>
+              <div class="learn-card-meta">${dr.source || "coach"} · ${dr.kind || "draft"}</div>
+              <div class="row-gap mt">
+                <button type="button" class="btn sm" data-apr="${dr.id}">Approve</button>
+                <button type="button" class="btn soft sm" data-dr-x="${dr.id}">Dismiss</button>
+              </div>
+            </div>`
+            )
+            .join("")
+        : `<div class="rank-empty">No drafts awaiting approval</div>`;
+      $$("[data-apr]", drEl).forEach((b) =>
+        b.addEventListener("click", async () => {
+          try {
+            await api("/api/learning/approve", {
+              method: "POST",
+              body: JSON.stringify({ lesson_id: +b.dataset.apr }),
+            });
+            toast("Approved");
+            loadMemory();
+          } catch (err) {
+            toast(err.message);
+          }
+        })
+      );
+      $$("[data-dr-x]", drEl).forEach((b) =>
+        b.addEventListener("click", async () => {
+          try {
+            await api("/api/learning/approve", {
+              method: "POST",
+              body: JSON.stringify({
+                lesson_id: +b.getAttribute("data-dr-x"),
+                dismiss: true,
+              }),
+            });
+            loadMemory();
+          } catch (err) {
+            toast(err.message);
+          }
+        })
+      );
+    }
+
+    const lesEl = $("#learnLessons");
+    if (lesEl) {
+      lesEl.innerHTML = lessons.length
+        ? lessons
+            .map((l) => `· ${(l.text || "").slice(0, 140)}`)
+            .join("<br/>")
+        : "No approved lessons yet — teach above.";
+    }
+
+    const stEl = $("#learnStats");
+    const stB = $("#learnStatsBadge");
+    if (stEl) {
+      const med =
+        stats.median_bounce_pct != null
+          ? Number(stats.median_bounce_pct).toFixed(1) + "%"
+          : "n/a";
+      stEl.textContent =
+        `events=${stats.events || 0} took=${stats.took || 0} skip=${stats.skip || 0} ` +
+        `partial=${stats.partial || 0} late=${stats.late || 0} panic=${stats.panic_band || 0} ` +
+        `median_bounce=${med} lessons=${stats.approved_lessons || 0}`;
+    }
+    if (stB) stB.textContent = String(stats.events || 0);
+
+    const rows = (fires.length ? fires : [])
       .map(
         (e) => `<tr>
         <td>#${e.id}</td><td>${e.symbol}</td>
         <td class="dn">${e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—"}</td>
         <td>${e.velocity_band || "—"}</td>
         <td>${e.last_action || "unlabeled"}</td>
+        <td>${
+          e.outcome_bounce != null ? Number(e.outcome_bounce).toFixed(1) + "%" : "—"
+        }</td>
         <td>${fmtTime(e.ts)}</td>
         <td>
           <button type="button" class="btn soft sm" data-eid="${e.id}" data-a="took">Took</button>
@@ -395,7 +701,7 @@
       )
       .join("");
     $("#memoryTable").innerHTML = table(
-      ["ID", "Sym", "Drop", "Band", "Label", "When", ""],
+      ["ID", "Sym", "Drop", "Band", "Label", "Bounce", "When", ""],
       rows
     );
     $$("[data-eid]").forEach((b) =>
@@ -412,6 +718,49 @@
         }
       })
     );
+  }
+
+  function wireLearningForms() {
+    const tf = $("#teachForm");
+    if (tf && !tf.dataset.bound) {
+      tf.dataset.bound = "1";
+      tf.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const fd = new FormData(tf);
+        const text = (fd.get("text") || "").toString().trim();
+        if (!text) return;
+        try {
+          await api("/api/learning/teach", {
+            method: "POST",
+            body: JSON.stringify({ text }),
+          });
+          toast("Lesson saved");
+          tf.reset();
+          loadMemory();
+        } catch (e) {
+          toast(e.message);
+        }
+      });
+    }
+    const cf = $("#coachForm");
+    if (cf && !cf.dataset.bound) {
+      cf.dataset.bound = "1";
+      cf.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const fd = new FormData(cf);
+        const question = (fd.get("question") || "brief").toString();
+        try {
+          const r = await api("/api/coach", {
+            method: "POST",
+            body: JSON.stringify({ question }),
+          });
+          const pre = $("#coachReply");
+          if (pre) pre.textContent = r.reply || "";
+        } catch (e) {
+          toast(e.message);
+        }
+      });
+    }
   }
 
   async function loadIntel() {
@@ -1342,8 +1691,6 @@
       targets: loadTargets,
       memory: loadMemory,
       intel: loadIntel,
-      planner: async () => {},
-      paper: async () => {},
       roadmap: loadRoadmap,
       playbook: loadPlaybook,
       voice: async () => {
@@ -1370,7 +1717,7 @@
   );
   $("#btnRefresh").addEventListener("click", refreshAll);
 
-  // Overview jump buttons + layer planner scaffold
+  // Overview jump buttons (Targets / Movers / Learning / …)
   document.body.addEventListener("click", (e) => {
     const t = e.target;
     if (!(t instanceof HTMLElement)) return;
@@ -1381,48 +1728,7 @@
     }
   });
 
-  const planForm = $("#planForm");
-  if (planForm) {
-    planForm.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const f = e.target;
-      const sym = (f.symbol.value || "").toUpperCase().trim();
-      const layers = Math.max(3, Math.min(12, parseInt(f.layers.value || "6", 10)));
-      const ad = parseFloat(f.ad_pct.value || "8");
-      const inv = f.invalidation.value || "structure break / below last layer";
-      const mkt = f.market.value || "futures";
-      // Exponential ladder sketch (sizes as fractions of risk unit)
-      const lines = [];
-      lines.push(`AD PLAN · ${mkt} ${sym}`);
-      lines.push(`AD length ≈ ${ad}% · layers ${layers} · powder reserve ~30%`);
-      lines.push(`Invalidation: ${inv}`);
-      lines.push("");
-      let size = 1;
-      let sum = 0;
-      const sizes = [];
-      for (let i = 0; i < layers; i++) {
-        sizes.push(size);
-        sum += size;
-        size *= 1.6;
-      }
-      const norm = sizes.map((s) => s / sum);
-      for (let i = 0; i < layers; i++) {
-        const drop = (ad * (i + 1)) / layers;
-        lines.push(
-          `L${i + 1}  −${drop.toFixed(1)}% from ref  · size ${(norm[i] * 100).toFixed(1)}% of risk unit`
-        );
-      }
-      lines.push("");
-      lines.push("Voice: “propose trade on " + sym + " with " + layers + " layers” to journal thesis.");
-      lines.push("Next: save_plan API will persist for agent learning.");
-      $("#planOut").textContent = lines.join("\n");
-      // Also ask agent to propose (optional continuity)
-      runAgentText(
-        `propose_trade for ${sym}: thesis AD scale-in ${layers} layers about ${ad}% AD, invalidation ${inv}`
-      );
-    });
-  }
-
+  wireLearningForms();
   setView("overview");
   updateMicUi();
   refreshAll();

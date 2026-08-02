@@ -1,10 +1,29 @@
 # Session handoff — pick up here
 
-**Last updated:** 2026-07-30 (V2.1 AD Desk HTTPS / mic — no upload)  
+**Last updated:** 2026-08-02 (AD Desk learning + coach spine)  
 **GitHub:** `chindonanKen/mexc-alert-bot` · branch `main`  
 **Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md) · [TRADING_STRATEGY.md](TRADING_STRATEGY.md) · [V2_BETA.md](V2_BETA.md) · [V4_TRADING_ASSISTANT.md](V4_TRADING_ASSISTANT.md)
 
 This file is a **dated snapshot** so the next human/agent (including a **new MacBook + new Grok session**) does not rediscover the same ground.
+
+### Two products (do not blur)
+
+| Product | Role |
+|---------|------|
+| **Telegram alarm bot** | Sensors + push for targets/movers — **leave as-is** |
+| **AD Desk** | Independent **learning + coach + voice** platform; works without Telegram open |
+
+Shared SQLite is plumbing (same book/fires). Learning UX is desk-only. Future multi-device alarms come from desk (`/api/notify/stub` placeholder).
+
+### Learning spine (shipped 2026-08-02)
+
+- Auto engagement: journal/fills → took|skip|partial|late after **1h** grace (`EngagementBridge`)
+- Max **2** pending questions on desk **Needs you** (Overview + Learning)
+- Teach lessons + coach drafts (approve/dismiss); coach API/pulse tool-backed from EventStore
+- Voice tools: `teach`, `coach_ask`, `list_pending_questions`, `answer_question`, `learning_stats`, …
+- Owner id: `DESK_USER_ID=8630949601`
+- Flags: `FEATURE_LEARNING`, `LEARNING_AUTO_FROM_POSITIONS`, `LEARNING_GRACE_SECONDS=3600`
+- Tests: `tests/test_desk_learning_spine.py` + existing suite via `make test`
 
 ### AD Desk (explore fully)
 

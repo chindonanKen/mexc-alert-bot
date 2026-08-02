@@ -155,7 +155,32 @@ class TestWebApi(unittest.TestCase):
     def test_index(self):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
-        self.assertIn("Command Desk", r.text)
+        self.assertIn("AD Desk", r.text)
+        self.assertIn("ovNeedsYou", r.text)
+        self.assertIn("teachForm", r.text)
+        self.assertIn("ovCoachPulse", r.text)
+
+    def test_learning_endpoints(self):
+        r = self.client.get("/api/learning")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertIn("needs_you", body)
+        self.assertIn("stats", body)
+        self.assertIn("coach_pulse", body)
+        r2 = self.client.post(
+            "/api/learning/teach",
+            json={"text": "webapi test lesson no full size on grind"},
+        )
+        self.assertEqual(r2.status_code, 200)
+        self.assertTrue(r2.json().get("ok"))
+        r3 = self.client.get("/api/overview")
+        self.assertEqual(r3.status_code, 200)
+        ov = r3.json()
+        self.assertIn("needs_you", ov)
+        self.assertIn("coach_pulse", ov)
+        r4 = self.client.get("/api/notify/stub")
+        self.assertEqual(r4.status_code, 200)
+        self.assertEqual(r4.json().get("status"), "stub")
 
 
 if __name__ == "__main__":

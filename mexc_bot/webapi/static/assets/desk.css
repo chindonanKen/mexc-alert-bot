@@ -134,6 +134,83 @@ body::before {
 .stage { padding: 1.15rem 1.4rem 7.5rem; max-width: 1440px; }
 
 /* ---- Overview command deck ---- */
+.nav-badge {
+  display: inline-block;
+  min-width: 1.1rem;
+  padding: 0.05rem 0.35rem;
+  margin-left: 0.25rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-family: var(--mono);
+  font-weight: 600;
+  background: rgba(56, 189, 248, 0.25);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  vertical-align: middle;
+}
+.nav button.has-pending {
+  color: #7dd3fc;
+}
+.ov-book-intel { margin-top: 1rem; }
+.ov-needs-you {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  background:
+    radial-gradient(ellipse at 0% 0%, rgba(56, 189, 248, 0.16), transparent 55%),
+    rgba(8, 24, 40, 0.65);
+  box-shadow: 0 0 32px rgba(56, 189, 248, 0.1);
+}
+.ov-needs-h {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cyan, #38bdf8);
+  margin-bottom: 0.55rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.ov-needs-row {
+  padding: 0.55rem 0;
+  border-top: 1px solid rgba(56, 189, 248, 0.12);
+}
+.ov-needs-row:first-of-type { border-top: 0; padding-top: 0; }
+.ov-needs-q { font-size: 0.9rem; line-height: 1.35; margin-bottom: 0.4rem; }
+.ov-coach-pulse { margin-top: 1rem; }
+.coach-pulse-text, .coach-reply {
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text);
+  margin: 0.4rem 0 0;
+  max-height: 220px;
+  overflow: auto;
+}
+.learn-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 900px) {
+  .learn-grid { grid-template-columns: 1fr; }
+}
+.learn-block { min-height: 4rem; max-height: 240px; }
+.learn-card {
+  padding: 0.65rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.learn-card-t { font-size: 0.88rem; line-height: 1.35; }
+.learn-card-meta {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--mute);
+  margin-top: 0.25rem;
+}
 .ov-book-news {
   margin-bottom: 1rem;
   padding: 0.85rem 1rem;

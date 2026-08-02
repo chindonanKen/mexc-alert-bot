@@ -332,30 +332,25 @@ def label_latest(
     action: Optional[str] = None,
     bounce: Optional[str] = None,
     behavior: Optional[str] = None,
+    notes: Optional[str] = None,
     user_id: Optional[int] = None,
 ) -> dict:
+    from ..learning.store import EventStore
+
     uid = _uid(user_id)
-    conn = db.connect()
-    try:
-        row = conn.execute(
-            "SELECT id FROM learning_events WHERE user_id = ? ORDER BY ts DESC LIMIT 1",
-            (uid,),
-        ).fetchone()
-        if not row:
-            raise ValueError("No learning events to label")
-        eid = int(row[0] if not hasattr(row, "keys") else row["id"])
-        conn.execute(
-            """
-            INSERT INTO learning_labels (
-                event_id, user_id, action, bounce_quality, behavior, notes, ts
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (eid, uid, action, bounce, behavior, "desk/voice", time.time()),
-        )
-        conn.commit()
-        return {"ok": True, "event_id": eid, "action": action}
-    finally:
-        conn.close()
+    store = EventStore(db.db_path())
+    eid = store.label_latest(
+        uid,
+        action=action,
+        bounce_quality=bounce,
+        behavior=behavior,
+        notes=notes or "desk/voice",
+        source="human",
+        confidence=1.0,
+    )
+    if not eid:
+        raise ValueError("No learning events to label")
+    return {"ok": True, "event_id": eid, "action": action}
 
 
 def list_recent_fires(user_id: Optional[int] = None, limit: int = 12) -> List[dict]:
@@ -500,10 +495,15 @@ TOOL_DEFS = [
     ),
     _tool(
         "label_fire",
-        "Label latest fire as took, skip, or watch",
+        "Label latest fire as took, skip, watch, partial, or late",
         {
-            "action": {"type": "string", "enum": ["took", "skip", "watch"]},
+            "action": {
+                "type": "string",
+                "enum": ["took", "skip", "watch", "partial", "late"],
+            },
             "bounce_quality": {"type": "string"},
+            "behavior": {"type": "string"},
+            "notes": {"type": "string"},
         },
         ["action"],
     ),
@@ -511,6 +511,53 @@ TOOL_DEFS = [
         "list_fires",
         "List recent mover/target fire events from memory",
         {"limit": {"type": "integer"}},
+    ),
+    _tool(
+        "list_pending_questions",
+        "List open desk learning questions needing owner answer",
+        {},
+    ),
+    _tool(
+        "answer_question",
+        "Answer or dismiss a pending learning question",
+        {
+            "question_id": {"type": "integer"},
+            "answer_text": {"type": "string"},
+            "action": {"type": "string"},
+            "behavior": {"type": "string"},
+            "dismiss": {"type": "boolean"},
+        },
+        ["question_id"],
+    ),
+    _tool(
+        "teach",
+        "Save a durable trading lesson to desk memory",
+        {
+            "text": {"type": "string"},
+            "needs_approval": {"type": "boolean"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+        },
+        ["text"],
+    ),
+    _tool(
+        "approve_draft",
+        "Approve or dismiss a coach lesson/behavior draft",
+        {
+            "lesson_id": {"type": "integer"},
+            "dismiss": {"type": "boolean"},
+        },
+        ["lesson_id"],
+    ),
+    _tool(
+        "learning_stats",
+        "Aggregate learning stats from event log (took/skip/bounce)",
+        {},
+    ),
+    _tool(
+        "coach_ask",
+        "Ask AD Desk coach (strategy + store-backed memory)",
+        {"question": {"type": "string"}},
+        ["question"],
     ),
     _tool(
         "list_intel",
@@ -598,14 +645,53 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             return label_latest(
                 action=args.get("action"),
                 bounce=args.get("bounce_quality"),
+                behavior=args.get("behavior"),
+                notes=args.get("notes"),
             )
         if name == "list_fires":
             return {"fires": list_recent_fires(limit=int(args.get("limit") or 12))}
+        if name == "list_pending_questions":
+            from .learning_api import learning_bundle
+
+            b = learning_bundle()
+            return {"pending_questions": b.get("pending_questions") or []}
+        if name == "answer_question":
+            from .learning_api import answer_question
+
+            return answer_question(
+                int(args["question_id"]),
+                answer_text=args.get("answer_text"),
+                action=args.get("action"),
+                behavior=args.get("behavior"),
+                dismiss=bool(args.get("dismiss")),
+            )
+        if name == "teach":
+            from .learning_api import teach
+
+            return teach(
+                str(args.get("text") or ""),
+                tags=args.get("tags"),
+                needs_approval=bool(args.get("needs_approval")),
+            )
+        if name == "approve_draft":
+            from .learning_api import approve_draft
+
+            return approve_draft(
+                int(args["lesson_id"]), dismiss=bool(args.get("dismiss"))
+            )
+        if name == "learning_stats":
+            from .learning_api import learning_bundle
+
+            return {"stats": learning_bundle().get("stats")}
+        if name == "coach_ask":
+            from .learning_api import coach_ask
+
+            return coach_ask(str(args.get("question") or "brief"))
         if name == "list_intel":
             return {"investigations": list_investigations(), "news": list_news()}
         if name == "get_overview":
             uid = _uid()
-            return {
+            out = {
                 "alerts": len(list_alerts()),
                 "watch": len(list_watchlist()),
                 "open_positions": len(list_positions()),
@@ -614,6 +700,16 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 "user_id": uid,
                 "live_orders_allowed": live_orders_allowed(),
             }
+            try:
+                from .learning_api import learning_bundle
+
+                b = learning_bundle(uid)
+                out["needs_you"] = b.get("needs_you")
+                out["coach_pulse"] = b.get("coach_pulse")
+                out["stats"] = b.get("stats")
+            except Exception:
+                pass
+            return out
         if name == "propose_trade":
             plan = {
                 "symbol": args["symbol"].upper(),
