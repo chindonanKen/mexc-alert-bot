@@ -700,6 +700,18 @@ TOOL_DEFS = [
         {},
     ),
     _tool(
+        "correct_judgment",
+        "Owner corrects the agent's call (no_trade|take_scout|take_layers|wait_deeper) with reason — updates case + nudges beliefs",
+        {
+            "correct_verdict": {"type": "string"},
+            "reason": {"type": "string"},
+            "event_id": {"type": "integer"},
+            "case_id": {"type": "integer"},
+            "symbol": {"type": "string"},
+        },
+        ["correct_verdict", "reason"],
+    ),
+    _tool(
         "list_intel",
         "List isolated-dump investigations and recent news",
         {},
@@ -891,6 +903,16 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             from .learning_api import refresh_book_charts
 
             return refresh_book_charts()
+        if name == "correct_judgment":
+            from .learning_api import correct_judgment
+
+            return correct_judgment(
+                correct_verdict=str(args["correct_verdict"]),
+                reason=str(args["reason"]),
+                event_id=args.get("event_id"),
+                case_id=args.get("case_id"),
+                symbol=args.get("symbol"),
+            )
         if name == "list_intel":
             return {"investigations": list_investigations(), "news": list_news()}
         if name == "get_overview":

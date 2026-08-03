@@ -55,6 +55,8 @@ Agent brain (required for learning claims):
   teach — durable rule with evidence
   learning_stats
 When user asks about a coin chart/history/AD/RSI/volume: call read_chart first.
+When user says the agent is wrong / should be no_trade|take_scout|take_layers|wait_deeper: call correct_judgment with reason.
+Always surface self_critique from judge_fire when discussing a call.
 
 AD discipline:
 - Panic + breadth + volume > grind/isolated

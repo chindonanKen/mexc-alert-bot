@@ -586,11 +586,20 @@
         const j = ac.judgment || {};
         const s = j.setup || {};
         const cite = (j.cite || []).map((c) => `<li>${c}</li>`).join("");
+        const crit = (j.self_critique || [])
+          .map((c) => `<li class="crit">! ${c}</li>`)
+          .join("");
         const ch = j.chart || {};
+        const ov = j.human_override
+          ? `<div class="learn-card-meta up">You corrected: ${
+              j.human_override.previous_verdict
+            } → ${j.human_override.verdict}</div>`
+          : "";
         acEl.innerHTML = `
           <div class="agent-case-h">${ac.symbol || j.symbol || "—"} · ${
           s.verdict || "?"
         } · size ${j.size_hint || "—"}</div>
+          ${ov}
           <div class="learn-card-meta">conf ${j.confidence ?? "—"} · edge ${
           s.edge != null ? Number(s.edge).toFixed(2) : "thin"
         } n=${s.n ?? 0} · outcome ${ac.outcome_label || "pending"}</div>
@@ -599,12 +608,28 @@
           } · AD ${ch.ad_zone || "—"} · vol ${ch.vol_flag || "—"} · RSI ${
           ch.rsi_now_5m ?? "—"
         } div ${ch.div_bull ? "yes" : "no"}</div>
+          <div class="learn-card-meta">Why</div>
           <ul class="cite-list">${cite || "<li>No cites yet — agent needs more outcomes</li>"}</ul>
-          <div class="row-gap mt">
+          <div class="learn-card-meta">Self-critique</div>
+          <ul class="cite-list">${crit || "<li>None</li>"}</ul>
+          <div class="row-gap mt wrap">
             <button type="button" class="btn soft sm" data-judge-ev="${
               ac.event_id || ""
-            }">Refresh judgment</button>
-          </div>`;
+            }">Refresh</button>
+            <button type="button" class="btn soft sm" data-corr="no_trade" data-case="${
+              ac.id
+            }">Correct → no_trade</button>
+            <button type="button" class="btn soft sm" data-corr="take_scout" data-case="${
+              ac.id
+            }">Correct → scout</button>
+            <button type="button" class="btn soft sm" data-corr="take_layers" data-case="${
+              ac.id
+            }">Correct → layers</button>
+            <button type="button" class="btn soft sm" data-corr="wait_deeper" data-case="${
+              ac.id
+            }">Correct → wait deeper</button>
+          </div>
+          <p class="hint">Or tell the agent why in Talk below / voice — e.g. “wrong, should be no_trade because isolated”</p>`;
         $$("[data-judge-ev]", acEl).forEach((b) =>
           b.addEventListener("click", async () => {
             try {
@@ -612,6 +637,28 @@
                 method: "POST",
                 body: JSON.stringify({ event_id: +b.dataset.judgeEv || null }),
               });
+              loadMemory();
+            } catch (err) {
+              toast(err.message);
+            }
+          })
+        );
+        $$("[data-corr]", acEl).forEach((b) =>
+          b.addEventListener("click", async () => {
+            const reason = window.prompt(
+              "Why is the agent wrong? (saved as training)"
+            );
+            if (!reason || !reason.trim()) return;
+            try {
+              await api("/api/learning/correct", {
+                method: "POST",
+                body: JSON.stringify({
+                  case_id: +b.dataset.case,
+                  correct_verdict: b.dataset.corr,
+                  reason: reason.trim(),
+                }),
+              });
+              toast("Correction saved — agent nudged");
               loadMemory();
             } catch (err) {
               toast(err.message);
@@ -721,7 +768,7 @@
         : `<div class="rank-empty">No ticker edges yet</div>`;
     }
 
-    // Trades with process feedback (updates exec edge)
+    // Closed/open trades — facts only (no tag farm). Talk to agent to correct process.
     const trEl = $("#learnTrades");
     if (trEl) {
       const closed = trades.filter((t) => t.status === "closed" || t.status === "open");
@@ -735,13 +782,6 @@
                       pnl >= 0 ? "+" : ""
                     }${Number(pnl).toFixed(2)}%</span>`
                   : t.status;
-              const behs = ["plan_ok", "fomo", "pride", "hesitant", "rule_break"];
-              const tags = behs
-                .map(
-                  (beh) =>
-                    `<button type="button" class="btn soft sm" data-rec-proc="${t.id}" data-tag="${beh}">${beh}</button>`
-                )
-                .join("");
               return `<div class="learn-card rich">
                 <div class="learn-card-h">#${t.id} ${t.symbol} ${pnlS} · ${
                 t.hold_hours != null ? t.hold_hours + "h" : ""
@@ -750,33 +790,16 @@
                 t.n_sells
               } · fire ${
                 t.primary_event_id ? "#" + t.primary_event_id : "—"
-              }</div>
-                <div class="row-gap mt">${tags}
+              } · ${fmtTime(t.opened_at)}</div>
+                <div class="row-gap mt">
                   <button type="button" class="btn soft sm" data-coach-tr="${
                     t.symbol
-                  }">Agent</button>
+                  }">Ask agent about this</button>
                 </div>
               </div>`;
             })
             .join("")
-        : `<div class="rank-empty">Close trades / sync fills — agent trains exec edge here</div>`;
-      $$("[data-rec-proc]", trEl).forEach((b) =>
-        b.addEventListener("click", async () => {
-          try {
-            await api("/api/learning/trades/tag", {
-              method: "POST",
-              body: JSON.stringify({
-                trade_id: +b.dataset.recProc,
-                behavior: b.dataset.tag,
-              }),
-            });
-            toast("Process → exec edge updated");
-            loadMemory();
-          } catch (err) {
-            toast(err.message);
-          }
-        })
-      );
+        : `<div class="rank-empty">Closes/fills train exec edge automatically — no tags required</div>`;
       $$("[data-coach-tr]", trEl).forEach((b) =>
         b.addEventListener("click", async () => {
           try {

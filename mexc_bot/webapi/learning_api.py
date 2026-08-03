@@ -381,15 +381,92 @@ def belief_ticker(
     return {"ticker": b, "chart": chart}
 
 
+def correct_judgment(
+    *,
+    correct_verdict: str,
+    reason: str,
+    event_id: Optional[int] = None,
+    case_id: Optional[int] = None,
+    symbol: Optional[str] = None,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Human overrides agent call and teaches why (belief nudge)."""
+    uid = int(user_id or uid_or_raise())
+    eng = beliefs()
+    # resolve case via symbol → latest case
+    if not case_id and not event_id and symbol:
+        for c in eng.list_cases(uid, limit=20):
+            if symbol.upper().replace("_", "") in (c.get("symbol") or "").upper().replace(
+                "_", ""
+            ):
+                case_id = c.get("id")
+                event_id = c.get("event_id")
+                break
+    return eng.apply_human_correction(
+        uid,
+        event_id=event_id,
+        case_id=case_id,
+        correct_verdict=correct_verdict,
+        reason=reason,
+        adjust_beliefs=True,
+    )
+
+
 def coach_ask(question: str, user_id: Optional[int] = None) -> Dict[str, Any]:
     """Agent-native coach: always load beliefs + optional judge."""
     uid = int(user_id or uid_or_raise())
     store = event_store()
     eng = beliefs()
     q = (question or "").strip()
+    ql = q.lower()
+
+    # Natural language correction: "wrong, should be no_trade because ..."
+    if any(
+        w in ql
+        for w in (
+            "wrong",
+            "incorrect",
+            "should be",
+            "actually",
+            "correct that",
+            "change to",
+            "i disagree",
+        )
+    ):
+        verdict = None
+        for v in ("no_trade", "take_layers", "take_scout", "wait_deeper"):
+            if v.replace("_", " ") in ql or v in ql:
+                verdict = v
+                break
+        if "no trade" in ql or "skip" in ql and "take" not in ql:
+            verdict = verdict or "no_trade"
+        if "full layer" in ql or "take layers" in ql:
+            verdict = verdict or "take_layers"
+        if "scout" in ql or "micro" in ql:
+            verdict = verdict or "take_scout"
+        if verdict:
+            reason = q
+            try:
+                corr = correct_judgment(
+                    correct_verdict=verdict, reason=reason, user_id=uid
+                )
+                return {
+                    "reply": (
+                        f"Correction saved: {corr.get('previous_verdict')} → "
+                        f"{corr.get('correct_verdict')}. Reason stored; setup edge nudged.\n"
+                        f"{reason[:200]}"
+                    ),
+                    "correction": corr,
+                }
+            except Exception as e:
+                return {
+                    "reply": f"Could not apply correction: {e}. Say verdict: no_trade|take_scout|take_layers|wait_deeper and why.",
+                    "error": str(e),
+                }
+
     lines = [
         "AD SUPER-AGENT (not financial advice)",
-        "Judgment from setup/ticker edges + AD rules + chart features.",
+        "Judgment from setup/ticker edges + AD rules + chart thesis. Self-critical on every call.",
         "",
     ]
     # Try judge latest or mentioned symbol
@@ -417,13 +494,28 @@ def coach_ask(question: str, user_id: Optional[int] = None) -> Dict[str, Any]:
             f"JUDGMENT {judgment.get('symbol')}: {judgment['setup'].get('verdict')} "
             f"size={judgment.get('size_hint')} conf={judgment.get('confidence')}"
         )
+        if judgment.get("human_override"):
+            ho = judgment["human_override"]
+            lines.append(
+                f"  (human override active: {ho.get('previous_verdict')}→{ho.get('verdict')})"
+            )
         for c in judgment.get("cite") or []:
             lines.append(f"  · {c}")
+        sc = judgment.get("self_critique") or []
+        if sc:
+            lines.append("SELF-CRITIQUE:")
+            for c in sc:
+                lines.append(f"  ! {c}")
         ch = judgment.get("chart") or {}
         if ch.get("thesis"):
             lines.append("")
             lines.append("CHART THESIS:")
             lines.append(ch.get("thesis"))
+        lines.append("")
+        lines.append(
+            "To change my call: say e.g. 'wrong — should be no_trade because isolated dump' "
+            "or use correct_judgment tool."
+        )
         lines.append("")
 
     setups = eng.list_setup_beliefs(uid, limit=5)

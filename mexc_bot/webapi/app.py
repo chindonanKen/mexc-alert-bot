@@ -712,6 +712,28 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(400, str(e))
 
+    class CorrectBody(BaseModel):
+        correct_verdict: str
+        reason: str
+        event_id: Optional[int] = None
+        case_id: Optional[int] = None
+        symbol: Optional[str] = None
+
+    @app.post("/api/learning/correct")
+    def learning_correct(body: CorrectBody, _: bool = Depends(require_auth)):
+        from .learning_api import correct_judgment
+
+        try:
+            return correct_judgment(
+                correct_verdict=body.correct_verdict,
+                reason=body.reason,
+                event_id=body.event_id,
+                case_id=body.case_id,
+                symbol=body.symbol,
+            )
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
     @app.post("/api/learning/teach")
     def learning_teach(body: TeachBody, _: bool = Depends(require_auth)):
         from .learning_api import teach

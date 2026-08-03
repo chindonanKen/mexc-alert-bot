@@ -106,6 +106,31 @@ class TestBeliefEngine(unittest.TestCase):
         self.assertEqual(j["setup"]["verdict"], "no_trade")
         self.assertEqual(j["size_hint"], "none")
         self.assertTrue(j["cite"])
+        self.assertTrue(j.get("self_critique"))
+
+    def test_human_correction_changes_verdict(self):
+        eid = self.store.log_event(
+            self.uid,
+            "mover_peak",
+            "FIX_USDT",
+            "futures",
+            price=10,
+            drop_pct=-8,
+            velocity_band="PANIC",
+            heat_breadth=1,
+        )
+        ev = self.store.recent_events(self.uid, limit=1)[0]
+        j = self.eng.judge_fire(self.uid, ev)
+        cid = self.eng.open_case(self.uid, ev, j)
+        out = self.eng.apply_human_correction(
+            self.uid,
+            case_id=cid,
+            correct_verdict="no_trade",
+            reason="isolated dump not market-wide",
+        )
+        self.assertEqual(out["correct_verdict"], "no_trade")
+        self.assertEqual(out["judgment"]["setup"]["verdict"], "no_trade")
+        self.assertIsNotNone(out["judgment"].get("human_override"))
 
     def test_judge_panic_broad_with_edge(self):
         # train setup cell first

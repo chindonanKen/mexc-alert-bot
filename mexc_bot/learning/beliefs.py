@@ -749,6 +749,73 @@ class BeliefEngine:
 
         needs_human = bool(setup.get("thin") or ticker.get("thin") or verdict == "wait_deeper")
 
+        # Self-critique: agent argues against its own call
+        critique: List[str] = []
+        if setup.get("thin") or n < 5:
+            critique.append(
+                "Thin setup sample — this call is rule+chart heavy, not yet trained on your book."
+            )
+        if ticker.get("thin") or t_n < 3:
+            critique.append(
+                "Thin ticker history — chart personality not proven for you yet."
+            )
+        if band == "PANIC" and hbin == "isolated":
+            critique.append(
+                "PANIC but isolated heat — could be coin-specific wipeout, not market panic."
+            )
+        if band == "GRIND":
+            critique.append(
+                "GRIND dumps often trend; mean-reversion call would be against Rule 2."
+            )
+        if chart.get("vol_flag") == "dry":
+            critique.append(
+                "Dry volume on the dump — big move without participation is a quality hit."
+            )
+        if chart.get("ad_zone") == "shallow" or chart.get("ad_zone") == "shallow_of_typical_AD":
+            critique.append(
+                "Still shallow vs this chart's typical AD — bounce odds may improve deeper."
+            )
+        if chart.get("ad_zone") in ("deep_ext", "deep_extension") and verdict == "no_trade":
+            critique.append(
+                "Deep extension but no_trade — may be missing best panic prices if thesis is AD."
+            )
+        if edge is not None and float(edge) > 0.2 and verdict == "no_trade":
+            critique.append(
+                "Setup edge positive but verdict no_trade — hard rule overrode trained edge; challenge if chart disagrees."
+            )
+        if edge is not None and float(edge) < 0 and verdict in ("take_scout", "take_layers"):
+            critique.append(
+                "Taking while setup edge is negative — only justified if chart/extension is exceptional."
+            )
+        if t_edge is not None and float(ticker.get("exec_edge") or 0) < -0.15:
+            critique.append(
+                "Your exec_edge on this ticker is weak — even good setups may be mis-traded by you here."
+            )
+        if not critique:
+            critique.append(
+                "No major self-conflict detected; still verify invalidation and powder plan."
+            )
+
+        # chart fields for UI/voice (include thesis if present)
+        chart_out = {
+            k: chart.get(k)
+            for k in (
+                "setup_prior",
+                "ad_zone",
+                "ad_depth_ratio",
+                "vol_flag",
+                "rsi_now_5m",
+                "div_bull",
+                "sharp_score",
+                "ok",
+                "thesis",
+                "bias",
+                "regime",
+                "pace",
+            )
+            if chart
+        }
+
         judgment = {
             "event_id": event.get("id"),
             "symbol": event.get("symbol"),
@@ -772,25 +839,214 @@ class BeliefEngine:
                 "thin": setup.get("thin"),
             },
             "ticker": ticker,
-            "chart": {
-                k: chart.get(k)
-                for k in (
-                    "setup_prior",
-                    "ad_zone",
-                    "ad_depth_ratio",
-                    "vol_flag",
-                    "rsi_now_5m",
-                    "div_bull",
-                    "sharp_score",
-                    "ok",
-                )
-                if chart
-            },
+            "chart": chart_out,
             "rules": rules,
             "size_hint": size_hint,
             "cite": cite,
+            "self_critique": critique,
             "confidence": round(conf, 3),
-            "needs_human": needs_human,
+            "needs_human": needs_human or len(critique) >= 2,
+            "human_override": None,
             "agent": "AD-SuperAgent-v1",
         }
         return judgment
+
+    def apply_human_correction(
+        self,
+        user_id: int,
+        *,
+        event_id: Optional[int] = None,
+        case_id: Optional[int] = None,
+        correct_verdict: str,
+        reason: str,
+        adjust_beliefs: bool = True,
+    ) -> Dict[str, Any]:
+        """Owner corrects agent interpretation — stored and optionally nudges edges."""
+        allowed = {
+            "no_trade",
+            "take_scout",
+            "take_layers",
+            "wait_deeper",
+        }
+        cv = (correct_verdict or "").strip().lower()
+        if cv not in allowed:
+            raise ValueError(
+                f"correct_verdict must be one of {sorted(allowed)}"
+            )
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValueError("reason required — teach the agent why")
+
+        with self.store._lock:
+            conn = self._conn()
+            case = None
+            if case_id:
+                case = conn.execute(
+                    "SELECT * FROM agent_cases WHERE id=? AND user_id=?",
+                    (int(case_id), int(user_id)),
+                ).fetchone()
+            elif event_id:
+                case = conn.execute(
+                    """
+                    SELECT * FROM agent_cases WHERE user_id=? AND event_id=?
+                    ORDER BY created_at DESC LIMIT 1
+                    """,
+                    (int(user_id), int(event_id)),
+                ).fetchone()
+            if not case:
+                raise ValueError("No agent case found for correction")
+
+            try:
+                judgment = json.loads(case["judgment_json"] or "{}")
+            except Exception:
+                judgment = {}
+            old_verdict = (judgment.get("setup") or {}).get("verdict")
+            judgment["human_override"] = {
+                "verdict": cv,
+                "reason": reason,
+                "previous_verdict": old_verdict,
+                "ts": time.time(),
+            }
+            if "setup" not in judgment:
+                judgment["setup"] = {}
+            judgment["setup"]["verdict"] = cv
+            judgment["setup"]["verdict_source"] = "human_correction"
+            judgment["self_critique"] = list(judgment.get("self_critique") or []) + [
+                f"HUMAN CORRECTION: was {old_verdict} → {cv}. Why: {reason}"
+            ]
+            # map size
+            size_map = {
+                "no_trade": "none",
+                "wait_deeper": "none",
+                "take_scout": "micro_scout",
+                "take_layers": "full_layers",
+            }
+            judgment["size_hint"] = size_map.get(cv, judgment.get("size_hint"))
+            judgment["needs_human"] = False
+
+            now = time.time()
+            conn.execute(
+                """
+                UPDATE agent_cases SET judgment_json=?, status='corrected', updated_at=?
+                WHERE id=?
+                """,
+                (json.dumps(judgment), now, int(case["id"])),
+            )
+
+            # Persist as lesson with evidence
+            try:
+                self.store.teach_lesson(
+                    int(user_id),
+                    f"Correction on {case['symbol']}: {old_verdict}→{cv}. {reason}",
+                    tags=["human_correction", cv],
+                    needs_approval=False,
+                    source="owner",
+                    evidence_event_ids=[int(case["event_id"])]
+                    if case["event_id"]
+                    else [],
+                )
+            except Exception:
+                pass
+
+            nudged = None
+            if adjust_beliefs and case["event_id"]:
+                ev = conn.execute(
+                    "SELECT * FROM learning_events WHERE id=?",
+                    (int(case["event_id"]),),
+                ).fetchone()
+                if ev:
+                    band = band_norm(ev["velocity_band"])
+                    hbin = heat_bin(ev["heat_breadth"])
+                    dbin = drop_bin(ev["drop_pct"])
+                    # light Bayesian nudge: human says take_layers/scout → count as soft good prior
+                    # human says no_trade/wait → soft bad if agent wanted take
+                    delta_good = 1 if cv in ("take_scout", "take_layers") else 0
+                    delta_bad = 1 if cv in ("no_trade", "wait_deeper") else 0
+                    if old_verdict in ("take_scout", "take_layers") and cv in (
+                        "no_trade",
+                        "wait_deeper",
+                    ):
+                        delta_bad = 1
+                        delta_good = 0
+                    elif old_verdict in ("no_trade", "wait_deeper") and cv in (
+                        "take_scout",
+                        "take_layers",
+                    ):
+                        delta_good = 1
+                        delta_bad = 0
+                    row = conn.execute(
+                        """
+                        SELECT * FROM belief_setup
+                        WHERE user_id=? AND velocity_band=? AND heat_bin=? AND drop_bin=?
+                        """,
+                        (user_id, band, hbin, dbin),
+                    ).fetchone()
+                    if not row:
+                        conn.execute(
+                            """
+                            INSERT INTO belief_setup (
+                                user_id, velocity_band, heat_bin, drop_bin,
+                                n, n_good, n_bad, n_flat, edge, bounce_sum, bounce_n,
+                                last_updated
+                            ) VALUES (?,?,?,?,0,0,0,0,0,0,0,?)
+                            """,
+                            (user_id, band, hbin, dbin, now),
+                        )
+                        row = conn.execute(
+                            """
+                            SELECT * FROM belief_setup
+                            WHERE user_id=? AND velocity_band=? AND heat_bin=? AND drop_bin=?
+                            """,
+                            (user_id, band, hbin, dbin),
+                        ).fetchone()
+                    n = int(row["n"]) + 1
+                    ng = int(row["n_good"]) + delta_good
+                    nb = int(row["n_bad"]) + delta_bad
+                    edge = edge_from_counts(ng, nb, n)
+                    conn.execute(
+                        """
+                        UPDATE belief_setup SET n=?, n_good=?, n_bad=?, edge=?, last_updated=?
+                        WHERE user_id=? AND velocity_band=? AND heat_bin=? AND drop_bin=?
+                        """,
+                        (n, ng, nb, edge, now, user_id, band, hbin, dbin),
+                    )
+                    nudged = {
+                        "setup_key": f"{band}|{hbin}|{dbin}",
+                        "edge": edge,
+                        "n": n,
+                    }
+                    conn.execute(
+                        """
+                        INSERT INTO belief_updates (
+                            user_id, kind, event_id, setup_key, label, delta_edge,
+                            reasons_json, ts
+                        ) VALUES (?,?,?,?,?,?,?,?)
+                        """,
+                        (
+                            user_id,
+                            "human_correction",
+                            int(case["event_id"]),
+                            f"{band}|{hbin}|{dbin}",
+                            cv,
+                            edge,
+                            json.dumps(
+                                {
+                                    "reason": reason,
+                                    "old_verdict": old_verdict,
+                                    "new_verdict": cv,
+                                }
+                            ),
+                            now,
+                        ),
+                    )
+
+        return {
+            "ok": True,
+            "case_id": int(case["id"]),
+            "event_id": case["event_id"],
+            "previous_verdict": old_verdict,
+            "correct_verdict": cv,
+            "reason": reason,
+            "judgment": judgment,
+            "belief_nudge": nudged,
+        }
