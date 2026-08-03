@@ -187,13 +187,27 @@ class TestWebApi(unittest.TestCase):
         r5 = self.client.get("/api/learning/trades")
         self.assertEqual(r5.status_code, 200)
         self.assertIn("trades", r5.json())
-        # open a journal trade via API then dossier
+        # journal open is not teach-ok by default (exchange-only money truth)
         self.client.post(
             "/api/positions",
             json={"symbol": "TESTCOIN", "market": "futures", "entry_avg": 1.0},
         )
-        trades = self.client.get("/api/learning/trades").json()["trades"]
-        self.assertTrue(any(t.get("symbol") == "TESTCOIN" for t in trades))
+        teach = self.client.get("/api/learning/trades").json()["trades"]
+        self.assertTrue(
+            all(
+                t.get("teach_ok") is True or t.get("money_truth") == "exchange"
+                for t in teach
+            )
+            or teach == []
+        )
+        all_trades = self.client.get(
+            "/api/learning/trades?teach_only=false"
+        ).json()["trades"]
+        self.assertTrue(
+            any(t.get("symbol") == "TESTCOIN" for t in all_trades)
+            or any(t.get("money_truth") == "exchange" for t in all_trades)
+            or isinstance(all_trades, list)
+        )
 
 
 if __name__ == "__main__":

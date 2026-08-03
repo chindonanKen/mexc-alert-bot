@@ -856,21 +856,27 @@ def create_app() -> FastAPI:
     @app.get("/api/learning/trades")
     def learning_trades(
         closed_only: bool = Query(False),
+        open_only: bool = Query(False),
         symbol: Optional[str] = Query(None),
         limit: int = Query(30, ge=1, le=100),
+        teach_only: bool = Query(True),
         _: bool = Depends(require_auth),
     ):
         from .learning_api import trades_api
 
         try:
             return trades_api(
-                closed_only=closed_only, symbol=symbol, limit=limit
+                closed_only=closed_only,
+                open_only=open_only,
+                symbol=symbol,
+                limit=limit,
+                teach_only=teach_only,
             )
         except Exception as e:
             raise HTTPException(400, str(e))
 
     @app.get("/api/learning/trades/{trade_id}")
-    def learning_trade_one(trade_id: int, _: bool = Depends(require_auth)):
+    def learning_trade_one(trade_id: str, _: bool = Depends(require_auth)):
         from .learning_api import trade_api
 
         try:
@@ -879,7 +885,7 @@ def create_app() -> FastAPI:
             raise HTTPException(400, str(e))
 
     class TagTradeBody(BaseModel):
-        trade_id: int
+        trade_id: str
         behavior: Optional[str] = None
         notes: Optional[str] = None
 
