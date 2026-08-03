@@ -1,42 +1,58 @@
 # Session handoff — pick up here
 
-**Last updated:** 2026-08-02 (AD Desk learning + coach spine)  
+**Last updated:** 2026-08-03 (platform baseline; **learning plan wiped**)  
 **GitHub:** `chindonanKen/mexc-alert-bot` · branch `main`  
-**Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md) · [TRADING_STRATEGY.md](TRADING_STRATEGY.md) · [V2_BETA.md](V2_BETA.md) · [V4_TRADING_ASSISTANT.md](V4_TRADING_ASSISTANT.md)
+**Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md) · [TRADING_STRATEGY.md](TRADING_STRATEGY.md)
 
 This file is a **dated snapshot** so the next human/agent (including a **new MacBook + new Grok session**) does not rediscover the same ground.
+
+---
+
+## Product baseline (what works — trust this)
+
+Owner assessment accepted **2026-08-03**. Do **not** pretend Learning is a finished product.
+
+| Surface | Status |
+|---------|--------|
+| **Positions** | **Solid** — best part of AD Desk (exchange money truth, opens/closes, layers) |
+| **Targets / movers** | **Solid** — shared DB with Telegram sensors/alarms |
+| **Overview** | **Partial** — useful; not a full command center |
+| **Learning / coach / Agent tab** | **Not a holistic product** — plumbing exists; plan **wiped clean** (see below) |
 
 ### Two products (do not blur)
 
 | Product | Role |
 |---------|------|
 | **Telegram alarm bot** | Sensors + push for targets/movers — **leave as-is** |
-| **AD Desk** | Independent **learning + coach + voice** platform; works without Telegram open |
+| **AD Desk** | Desk UI over same SQLite + MEXC private reads; **not** “full learning platform” until a new plan is written |
 
-Shared SQLite is plumbing (same book/fires). Learning UX is desk-only. Future multi-device alarms come from desk (`/api/notify/stub` placeholder).
+Shared SQLite is plumbing. Owner: `DESK_USER_ID=8630949601`.
 
-### AD Super-Agent (real learning loop)
+---
 
-- **Beliefs:** `belief_setup` (band×heat×drop edges) + `belief_ticker` (setup_edge + exec_edge) update from outcomes and trade closes — not tag theater
-- **judge_fire:** structured verdict (no_trade / take_scout / take_layers) with cites of n+edge
-- **Chart features:** OHLCV sharpness, AD depth zone, volume expand/dry, RSI + bullish div (soft-fail)
-- **Cases:** active training case on Agent tab; voice tools: judge_fire, belief_*, record_process, coach_ask
-- Auto engagement + dossiers still support the loop; process tags update **exec** edge
-- UI nav: **Agent** (not label farm)
-- Owner: `DESK_USER_ID=8630949601`
-- Tests: `test_super_agent.py` + learning suite
+## Learning plan — WIPED (do not continue old roadmap)
 
-### AD Desk (explore fully)
+**Effective immediately:** all prior **active** learning build plans are cancelled for planning purposes:
+
+- L1–L5 “learning environment” ship order in AGENTS.md  
+- Super-Agent / belief / coach UX as the current delivery goal  
+- Assumed “desk = complete teach loop without Telegram” as **done**
+
+**What remains (assets, not a product plan):**
+- MEXC private fill/position truth (`money_truth`, `teach_ok`, `LEARNING_TEACH_SINCE`)
+- Tables / APIs / voice tools in code — may be reused later  
+- Do **not** expand Learning UI or coach “spine” until owner writes a **new** learning goal
+
+**Next time Learning is in scope:** start from Positions + real MEXC data + a single clear loop. New plan only when owner asks.
+
+---
+
+## AD Desk ops (still true)
 
 - **No sound-file upload.** Mic needs HTTPS secure context.
-- **Dual entry (aligned with droplet Grok HTTP guide):**
-  - `./scripts/desk_up.sh` → `http://IP:8080/?token=…` — UI + text agent (mic blocked)
-  - `./scripts/desk_https_up.sh` → same + `https://IP/` for mic (openssl IP-SAN cert + Caddy)
-- Accept self-signed cert once (Advanced → Proceed); allow microphone.
-- Requires `.env`: `DESK_API_TOKEN`, `DESK_USER_ID`, `XAI_API_KEY`
-- HTTPS fix: dropped flaky Caddy `tls internal`; use `scripts/desk_gen_certs.sh` + mount `deploy/caddy/certs`.
-- **Voice:** mic → ffmpeg WAV → xAI STT → grok tools. Rebuild desk after pull.
-- DO cloud firewall must allow **8080** (HTTP) and **443** (HTTPS mic).
+- Dual entry: `./scripts/desk_up.sh` (HTTP) · `./scripts/desk_https_up.sh` (HTTPS mic)
+- Requires `.env`: `DESK_API_TOKEN`, `DESK_USER_ID`, `XAI_API_KEY` (voice)
+- DO firewall: **8080** + **443**
 
 ---
 
