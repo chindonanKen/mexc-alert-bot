@@ -288,6 +288,13 @@ body::before {
   color: var(--mute);
   padding: 0.15rem 0;
 }
+.cmd-pos-under {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--cyan, #7dd3fc);
+  margin-top: 0.2rem;
+  opacity: 0.95;
+}
 .cite-list {
   margin: 0.5rem 0 0;
   padding-left: 1.1rem;

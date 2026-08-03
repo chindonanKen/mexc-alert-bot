@@ -1138,9 +1138,18 @@ class EventStore:
                 WHERE user_id = ?
                 ORDER BY ts DESC LIMIT ?
                 """,
-                (user_id, max(1, min(limit, 100))),
+                (user_id, max(1, min(limit, 500))),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def fills_for_symbol(
+        self, user_id: int, symbol: str, *, limit: int = 500
+    ) -> List[dict]:
+        """All fills for a symbol (any underscore/compact form)."""
+        from .engagement import symbols_match
+
+        rows = self.recent_fills(user_id, limit=limit)
+        return [r for r in rows if symbols_match(symbol, r.get("symbol") or "")]
 
     def symbols_for_fill_sync(self, user_id: int) -> List[str]:
         """Symbols from open journal + recent events (spot-ish form)."""

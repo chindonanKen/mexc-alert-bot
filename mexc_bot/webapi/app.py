@@ -205,35 +205,89 @@ def create_app() -> FastAPI:
             logger.debug("counts: %s", e)
 
         alerts = actions.list_alerts(uid) if uid else []
-        # Top 3 targets: enabled first, then by id (stable). Noise cut for Overview.
-        enabled = [a for a in alerts if a.get("enabled")]
-        disabled = [a for a in alerts if not a.get("enabled")]
-        top_targets = (enabled + disabled)[:3]
+        now_ts = time.time()
+        hour_ago = now_ts - 3600
 
         recent_events = (
             db.fetch_all(
                 """
-                SELECT id, source, symbol, market, drop_pct, velocity_band, mode, ts, price
-                FROM learning_events WHERE user_id = ? ORDER BY ts DESC LIMIT 40
+                SELECT id, source, symbol, market, drop_pct, velocity_band, mode, ts, price,
+                       ref_price, heat_breadth
+                FROM learning_events WHERE user_id = ? ORDER BY ts DESC LIMIT 80
                 """,
                 (uid,),
             )
             if uid
             else []
         )
-        # Top 3 movers: deepest recent dumps, prefer PANIC/FAST
-        def _mover_score(e: dict) -> float:
-            drop = abs(float(e.get("drop_pct") or 0))
-            band = (e.get("velocity_band") or "").upper()
-            boost = 3.0 if band == "PANIC" else 1.5 if band == "FAST" else 0.0
-            return drop + boost
 
-        mover_like = [
+        # Overview TARGETS = latest *fired* target alerts (not static armed list)
+        target_fires = [
             e
             for e in recent_events
-            if (e.get("source") or "").startswith("mover") or e.get("drop_pct") is not None
+            if (e.get("source") or "") in ("target", "target_fire", "price_target")
+            or (
+                (e.get("source") or "").startswith("target")
+            )
         ]
-        top_movers = sorted(mover_like, key=_mover_score, reverse=True)[:3]
+        # also accept source containing target
+        if not target_fires:
+            target_fires = [
+                e for e in recent_events if "target" in (e.get("source") or "").lower()
+            ]
+        # dedupe by symbol keep newest
+        seen_t = set()
+        top_targets = []
+        for e in target_fires:
+            sk = (e.get("symbol") or "").upper()
+            if sk in seen_t:
+                continue
+            seen_t.add(sk)
+            e = dict(e)
+            e["fired_at"] = e.get("ts")
+            e["age_seconds"] = now_ts - float(e.get("ts") or now_ts)
+            top_targets.append(e)
+            if len(top_targets) >= 5:
+                break
+
+        # Overview MOVERS = fires in last 1h, sorted by largest move (abs drop%)
+        mover_1h = []
+        for e in recent_events:
+            ts = float(e.get("ts") or 0)
+            if ts < hour_ago:
+                continue
+            src = e.get("source") or ""
+            if not (src.startswith("mover") or e.get("drop_pct") is not None):
+                if "target" in src.lower():
+                    continue
+            if "target" in src.lower():
+                continue
+            row = dict(e)
+            row["fired_at"] = ts
+            row["age_seconds"] = now_ts - ts
+            row["move_1h_pct"] = abs(float(e.get("drop_pct") or 0))
+            mover_1h.append(row)
+        # if few in 1h, widen to 6h but still sort by move
+        if len(mover_1h) < 3:
+            for e in recent_events:
+                ts = float(e.get("ts") or 0)
+                if ts < now_ts - 6 * 3600:
+                    continue
+                src = e.get("source") or ""
+                if "target" in src.lower():
+                    continue
+                if not (src.startswith("mover") or e.get("drop_pct") is not None):
+                    continue
+                if any(x.get("id") == e.get("id") for x in mover_1h):
+                    continue
+                row = dict(e)
+                row["fired_at"] = ts
+                row["age_seconds"] = now_ts - ts
+                row["move_1h_pct"] = abs(float(e.get("drop_pct") or 0))
+                mover_1h.append(row)
+        top_movers = sorted(
+            mover_1h, key=lambda x: float(x.get("move_1h_pct") or 0), reverse=True
+        )[:5]
 
         # Book = only symbols you care about: targets + movers watchlist + open positions
         book_syms: set = set()
@@ -264,6 +318,33 @@ def create_app() -> FastAPI:
         positions = actions.list_positions(uid) if uid else []
         for p in positions:
             _add_book_sym(p.get("symbol") or "")
+
+        def _pos_for(sym: str) -> Optional[dict]:
+            if not sym:
+                return None
+            key = sym.upper().replace("_", "")
+            for p in positions:
+                pk = (p.get("symbol") or "").upper().replace("_", "")
+                if pk == key or key in pk or pk in key:
+                    return {
+                        "id": p.get("id"),
+                        "symbol": p.get("symbol"),
+                        "entry": p.get("entry_display") or p.get("entry_avg"),
+                        "mark": p.get("mark_price"),
+                        "upnl_pct": p.get("upnl_pct"),
+                        "upnl_usd_est": p.get("upnl_usd_est"),
+                        "size_remaining": p.get("size_remaining"),
+                        "hold_hours": p.get("hold_hours"),
+                        "n_buys": p.get("n_buys"),
+                        "n_sells": p.get("n_sells"),
+                        "change_24h_pct": p.get("change_24h_pct"),
+                    }
+            return None
+
+        for row in top_targets:
+            row["position"] = _pos_for(row.get("symbol") or "")
+        for row in top_movers:
+            row["position"] = _pos_for(row.get("symbol") or "")
 
         def _in_book(sym: str, title: str = "") -> bool:
             """True only if news/intel touches a book symbol (target/mover/position)."""
@@ -307,7 +388,6 @@ def create_app() -> FastAPI:
         book_intel = [i for i in recent_inv if _in_book(i.get("symbol") or "")][:6]
 
         # Recent only (48h) — and only book-linked. No filler headlines.
-        now_ts = time.time()
         news_horizon = now_ts - 48 * 3600
         news_rows = db.fetch_all(
             """

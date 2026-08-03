@@ -202,6 +202,25 @@ class TestBeliefEngine(unittest.TestCase):
         self.assertFalse(f.get("ok"))
 
 
+class TestReconstructFills(unittest.TestCase):
+    def test_avg_cost_after_partial_sells(self):
+        from mexc_bot.learning.trades import reconstruct_open_from_fills
+
+        fills = [
+            {"symbol": "AAAUSDT", "side": "buy", "price": 10.0, "qty": 10, "ts": 100},
+            {"symbol": "AAAUSDT", "side": "buy", "price": 12.0, "qty": 10, "ts": 200},
+            {"symbol": "AAAUSDT", "side": "sell", "price": 14.0, "qty": 5, "ts": 300},
+            {"symbol": "AAAUSDT", "side": "buy", "price": 11.0, "qty": 5, "ts": 400},
+        ]
+        # After: bought 10@10 + 10@12 = 20 @11 avg, sell 5 → 15 left @11, buy 5@11 → 20 @11
+        r = reconstruct_open_from_fills(fills, symbol="AAAUSDT", market="spot")
+        self.assertTrue(r["is_open"])
+        self.assertAlmostEqual(r["size_remaining"], 20.0, places=5)
+        self.assertAlmostEqual(r["entry_avg"], 11.0, places=5)
+        self.assertEqual(r["n_buys"], 3)
+        self.assertEqual(r["n_sells"], 1)
+
+
 class TestFatalNewsJudge(unittest.TestCase):
     def test_hard_fatal_forces_no_trade(self):
         from mexc_bot.learning.fatal_news import apply_fatal_to_verdict

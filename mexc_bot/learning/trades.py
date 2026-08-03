@@ -47,11 +47,15 @@ def fills_for_trade(
     market: str,
     opened_at: Optional[float],
     closed_at: Optional[float],
+    all_history: bool = False,
 ) -> Dict[str, List[dict]]:
-    """Split fills into buy/sell layers overlapping the trade window."""
+    """Split fills into buy/sell layers.
+
+    Default: window around journal open/close.
+    ``all_history=True``: every fill for the symbol (for correct size/avg).
+    """
     o = _f(opened_at) or 0.0
     c = _f(closed_at) or (time.time() + 1)
-    # slack before open for late-synced fills
     win_start = o - 120
     win_end = c + 120
     buys: List[dict] = []
@@ -60,12 +64,14 @@ def fills_for_trade(
         if not symbols_match(symbol, f.get("symbol") or ""):
             continue
         fm = (f.get("market") or "").lower()
-        if market and fm and fm != market.lower():
-            # still allow if market blank
-            if fm not in ("", market.lower()):
+        if market and fm and fm not in ("", market.lower()):
+            # spot fills often market=spot; journal may say futures for stock perps
+            if market.lower() == "futures" and fm == "spot":
+                pass  # allow spot fills for desk journal rows
+            elif fm not in ("", market.lower()):
                 continue
         ts = _f(f.get("ts")) or 0.0
-        if ts < win_start or ts > win_end:
+        if not all_history and (ts < win_start or ts > win_end):
             continue
         side = (f.get("side") or "").lower()
         layer = {
@@ -74,6 +80,7 @@ def fills_for_trade(
             "ts": ts,
             "side": side,
             "exchange_trade_id": f.get("exchange_trade_id"),
+            "quote_qty": _f(f.get("quote_qty")),
         }
         if side in ("buy", "long", "bid"):
             buys.append(layer)
@@ -82,6 +89,76 @@ def fills_for_trade(
     buys.sort(key=lambda x: x.get("ts") or 0)
     sells.sort(key=lambda x: x.get("ts") or 0)
     return {"buys": buys, "sells": sells}
+
+
+def reconstruct_open_from_fills(
+    fills: Sequence[dict],
+    *,
+    symbol: str,
+    market: str = "spot",
+) -> Dict[str, Any]:
+    """Walk full fill history (avg-cost) → remaining qty, avg entry, all layers.
+
+    Accounts for historic buys/sells so size is not just the latest buys.
+    """
+    layers = fills_for_trade(
+        fills,
+        symbol=symbol,
+        market=market,
+        opened_at=0,
+        closed_at=time.time() + 1,
+        all_history=True,
+    )
+    all_fills: List[dict] = []
+    for b in layers["buys"]:
+        all_fills.append({**b, "side": "buy"})
+    for s in layers["sells"]:
+        all_fills.append({**s, "side": "sell"})
+    all_fills.sort(key=lambda x: x.get("ts") or 0)
+
+    qty = 0.0
+    cost = 0.0  # notional of remaining inventory (avg-cost)
+    first_open_ts: Optional[float] = None
+    last_fill_ts: Optional[float] = None
+    for f in all_fills:
+        q = _f(f.get("qty")) or 0.0
+        p = _f(f.get("price")) or 0.0
+        if q <= 0 or p <= 0:
+            continue
+        last_fill_ts = _f(f.get("ts"))
+        side = (f.get("side") or "").lower()
+        if side == "buy":
+            cost += p * q
+            qty += q
+            if first_open_ts is None and qty > 0:
+                first_open_ts = last_fill_ts
+        elif side == "sell":
+            if qty <= 0:
+                continue
+            sell_q = min(qty, q)
+            avg = cost / qty if qty > 0 else p
+            cost -= avg * sell_q
+            qty -= sell_q
+            if qty <= 1e-12:
+                qty = 0.0
+                cost = 0.0
+                first_open_ts = None
+    avg_entry = (cost / qty) if qty > 1e-12 else None
+    return {
+        "symbol": symbol,
+        "market": market,
+        "size_remaining": qty if qty > 1e-12 else 0.0,
+        "entry_avg": avg_entry,
+        "buy_orders": layers["buys"],
+        "sell_orders": layers["sells"],
+        "n_buys": len(layers["buys"]),
+        "n_sells": len(layers["sells"]),
+        "first_open_ts": first_open_ts,
+        "last_fill_ts": last_fill_ts,
+        "total_bought_qty": sum(_f(b.get("qty")) or 0 for b in layers["buys"]),
+        "total_sold_qty": sum(_f(s.get("qty")) or 0 for s in layers["sells"]),
+        "is_open": qty > 1e-12,
+    }
 
 
 def link_events(

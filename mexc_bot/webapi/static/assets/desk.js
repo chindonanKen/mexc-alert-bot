@@ -316,6 +316,29 @@
       }
     }
 
+    function posUnder(pos) {
+      if (!pos) return "";
+      const up = pos.upnl_pct;
+      const upS =
+        up != null
+          ? `<span class="${up >= 0 ? "up" : "dn"}">${up >= 0 ? "+" : ""}${Number(
+              up
+            ).toFixed(1)}%</span>`
+          : "—";
+      return `<div class="cmd-pos-under">pos avg ${
+        pos.entry != null ? fmtPx(pos.entry) : "—"
+      } · mark ${pos.mark != null ? fmtPx(pos.mark) : "—"} · ${upS}${
+        pos.size_remaining != null ? " · qty " + Number(pos.size_remaining).toFixed(2) : ""
+      }${pos.hold_hours != null ? " · " + pos.hold_hours + "h" : ""}</div>`;
+    }
+
+    function ageLabel(sec) {
+      if (sec == null || isNaN(sec)) return "";
+      if (sec < 60) return Math.round(sec) + "s ago";
+      if (sec < 3600) return Math.round(sec / 60) + "m ago";
+      return (sec / 3600).toFixed(1) + "h ago";
+    }
+
     const tt = h.top_targets || [];
     $("#ovTopTargets").innerHTML = tt.length
       ? tt
@@ -325,16 +348,17 @@
               <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
               <div>
                 <div class="cmd-sym">${a.symbol}</div>
-                <div class="cmd-meta">${(a.market || "spot").toUpperCase()} · ${
-              a.enabled ? "armed" : "off"
+                <div class="cmd-meta">${(a.market || "spot").toString().slice(0, 1).toUpperCase()} · fired ${
+              ageLabel(a.age_seconds) || fmtTime(a.fired_at || a.ts)
             }</div>
+                ${posUnder(a.position)}
               </div>
             </div>
             <div class="cmd-px">${fmtPx(a.price)}</div>
           </div>`
           )
           .join("")
-      : rankEmpty("No targets");
+      : rankEmpty("No target fires yet");
 
     const tm = h.top_movers || [];
     $("#ovTopMovers").innerHTML = tm.length
@@ -345,39 +369,64 @@
               <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
               <div>
                 <div class="cmd-sym">${e.symbol}</div>
-                <div class="cmd-meta">${e.velocity_band || e.mode || "mover"}</div>
+                <div class="cmd-meta">${e.velocity_band || e.mode || "mover"} · ${
+              ageLabel(e.age_seconds) || fmtTime(e.fired_at || e.ts)
+            }</div>
+                ${posUnder(e.position)}
               </div>
             </div>
             <div class="cmd-px dn">${
-              e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—"
+              e.drop_pct != null
+                ? Number(e.drop_pct).toFixed(1) + "%"
+                : e.move_1h_pct != null
+                  ? Number(e.move_1h_pct).toFixed(1) + "%"
+                  : "—"
             }</div>
           </div>`
           )
           .join("")
-      : rankEmpty("No recent fires");
+      : rankEmpty("No mover fires in last hours");
 
     const pos = h.positions || d.positions || [];
     $("#ovPos").innerHTML = pos.length
       ? pos
-          .map(
-            (p, i) => `<div class="cmd-row pos">
+          .map((p, i) => {
+            const entry = p.entry_display != null ? p.entry_display : p.entry_avg;
+            const up = p.upnl_pct;
+            const upS =
+              up != null
+                ? `<span class="${up >= 0 ? "up" : "dn"}">${
+                    up >= 0 ? "+" : ""
+                  }${Number(up).toFixed(1)}%</span>`
+                : "—";
+            return `<div class="cmd-row pos">
             <div class="cmd-row-main">
               <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
               <div>
                 <div class="cmd-sym">${p.symbol}</div>
-                <div class="cmd-meta">${(p.notes || "").slice(0, 32) || "—"}</div>
+                <div class="cmd-meta">avg ${
+                  entry != null ? fmtPx(entry) : "—"
+                } · mark ${
+                  p.mark_price != null ? fmtPx(p.mark_price) : "—"
+                } · ${upS}</div>
+                <div class="cmd-meta">qty ${
+                  p.size_remaining != null
+                    ? Number(p.size_remaining).toFixed(2)
+                    : "—"
+                } · B${p.n_buys || 0}/S${p.n_sells || 0} · ${
+              p.hold_hours != null ? p.hold_hours + "h" : ""
+            }${
+              p.upnl_usd_est != null
+                ? " · ~$" + Number(p.upnl_usd_est).toFixed(0)
+                : ""
+            }</div>
               </div>
             </div>
             <div class="cmd-side">
-              <div class="cmd-px">${
-                p.entry_avg != null ? fmtPx(p.entry_avg) : "—"
-              }</div>
-              <div class="cmd-meta">${
-                p.open_hours != null ? p.open_hours + "h" : fmtTime(p.opened_at)
-              }</div>
+              <div class="cmd-px">${upS}</div>
             </div>
-          </div>`
-          )
+          </div>`;
+          })
           .join("")
       : rankEmpty("No open positions");
 

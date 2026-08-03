@@ -87,7 +87,8 @@ class FillSyncPoller:
             symbols = {"BTCUSDT", "ETHUSDT"}
         new_rows: List[dict] = []
         for sym in list(symbols)[:40]:
-            trades = self.client.get_my_trades(sym, limit=30)
+            # Pull max history available per request (MEXC cap 100)
+            trades = self.client.get_my_trades(sym, limit=100)
             for tr in trades:
                 row = trade_to_fill_row(tr, self.user_id)
                 if not row:
