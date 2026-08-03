@@ -48,7 +48,7 @@
         </div>
       </header>
 
-      <!-- OVERVIEW — Needs you · Targets · Movers · Positions -->
+      <!-- OVERVIEW -->
       <section class="view on" id="view-overview">
         <div id="ovNeedsYou" class="ov-needs-you" hidden></div>
         <div id="ovBookNews" class="ov-book-news" hidden></div>
@@ -60,7 +60,6 @@
             </header>
             <div id="ovTopTargets" class="cmd-list"></div>
           </article>
-
           <article class="cmd-panel cmd-movers">
             <header class="cmd-h">
               <h3>Biggest moves ~1h</h3>
@@ -68,7 +67,6 @@
             </header>
             <div id="ovTopMovers" class="cmd-list"></div>
           </article>
-
           <article class="cmd-panel cmd-positions">
             <header class="cmd-h">
               <h3>Open positions</h3>
@@ -134,46 +132,75 @@
         </div>
       </section>
 
-      <!-- LEARNING V1 — you teach the agent -->
+      <!-- LEARNING — trade-first teaching -->
       <section class="view" id="view-memory">
-        <p class="learn-lede mute">You teach. The agent stores. Voice uses the same tools.</p>
+        <p class="learn-lede">
+          <strong>How to use:</strong> pick a trade (or fire) → teach about <em>that</em> trade → agent stores the lesson with symbol/context.
+          Voice: “teach me about SYN — plan_ok, sized small on first layer.”
+        </p>
+
         <div id="ovNeedsYouLearn" class="panel learn-pending-panel" hidden>
           <header class="panel-h">
-            <h3>Pending answers</h3>
+            <h3>1 · Pending — answer about a fire</h3>
             <span class="badge quiet" id="learnPendingBadge">0</span>
           </header>
           <div id="learnPending" class="scroll learn-block"></div>
         </div>
-        <div class="learn-v1-grid">
-          <div class="panel">
-            <header class="panel-h"><h3>Teach the agent</h3></header>
+
+        <div class="learn-holistic">
+          <div class="panel learn-pick-panel">
+            <header class="panel-h">
+              <h3>2 · Pick what you’re teaching about</h3>
+              <span class="badge quiet" id="learnStatsBadge">—</span>
+            </header>
+            <div id="learnStats" class="learn-stats-line mute"></div>
+            <div class="learn-tabs">
+              <button type="button" class="btn soft sm learn-tab on" data-learn-tab="trades">Trades</button>
+              <button type="button" class="btn soft sm learn-tab" data-learn-tab="fires">Fires</button>
+            </div>
+            <div id="learnTradeList" class="scroll learn-block tall"></div>
+            <div id="learnFireList" class="scroll learn-block tall" hidden></div>
+          </div>
+
+          <div class="panel learn-teach-panel">
+            <header class="panel-h"><h3>3 · Teach about selection</h3></header>
+            <div id="learnContextBar" class="learn-context empty">
+              Select a trade or fire on the left — then write the lesson.
+            </div>
+            <div id="learnContextDetail" class="learn-context-detail" hidden></div>
             <form id="teachForm" class="form-col">
-              <textarea name="text" rows="3" placeholder="Rule, process note, size discipline… (agent stores this)" required></textarea>
-              <button class="btn" type="submit">Save lesson</button>
+              <input type="hidden" name="entity_key" id="teachEntityKey" value="" />
+              <input type="hidden" name="symbol" id="teachSymbol" value="" />
+              <input type="hidden" name="market" id="teachMarket" value="" />
+              <input type="hidden" name="event_id" id="teachEventId" value="" />
+              <input type="hidden" name="context_type" id="teachContextType" value="" />
+              <div class="learn-chips" id="learnBehaviorChips" aria-label="Process tags">
+                <button type="button" class="chip" data-beh="plan_ok">plan_ok</button>
+                <button type="button" class="chip" data-beh="greed">greed</button>
+                <button type="button" class="chip" data-beh="fomo">fomo</button>
+                <button type="button" class="chip" data-beh="hesitant">hesitant</button>
+                <button type="button" class="chip" data-beh="pride">pride</button>
+                <button type="button" class="chip" data-beh="rule_break">rule_break</button>
+                <button type="button" class="chip" data-beh="process_skip">process_skip</button>
+              </div>
+              <textarea name="text" id="teachText" rows="4" placeholder="What should the agent remember about THIS trade/fire? (process, size, timing…)" required></textarea>
+              <div class="row-gap">
+                <button class="btn" type="submit" id="teachSubmit" disabled>Save lesson on selection</button>
+                <button class="btn soft" type="button" id="teachClear">Clear selection</button>
+              </div>
             </form>
           </div>
-          <div class="panel">
-            <header class="panel-h">
-              <h3>What I’ve learned</h3>
-              <button type="button" class="btn soft sm" id="btnWhatLearned">Refresh</button>
-            </header>
-            <pre id="whatLearnedReply" class="learn-recall scroll"></pre>
-            <div id="learnLessons" class="learn-lessons-list mt"></div>
-          </div>
         </div>
+
         <div class="panel mt">
           <header class="panel-h">
-            <h3>Recent</h3>
-            <span class="badge quiet" id="learnStatsBadge">stats</span>
+            <h3>4 · What the agent has learned</h3>
+            <button type="button" class="btn soft sm" id="btnWhatLearned">Refresh</button>
           </header>
-          <div id="learnStats" class="learn-stats-line mute"></div>
-          <div id="learnRecent" class="scroll learn-block tall mt"></div>
-        </div>
-        <div class="panel mt">
-          <header class="panel-h"><h3>Ask the agent</h3></header>
-          <form id="agentRecallForm" class="form-row">
+          <div id="learnLessons" class="learn-lessons-list"></div>
+          <form id="agentRecallForm" class="form-row mt">
             <input name="question" placeholder="What have you learned so far?" class="grow" />
-            <button class="btn soft" type="submit">Ask</button>
+            <button class="btn soft" type="submit">Ask agent</button>
           </form>
           <pre id="agentRecallReply" class="learn-recall scroll mt"></pre>
         </div>
@@ -197,7 +224,7 @@
         </div>
       </section>
 
-      <!-- VOICE log (controls in dock) -->
+      <!-- VOICE log -->
       <section class="view" id="view-voice">
         <div class="panel clean voice-panel">
           <div id="secureBox" class="secure-box" hidden></div>
@@ -251,7 +278,6 @@
     </div>
   </div>
 
-  <!-- Global voice dock -->
   <div id="voiceDock" class="voice-dock" aria-label="Grok voice call">
     <div class="voice-dock-inner">
       <div class="voice-dock-brand">

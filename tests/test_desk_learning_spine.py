@@ -381,9 +381,11 @@ class TestDeskSurfacesStructural(unittest.TestCase):
         self.assertIn("ovAgentLearned", html)
         self.assertIn("ovBookIntel", html)
         self.assertIn("teachForm", html)
-        self.assertIn("whatLearnedReply", html)
+        self.assertIn("learnTradeList", html)
+        self.assertIn("learnContextBar", html)
         self.assertIn("learnPending", html)
         self.assertIn("agentRecallForm", html)
+        self.assertIn("teachForm", html)
         self.assertIn("navLearnBadge", html)
         self.assertIn("navLearning", html)
 

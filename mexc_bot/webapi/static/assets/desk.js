@@ -864,6 +864,61 @@
     );
   }
 
+  // Learning V1 — trade-first teaching context
+  state.learnSel = null; // { type, symbol, market, entity_key, event_id, label, detail }
+  state.learnBehaviors = [];
+
+  function setLearnSelection(sel) {
+    state.learnSel = sel;
+    state.learnBehaviors = [];
+    $$(".chip", $("#learnBehaviorChips")).forEach((c) =>
+      c.classList.remove("on")
+    );
+    const bar = $("#learnContextBar");
+    const det = $("#learnContextDetail");
+    const sub = $("#teachSubmit");
+    const ek = $("#teachEntityKey");
+    const sy = $("#teachSymbol");
+    const mk = $("#teachMarket");
+    const ev = $("#teachEventId");
+    const ct = $("#teachContextType");
+    if (!sel) {
+      if (bar) {
+        bar.className = "learn-context empty";
+        bar.textContent =
+          "Select a trade or fire on the left — then write the lesson.";
+      }
+      if (det) {
+        det.hidden = true;
+        det.innerHTML = "";
+      }
+      if (sub) sub.disabled = true;
+      if (ek) ek.value = "";
+      if (sy) sy.value = "";
+      if (mk) mk.value = "";
+      if (ev) ev.value = "";
+      if (ct) ct.value = "";
+      $$(".learn-pick").forEach((el) => el.classList.remove("selected"));
+      return;
+    }
+    if (bar) {
+      bar.className = "learn-context on";
+      bar.innerHTML = `<strong>Teaching about:</strong> ${escHtml(
+        sel.label
+      )}`;
+    }
+    if (det) {
+      det.hidden = false;
+      det.innerHTML = escHtml(sel.detail || "");
+    }
+    if (sub) sub.disabled = false;
+    if (ek) ek.value = sel.entity_key || "";
+    if (sy) sy.value = sel.symbol || "";
+    if (mk) mk.value = sel.market || "";
+    if (ev) ev.value = sel.event_id != null ? String(sel.event_id) : "";
+    if (ct) ct.value = sel.type || "";
+  }
+
   async function loadMemory() {
     let bundle = {};
     try {
@@ -873,19 +928,20 @@
       return;
     }
     const needs = bundle.needs_you || {};
-    const pending = (needs.pending_questions || bundle.pending_questions || []).slice(0, 2);
+    const pending = (needs.pending_questions || bundle.pending_questions || []).slice(
+      0,
+      2
+    );
     const lessons = bundle.lessons || [];
     const stats = bundle.stats || {};
     const fires = bundle.fires || [];
     const trades = bundle.trades || [];
-    const learned =
-      bundle.what_learned_reply || bundle.agent_summary || "";
     updateLearningNavBadge(needs.count != null ? needs.count : pending.length);
 
-    // Pending
+    // 1 Pending
     const wrap = $("#ovNeedsYouLearn");
     const pb = $("#learnPendingBadge");
-    if (pb) pb.textContent = String(pending.length);
+    if (pb) pb.textContent = String(needs.count != null ? needs.count : pending.length);
     if (wrap) wrap.hidden = pending.length === 0;
     const pendEl = $("#learnPending");
     if (pendEl) {
@@ -896,22 +952,40 @@
               const band =
                 q.velocity_band || (q.event && q.event.velocity_band) || "—";
               const drop =
-                q.drop_pct != null
-                  ? Number(q.drop_pct).toFixed(1) + "%"
-                  : "—";
+                q.drop_pct != null ? Number(q.drop_pct).toFixed(1) + "%" : "—";
               const px = q.fire_price != null ? q.fire_price : "—";
+              const eid = q.event_id || (q.event && q.event.id) || "";
               return `<div class="learn-card rich">
-                <div class="learn-card-h">${sym} · ${band} · ${drop} @ ${px}</div>
+                <div class="learn-card-h">${escHtml(sym)} · ${escHtml(
+                band
+              )} · ${drop} @ ${escHtml(String(px))}</div>
                 <div class="learn-card-meta">${fmtTime(
                   q.fire_ts || q.created_at
+                )} · fire #${eid || "—"}</div>
+                <div class="learn-card-t">${escHtml(
+                  (q.question || "Took or skip?").slice(0, 200)
                 )}</div>
-                <div class="learn-card-t">${escHtml((q.question || "Took or skip?").slice(0, 200))}</div>
                 <div class="row-gap mt">
-                  <button type="button" class="btn sm" data-pq="${q.id}" data-act="took">Took</button>
-                  <button type="button" class="btn soft sm" data-pq="${q.id}" data-act="skip">Skip</button>
-                  <button type="button" class="btn soft sm" data-pq="${q.id}" data-act="partial">Partial</button>
-                  <button type="button" class="btn soft sm" data-pq="${q.id}" data-act="late">Late</button>
-                  <button type="button" class="btn soft sm" data-pq-dismiss="${q.id}">Dismiss</button>
+                  <button type="button" class="btn sm" data-pq="${
+                    q.id
+                  }" data-act="took">Took</button>
+                  <button type="button" class="btn soft sm" data-pq="${
+                    q.id
+                  }" data-act="skip">Skip</button>
+                  <button type="button" class="btn soft sm" data-pq="${
+                    q.id
+                  }" data-act="partial">Partial</button>
+                  <button type="button" class="btn soft sm" data-pq="${
+                    q.id
+                  }" data-act="late">Late</button>
+                  <button type="button" class="btn soft sm" data-teach-fire="${
+                    eid
+                  }" data-sym="${escHtml(sym)}" data-mkt="${escHtml(
+                (q.market || (q.event && q.event.market) || "futures").toString()
+              )}">Teach about this fire</button>
+                  <button type="button" class="btn soft sm" data-pq-dismiss="${
+                    q.id
+                  }">Dismiss</button>
                 </div>
               </div>`;
             })
@@ -928,7 +1002,7 @@
                 answer_text: "desk",
               }),
             });
-            toast("Saved");
+            toast("Engagement saved");
             loadMemory();
           } catch (err) {
             toast(err.message);
@@ -951,33 +1025,23 @@
           }
         })
       );
+      $$("[data-teach-fire]", pendEl).forEach((b) =>
+        b.addEventListener("click", () => {
+          setLearnSelection({
+            type: "fire",
+            symbol: b.dataset.sym,
+            market: b.dataset.mkt || "futures",
+            entity_key: "",
+            event_id: b.dataset.teachFire ? +b.dataset.teachFire : null,
+            label: `FIRE ${b.dataset.sym} (#${b.dataset.teachFire || "?"})`,
+            detail: "Pending fire — teach process / take-skip reasoning",
+          });
+          toast("Selected fire — write the lesson on the right");
+        })
+      );
     }
 
-    // What I've learned
-    const wl = $("#whatLearnedReply");
-    if (wl) {
-      // Single recall surface: mono block only when we have text and lessons
-      if (lessons.length) {
-        wl.textContent = learned || "";
-        wl.hidden = !learned;
-      } else {
-        wl.textContent = "";
-        wl.hidden = true;
-      }
-    }
-    const lesEl = $("#learnLessons");
-    if (lesEl) {
-      lesEl.innerHTML = lessons.length
-        ? lessons
-            .map(
-              (l) =>
-                `<div class="learn-lesson">· ${(l.text || "").slice(0, 200)}</div>`
-            )
-            .join("")
-        : "";
-    }
-
-    // Stats + recent
+    // 2 Trade list
     const stEl = $("#learnStats");
     const stB = $("#learnStatsBadge");
     if (stEl) {
@@ -985,67 +1049,247 @@
         stats.took || 0
       } · skip ${stats.skip || 0} · lessons ${lessons.length}`;
     }
-    if (stB) stB.textContent = `${stats.events || 0} fires`;
+    if (stB) stB.textContent = `${(trades || []).length} trades`;
 
-    const recent = $("#learnRecent");
-    if (recent) {
-      const tradeCards = (trades || []).slice(0, 8).map((t) => {
+    const tradeList = $("#learnTradeList");
+    if (tradeList) {
+      const list = trades || [];
+      tradeList.innerHTML = list.length
+        ? list
+            .map((t, i) => {
+              const pnl = t.pnl_pct;
+              const pnlS =
+                pnl != null
+                  ? `<span class="${pnl >= 0 ? "up" : "dn"}">${
+                      pnl >= 0 ? "+" : ""
+                    }${Number(pnl).toFixed(1)}%</span>`
+                  : t.status || "—";
+              const ek = t.entity_key || t.id || `t${i}`;
+              const layers = `B${t.n_buys || 0}/S${t.n_sells || 0}`;
+              const sel =
+                state.learnSel &&
+                state.learnSel.entity_key === String(ek)
+                  ? " selected"
+                  : "";
+              return `<div class="learn-card rich learn-pick${sel}" data-pick-trade="${escHtml(
+                String(ek)
+              )}" data-i="${i}">
+                <div class="learn-card-h">${escHtml(t.symbol)} · ${escHtml(
+                (t.market || "?").toString().slice(0, 1).toUpperCase()
+              )} · ${pnlS}</div>
+                <div class="learn-card-meta">${escHtml(
+                  t.status || ""
+                )} · ${layers} · ${escHtml(
+                t.money_truth || ""
+              )} · ${fmtTime(t.closed_at || t.opened_at)}</div>
+                <div class="row-gap mt">
+                  <button type="button" class="btn sm" data-pick-trade-btn="${escHtml(
+                    String(ek)
+                  )}" data-i="${i}">Teach about this trade</button>
+                </div>
+              </div>`;
+            })
+            .join("")
+        : rankEmpty("No teach_ok trades yet — Positions feed this list");
+      const pickTrade = (i) => {
+        const t = list[i];
+        if (!t) return;
         const pnl = t.pnl_pct;
-        const pnlS =
-          pnl != null
-            ? `<span class="${pnl >= 0 ? "up" : "dn"}">${
-                pnl >= 0 ? "+" : ""
-              }${Number(pnl).toFixed(1)}%</span>`
-            : t.status || "—";
-        return `<div class="learn-card rich">
-          <div class="learn-card-h">${t.symbol} · ${
-          (t.market || "").toString().slice(0, 1).toUpperCase()
-        } · ${pnlS}</div>
-          <div class="learn-card-meta">${t.status} · B${t.n_buys || 0}/S${
-          t.n_sells || 0
-        } · ${t.money_truth || "—"} · ${fmtTime(
-          t.closed_at || t.opened_at
-        )}</div>
-        </div>`;
-      });
-      const fireCards = (fires || []).slice(0, 10).map((e) => {
-        return `<div class="learn-card">
-          <div class="learn-card-h">#${e.id} ${e.symbol} · ${
-          e.velocity_band || "—"
-        } · ${
-          e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—"
-        }</div>
-          <div class="learn-card-meta">${fmtTime(e.ts)} · action ${
-          e.last_action || "—"
-        }</div>
-        </div>`;
-      });
-      recent.innerHTML =
-        (tradeCards.length
-          ? tradeCards.join("")
-          : rankEmpty("No teach_ok trades yet")) +
-        (fireCards.length
-          ? `<div class="learn-sep">Recent fires</div>` + fireCards.slice(0, 6).join("")
-          : "");
+        const detail = [
+          t.status,
+          t.entry_avg != null ? "entry " + t.entry_avg : "",
+          t.exit_avg != null ? "exit " + t.exit_avg : "",
+          t.pnl_usd != null ? "$" + t.pnl_usd : "",
+          `layers B${t.n_buys || 0}/S${t.n_sells || 0}`,
+          t.money_truth || "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        setLearnSelection({
+          type: "trade",
+          symbol: t.symbol,
+          market: t.market || "futures",
+          entity_key: String(t.entity_key || t.id || ""),
+          event_id: t.primary_event_id || null,
+          label: `${t.symbol} ${(t.market || "").toString()} · ${
+            t.status
+          } · ${pnl != null ? (pnl >= 0 ? "+" : "") + Number(pnl).toFixed(1) + "%" : "—"}`,
+          detail,
+        });
+        $$(".learn-pick", tradeList).forEach((el) =>
+          el.classList.toggle("selected", el.dataset.i === String(i))
+        );
+      };
+      $$("[data-pick-trade-btn]", tradeList).forEach((b) =>
+        b.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          pickTrade(+b.dataset.i);
+        })
+      );
+      $$("[data-pick-trade]", tradeList).forEach((el) =>
+        el.addEventListener("click", () => pickTrade(+el.dataset.i))
+      );
+    }
+
+    const fireList = $("#learnFireList");
+    if (fireList) {
+      fireList.innerHTML = (fires || []).length
+        ? fires
+            .slice(0, 20)
+            .map((e, i) => {
+              return `<div class="learn-card learn-pick" data-pick-fire="${e.id}" data-i="${i}">
+                <div class="learn-card-h">#${e.id} ${escHtml(
+                e.symbol
+              )} · ${escHtml(e.velocity_band || "—")} · ${
+                e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—"
+              }</div>
+                <div class="learn-card-meta">${fmtTime(e.ts)} · ${escHtml(
+                e.market || ""
+              )} · action ${escHtml(e.last_action || "—")}</div>
+                <div class="row-gap mt">
+                  <button type="button" class="btn sm" data-pick-fire-btn="${
+                    e.id
+                  }" data-i="${i}">Teach about this fire</button>
+                </div>
+              </div>`;
+            })
+            .join("")
+        : rankEmpty("No recent fires");
+      const fl = fires || [];
+      const pickFire = (i) => {
+        const e = fl[i];
+        if (!e) return;
+        setLearnSelection({
+          type: "fire",
+          symbol: e.symbol,
+          market: e.market || "futures",
+          entity_key: "",
+          event_id: e.id,
+          label: `FIRE ${e.symbol} #${e.id} · ${e.velocity_band || ""} · ${
+            e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : ""
+          }`,
+          detail: `Fire @ ${e.price ?? "—"} · ${fmtTime(e.ts)} · action ${
+            e.last_action || "unlabeled"
+          }`,
+        });
+      };
+      $$("[data-pick-fire-btn]", fireList).forEach((b) =>
+        b.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          pickFire(+b.dataset.i);
+        })
+      );
+    }
+
+    // 4 Lessons with about context
+    const lesEl = $("#learnLessons");
+    if (lesEl) {
+      lesEl.innerHTML = lessons.length
+        ? lessons
+            .map((l) => {
+              const tags = (() => {
+                try {
+                  return JSON.parse(l.tags_json || "[]");
+                } catch (_) {
+                  return l.tags || [];
+                }
+              })();
+              const symTag = (tags || []).find(
+                (x) => typeof x === "string" && x.startsWith("sym:")
+              );
+              const about = symTag
+                ? symTag.slice(4)
+                : (l.text || "").startsWith("[")
+                  ? "linked"
+                  : "general";
+              return `<div class="learn-lesson">
+                <span class="learn-about">${escHtml(about)}</span>
+                ${escHtml((l.text || "").slice(0, 220))}
+              </div>`;
+            })
+            .join("")
+        : rankEmpty(
+            "No lessons yet. Select a trade → teach about it → Save lesson."
+          );
+    }
+
+    // restore selection highlight after re-render
+    if (state.learnSel && state.learnSel.entity_key) {
+      setLearnSelection(state.learnSel);
     }
   }
 
   function wireLearningForms() {
+    // tabs
+    $$(".learn-tab").forEach((tab) => {
+      if (tab.dataset.bound) return;
+      tab.dataset.bound = "1";
+      tab.addEventListener("click", () => {
+        $$(".learn-tab").forEach((t) => t.classList.remove("on"));
+        tab.classList.add("on");
+        const which = tab.dataset.learnTab;
+        const tl = $("#learnTradeList");
+        const fl = $("#learnFireList");
+        if (tl) tl.hidden = which !== "trades";
+        if (fl) fl.hidden = which !== "fires";
+      });
+    });
+
+    // behavior chips
+    const chips = $("#learnBehaviorChips");
+    if (chips && !chips.dataset.bound) {
+      chips.dataset.bound = "1";
+      chips.addEventListener("click", (ev) => {
+        const b = ev.target.closest("[data-beh]");
+        if (!b) return;
+        const code = b.dataset.beh;
+        b.classList.toggle("on");
+        if (b.classList.contains("on")) {
+          if (!state.learnBehaviors.includes(code))
+            state.learnBehaviors.push(code);
+        } else {
+          state.learnBehaviors = state.learnBehaviors.filter((x) => x !== code);
+        }
+      });
+    }
+
+    const clear = $("#teachClear");
+    if (clear && !clear.dataset.bound) {
+      clear.dataset.bound = "1";
+      clear.addEventListener("click", () => setLearnSelection(null));
+    }
+
     const tf = $("#teachForm");
     if (tf && !tf.dataset.bound) {
       tf.dataset.bound = "1";
       tf.addEventListener("submit", async (ev) => {
         ev.preventDefault();
-        const fd = new FormData(tf);
-        const text = (fd.get("text") || "").toString().trim();
+        const text = ($("#teachText") && $("#teachText").value.trim()) || "";
         if (!text) return;
+        const sel = state.learnSel;
+        if (!sel || !sel.symbol) {
+          toast("Select a trade or fire first — lessons must attach to something");
+          return;
+        }
         try {
           await api("/api/learning/teach", {
             method: "POST",
-            body: JSON.stringify({ text }),
+            body: JSON.stringify({
+              text,
+              symbol: sel.symbol,
+              market: sel.market,
+              entity_key: sel.entity_key || null,
+              event_id: sel.event_id || null,
+              context_type: sel.type || null,
+              behaviors: state.learnBehaviors || [],
+            }),
           });
-          toast("Lesson saved for the agent");
-          tf.reset();
+          toast(`Lesson saved on ${sel.symbol}`);
+          if ($("#teachText")) $("#teachText").value = "";
+          state.learnBehaviors = [];
+          $$(".chip", $("#learnBehaviorChips")).forEach((c) =>
+            c.classList.remove("on")
+          );
           loadMemory();
         } catch (e) {
           toast(e.message);
@@ -1063,7 +1307,9 @@
       af.addEventListener("submit", async (ev) => {
         ev.preventDefault();
         const fd = new FormData(af);
-        const question = (fd.get("question") || "What have you learned so far?").toString();
+        const question = (
+          fd.get("question") || "What have you learned so far?"
+        ).toString();
         try {
           const r = await api("/api/learning/ask", {
             method: "POST",

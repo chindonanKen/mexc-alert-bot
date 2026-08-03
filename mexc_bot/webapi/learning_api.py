@@ -698,17 +698,67 @@ def teach(
     tags: Optional[List[str]] = None,
     needs_approval: bool = False,
     user_id: Optional[int] = None,
+    symbol: Optional[str] = None,
+    market: Optional[str] = None,
+    entity_key: Optional[str] = None,
+    event_id: Optional[int] = None,
+    behaviors: Optional[List[str]] = None,
+    context_type: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """Store a lesson, preferably bound to a trade or fire (holistic teaching)."""
     uid = int(user_id or uid_or_raise())
+    body = (text or "").strip()
+    if not body:
+        return {"ok": False, "error": "empty"}
+
+    tag_list: List[str] = list(tags or [])
+    for b in behaviors or []:
+        if b and b not in tag_list:
+            tag_list.append(str(b))
+    if symbol:
+        tag_list.append(f"sym:{str(symbol).upper()}")
+    if market:
+        tag_list.append(f"mkt:{str(market).lower()}")
+    if entity_key:
+        tag_list.append(f"ek:{entity_key}")
+    if context_type:
+        tag_list.append(f"ctx:{context_type}")
+    if event_id:
+        tag_list.append(f"ev:{int(event_id)}")
+
+    # Prefix so recall always shows which trade/fire this is about
+    about = ""
+    if symbol:
+        about = f"[{str(symbol).upper()}"
+        if market:
+            about += f" {str(market).lower()}"
+        if context_type:
+            about += f" · {context_type}"
+        if behaviors:
+            about += f" · {','.join(behaviors)}"
+        about += "] "
+    full_text = about + body
+
+    evid = list(evidence_ids or [])
+    if event_id and int(event_id) not in evid:
+        evid.append(int(event_id))
+
     lid = event_store().teach_lesson(
         uid,
-        text,
-        tags=tags,
+        full_text,
+        tags=tag_list,
         needs_approval=bool(needs_approval),
-        source="owner" if not needs_approval else "coach",
-        evidence_event_ids=evidence_ids or [],
+        source="owner",
+        evidence_event_ids=evid,
     )
-    return {"ok": bool(lid), "lesson_id": lid}
+    return {
+        "ok": bool(lid),
+        "lesson_id": lid,
+        "symbol": symbol,
+        "entity_key": entity_key,
+        "event_id": event_id,
+        "text": full_text,
+    }
 
 
 def answer_question(

@@ -181,7 +181,70 @@ body::before {
 .ov-needs-row:first-of-type { border-top: 0; padding-top: 0; }
 .ov-needs-q { font-size: 0.9rem; line-height: 1.35; margin-bottom: 0.4rem; }
 .ov-agent-learned { margin-top: 1rem; }
-.learn-lede { margin: 0 0 0.85rem; font-size: 0.85rem; max-width: 36rem; }
+.learn-lede { margin: 0 0 0.85rem; font-size: 0.85rem; max-width: 48rem; line-height: 1.45; }
+.learn-holistic {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 0.85rem;
+  align-items: start;
+}
+@media (max-width: 960px) {
+  .learn-holistic { grid-template-columns: 1fr; }
+}
+.learn-tabs { display: flex; gap: 0.35rem; margin: 0.35rem 0 0.55rem; }
+.learn-tab.on { border-color: var(--cyan, #7dd3fc); color: var(--cyan, #7dd3fc); }
+.learn-pick { cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+.learn-pick:hover { border-color: rgba(125, 211, 252, 0.35); }
+.learn-pick.selected {
+  border-color: var(--cyan, #7dd3fc);
+  background: rgba(125, 211, 252, 0.08);
+}
+.learn-context {
+  font-size: 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  margin-bottom: 0.55rem;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(0,0,0,0.2);
+}
+.learn-context.empty { color: var(--mute); }
+.learn-context.on {
+  border-color: rgba(125, 211, 252, 0.4);
+  color: inherit;
+}
+.learn-context-detail {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--mute);
+  margin: -0.25rem 0 0.55rem;
+  padding: 0 0.15rem;
+}
+.learn-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.45rem; }
+.chip {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.28rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: transparent;
+  color: var(--mute);
+  cursor: pointer;
+}
+.chip.on {
+  border-color: var(--mint, #34d399);
+  color: var(--mint, #34d399);
+  background: rgba(52, 211, 153, 0.12);
+}
+.learn-about {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--cyan, #7dd3fc);
+  margin-right: 0.4rem;
+}
 .learn-v1-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

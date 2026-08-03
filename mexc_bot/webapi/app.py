@@ -111,6 +111,12 @@ class TeachBody(BaseModel):
     text: str = ""
     tags: Optional[List[str]] = None
     needs_approval: bool = False
+    symbol: Optional[str] = None
+    market: Optional[str] = None
+    entity_key: Optional[str] = None
+    event_id: Optional[int] = None
+    behaviors: Optional[List[str]] = None
+    context_type: Optional[str] = None  # trade | fire
 
 
 class ApproveBody(BaseModel):
@@ -847,6 +853,12 @@ def create_app() -> FastAPI:
                 body.text,
                 tags=body.tags,
                 needs_approval=bool(body.needs_approval),
+                symbol=body.symbol,
+                market=body.market,
+                entity_key=body.entity_key,
+                event_id=body.event_id,
+                behaviors=body.behaviors,
+                context_type=body.context_type,
             )
         except Exception as e:
             raise HTTPException(400, str(e))

@@ -594,9 +594,18 @@ TOOL_DEFS = [
     ),
     _tool(
         "teach",
-        "Save a durable trading lesson to desk memory",
+        "Save a durable lesson ABOUT a trade or fire. Always pass symbol (+ entity_key or event_id) when teaching a specific trade.",
         {
             "text": {"type": "string"},
+            "symbol": {"type": "string"},
+            "market": {"type": "string"},
+            "entity_key": {"type": "string"},
+            "event_id": {"type": "integer"},
+            "behaviors": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "context_type": {"type": "string"},
             "needs_approval": {"type": "boolean"},
             "tags": {"type": "array", "items": {"type": "string"}},
         },
@@ -836,6 +845,12 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 str(args.get("text") or ""),
                 tags=args.get("tags"),
                 needs_approval=bool(args.get("needs_approval")),
+                symbol=args.get("symbol"),
+                market=args.get("market"),
+                entity_key=args.get("entity_key"),
+                event_id=args.get("event_id"),
+                behaviors=args.get("behaviors"),
+                context_type=args.get("context_type"),
             )
         if name == "learning_stats":
             from .learning_v1 import learning_home_v1

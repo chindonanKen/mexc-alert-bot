@@ -158,7 +158,8 @@ class TestWebApi(unittest.TestCase):
         self.assertIn("AD Desk", r.text)
         self.assertIn("ovNeedsYou", r.text)
         self.assertIn("teachForm", r.text)
-        self.assertIn("whatLearnedReply", r.text)
+        self.assertIn("learnTradeList", r.text)
+        self.assertIn("learnContextBar", r.text)
         self.assertIn("ovAgentLearned", r.text)
 
     def test_learning_endpoints(self):
