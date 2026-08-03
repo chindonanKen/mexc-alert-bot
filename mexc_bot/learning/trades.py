@@ -91,16 +91,9 @@ def fills_for_trade(
     return {"buys": buys, "sells": sells}
 
 
-def reconstruct_open_from_fills(
-    fills: Sequence[dict],
-    *,
-    symbol: str,
-    market: str = "spot",
-) -> Dict[str, Any]:
-    """Walk full fill history (avg-cost) → remaining qty, avg entry, all layers.
-
-    Accounts for historic buys/sells so size is not just the latest buys.
-    """
+def _all_fills_chronological(
+    fills: Sequence[dict], *, symbol: str, market: str
+) -> List[dict]:
     layers = fills_for_trade(
         fills,
         symbol=symbol,
@@ -115,49 +108,219 @@ def reconstruct_open_from_fills(
     for s in layers["sells"]:
         all_fills.append({**s, "side": "sell"})
     all_fills.sort(key=lambda x: x.get("ts") or 0)
+    return all_fills
 
+
+def segment_positions_from_fills(
+    fills: Sequence[dict],
+    *,
+    symbol: str,
+    market: str = "spot",
+) -> List[Dict[str, Any]]:
+    """Split fill history into discrete position entities.
+
+    When inventory hits zero after sells, that cycle CLOSES as its own trade
+    (success/miss on realized PnL). Next buy starts a new position.
+    Returns newest-first.
+    """
+    all_fills = _all_fills_chronological(fills, symbol=symbol, market=market)
+    positions: List[Dict[str, Any]] = []
     qty = 0.0
-    cost = 0.0  # notional of remaining inventory (avg-cost)
-    first_open_ts: Optional[float] = None
-    last_fill_ts: Optional[float] = None
+    cost = 0.0
+    cycle_buys: List[dict] = []
+    cycle_sells: List[dict] = []
+    opened_at: Optional[float] = None
+    realized_quote = 0.0  # sell proceeds this cycle
+    sold_qty_cycle = 0.0
+    bought_qty_cycle = 0.0
+    bought_cost_cycle = 0.0  # total buy notional this cycle (for full-cycle avg)
+
+    def _close_cycle(closed_at: float) -> None:
+        nonlocal qty, cost, cycle_buys, cycle_sells, opened_at
+        nonlocal realized_quote, sold_qty_cycle, bought_qty_cycle, bought_cost_cycle
+        if not cycle_buys and not cycle_sells:
+            return
+        entry_avg = (
+            (bought_cost_cycle / bought_qty_cycle) if bought_qty_cycle > 1e-12 else None
+        )
+        exit_avg = (
+            (realized_quote / sold_qty_cycle) if sold_qty_cycle > 1e-12 else None
+        )
+        pnl_pct = None
+        pnl_usd = None
+        if entry_avg and exit_avg and entry_avg > 0 and sold_qty_cycle > 0:
+            # realized on closed portion: sell proceeds - cost basis of sold qty
+            # cost basis of sold = entry_avg * sold (avg-cost assumption for full close)
+            cost_basis = entry_avg * sold_qty_cycle
+            pnl_usd = realized_quote - cost_basis
+            pnl_pct = (exit_avg - entry_avg) / entry_avg * 100.0
+        hold_s = None
+        if opened_at is not None:
+            hold_s = max(0.0, closed_at - opened_at)
+        outcome = "flat"
+        if pnl_pct is not None:
+            if pnl_pct > 0.5:
+                outcome = "success"
+            elif pnl_pct < -0.5:
+                outcome = "miss"
+        positions.append(
+            {
+                "symbol": symbol,
+                "market": market,
+                "status": "closed",
+                "opened_at": opened_at,
+                "closed_at": closed_at,
+                "hold_seconds": hold_s,
+                "hold_hours": round(hold_s / 3600.0, 2) if hold_s is not None else None,
+                "entry_avg": entry_avg,
+                "exit_avg": exit_avg,
+                "entry_display": entry_avg,
+                "size_remaining": 0.0,
+                "size_qty": bought_qty_cycle,
+                "size_sold": sold_qty_cycle,
+                "buy_orders": list(cycle_buys),
+                "sell_orders": list(cycle_sells),
+                "n_buys": len(cycle_buys),
+                "n_sells": len(cycle_sells),
+                "realized_pnl_pct": round(pnl_pct, 3) if pnl_pct is not None else None,
+                "realized_pnl_usd": round(pnl_usd, 4) if pnl_usd is not None else None,
+                "outcome": outcome,
+                "is_open": False,
+                "recon_from_fills": True,
+                "entity_key": f"{symbol}:{int(opened_at or 0)}-{int(closed_at)}",
+            }
+        )
+        cycle_buys = []
+        cycle_sells = []
+        opened_at = None
+        realized_quote = 0.0
+        sold_qty_cycle = 0.0
+        bought_qty_cycle = 0.0
+        bought_cost_cycle = 0.0
+        qty = 0.0
+        cost = 0.0
+
     for f in all_fills:
         q = _f(f.get("qty")) or 0.0
         p = _f(f.get("price")) or 0.0
+        ts = _f(f.get("ts")) or 0.0
         if q <= 0 or p <= 0:
             continue
-        last_fill_ts = _f(f.get("ts"))
         side = (f.get("side") or "").lower()
         if side == "buy":
+            if qty <= 1e-12:
+                # new cycle
+                opened_at = ts
+                cycle_buys = []
+                cycle_sells = []
+                realized_quote = 0.0
+                sold_qty_cycle = 0.0
+                bought_qty_cycle = 0.0
+                bought_cost_cycle = 0.0
             cost += p * q
             qty += q
-            if first_open_ts is None and qty > 0:
-                first_open_ts = last_fill_ts
+            bought_qty_cycle += q
+            bought_cost_cycle += p * q
+            cycle_buys.append(f)
         elif side == "sell":
-            if qty <= 0:
+            if qty <= 1e-12:
+                # sell with no inventory — skip orphan
                 continue
             sell_q = min(qty, q)
             avg = cost / qty if qty > 0 else p
             cost -= avg * sell_q
             qty -= sell_q
+            # record full sell fill on this cycle (display)
+            cycle_sells.append(f)
+            realized_quote += p * sell_q
+            sold_qty_cycle += sell_q
             if qty <= 1e-12:
-                qty = 0.0
-                cost = 0.0
-                first_open_ts = None
-    avg_entry = (cost / qty) if qty > 1e-12 else None
+                _close_cycle(ts)
+
+    # open remainder
+    if qty > 1e-12 and cycle_buys:
+        entry_avg = cost / qty if qty > 0 else None
+        positions.append(
+            {
+                "symbol": symbol,
+                "market": market,
+                "status": "open",
+                "opened_at": opened_at,
+                "closed_at": None,
+                "hold_seconds": (time.time() - opened_at) if opened_at else None,
+                "hold_hours": (
+                    round((time.time() - opened_at) / 3600.0, 2) if opened_at else None
+                ),
+                "entry_avg": entry_avg,
+                "exit_avg": None,
+                "entry_display": entry_avg,
+                "size_remaining": qty,
+                "size_qty": bought_qty_cycle,
+                "size_sold": sold_qty_cycle,
+                "buy_orders": list(cycle_buys),
+                "sell_orders": list(cycle_sells),
+                "n_buys": len(cycle_buys),
+                "n_sells": len(cycle_sells),
+                "realized_pnl_pct": None,
+                "realized_pnl_usd": None,
+                "outcome": "open",
+                "is_open": True,
+                "recon_from_fills": True,
+                "entity_key": f"{symbol}:open:{int(opened_at or 0)}",
+            }
+        )
+
+    # newest first
+    positions.sort(
+        key=lambda x: float(x.get("closed_at") or x.get("opened_at") or 0),
+        reverse=True,
+    )
+    return positions
+
+
+def reconstruct_open_from_fills(
+    fills: Sequence[dict],
+    *,
+    symbol: str,
+    market: str = "spot",
+) -> Dict[str, Any]:
+    """Current open inventory only (latest cycle). Prefer segment_positions_from_fills."""
+    segs = segment_positions_from_fills(fills, symbol=symbol, market=market)
+    for s in segs:
+        if s.get("is_open"):
+            return {
+                "symbol": symbol,
+                "market": market,
+                "size_remaining": s.get("size_remaining") or 0.0,
+                "entry_avg": s.get("entry_avg"),
+                "buy_orders": s.get("buy_orders") or [],
+                "sell_orders": s.get("sell_orders") or [],
+                "n_buys": s.get("n_buys") or 0,
+                "n_sells": s.get("n_sells") or 0,
+                "first_open_ts": s.get("opened_at"),
+                "last_fill_ts": (s.get("buy_orders") or s.get("sell_orders") or [{}])[
+                    -1
+                ].get("ts")
+                if (s.get("buy_orders") or s.get("sell_orders"))
+                else None,
+                "total_bought_qty": s.get("size_qty"),
+                "total_sold_qty": s.get("size_sold"),
+                "is_open": True,
+            }
     return {
         "symbol": symbol,
         "market": market,
-        "size_remaining": qty if qty > 1e-12 else 0.0,
-        "entry_avg": avg_entry,
-        "buy_orders": layers["buys"],
-        "sell_orders": layers["sells"],
-        "n_buys": len(layers["buys"]),
-        "n_sells": len(layers["sells"]),
-        "first_open_ts": first_open_ts,
-        "last_fill_ts": last_fill_ts,
-        "total_bought_qty": sum(_f(b.get("qty")) or 0 for b in layers["buys"]),
-        "total_sold_qty": sum(_f(s.get("qty")) or 0 for s in layers["sells"]),
-        "is_open": qty > 1e-12,
+        "size_remaining": 0.0,
+        "entry_avg": None,
+        "buy_orders": [],
+        "sell_orders": [],
+        "n_buys": 0,
+        "n_sells": 0,
+        "first_open_ts": None,
+        "last_fill_ts": None,
+        "total_bought_qty": 0.0,
+        "total_sold_qty": 0.0,
+        "is_open": False,
     }
 
 

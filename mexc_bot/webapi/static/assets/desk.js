@@ -390,7 +390,7 @@
     const pos = h.positions || d.positions || [];
     $("#ovPos").innerHTML = pos.length
       ? pos
-          .map((p, i) => {
+          .map((p) => {
             const entry = p.entry_display != null ? p.entry_display : p.entry_avg;
             const up = p.upnl_pct;
             const upS =
@@ -401,21 +401,18 @@
                 : "—";
             return `<div class="cmd-row pos">
             <div class="cmd-row-main">
-              <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
               <div>
                 <div class="cmd-sym">${p.symbol}</div>
                 <div class="cmd-meta">avg ${
                   entry != null ? fmtPx(entry) : "—"
                 } · mark ${
                   p.mark_price != null ? fmtPx(p.mark_price) : "—"
-                } · ${upS}</div>
+                }</div>
                 <div class="cmd-meta">qty ${
                   p.size_remaining != null
                     ? Number(p.size_remaining).toFixed(2)
                     : "—"
-                } · B${p.n_buys || 0}/S${p.n_sells || 0} · ${
-              p.hold_hours != null ? p.hold_hours + "h" : ""
-            }${
+                } · ${p.hold_hours != null ? p.hold_hours + "h" : ""}${
               p.upnl_usd_est != null
                 ? " · ~$" + Number(p.upnl_usd_est).toFixed(0)
                 : ""
@@ -473,82 +470,188 @@
     }
   }
 
+  function posOutcomeBadge(p) {
+    const o = (p.outcome || p.status || "").toLowerCase();
+    if (o === "open" || p.status === "open") {
+      return `<span class="pos-outcome open">OPEN</span>`;
+    }
+    if (o === "success") return `<span class="pos-outcome success">WIN</span>`;
+    if (o === "miss") return `<span class="pos-outcome miss">MISS</span>`;
+    return `<span class="pos-outcome flat">FLAT</span>`;
+  }
+
+  function posPnlClass(p, isOpen) {
+    if (isOpen) {
+      const u = p.upnl_pct;
+      if (u == null) return "mute";
+      return u >= 0 ? "up" : "dn";
+    }
+    const o = (p.outcome || "").toLowerCase();
+    if (o === "success") return "up";
+    if (o === "miss") return "dn";
+    return "mute"; // flat band — not green on +0.2%
+  }
+
+  function posPnlLine(p) {
+    const isOpen = p.status === "open" || p.is_open;
+    const cls = posPnlClass(p, isOpen);
+    if (isOpen) {
+      const upnl = p.upnl_pct;
+      if (upnl == null) return `<span class="mute">—</span>`;
+      return `<span class="${cls}">${upnl >= 0 ? "+" : ""}${Number(upnl).toFixed(1)}%</span>`;
+    }
+    const rp = p.realized_pnl_pct;
+    if (rp == null) return `<span class="mute">—</span>`;
+    return `<span class="${cls}">${rp >= 0 ? "+" : ""}${Number(rp).toFixed(1)}%</span>`;
+  }
+
+  function posMarketPill(m) {
+    const x = (m || "").toLowerCase();
+    if (x === "futures") return `<span class="pos-mkt fut">FUT</span>`;
+    if (x === "spot") return `<span class="pos-mkt spot">SPOT</span>`;
+    return `<span class="pos-mkt">?</span>`;
+  }
+
+  function posCardHtml(p) {
+    const isOpen = p.status === "open" || p.is_open;
+    const entry = p.entry_display != null ? p.entry_display : p.entry_avg;
+    const exit_ = p.exit_avg;
+    const mark = p.mark_price;
+    const pnlS = posPnlLine(p);
+    const usd =
+      isOpen && p.upnl_usd_est != null
+        ? `<span class="pos-usd">~$${Number(p.upnl_usd_est).toFixed(0)}</span>`
+        : !isOpen && p.realized_pnl_usd != null
+          ? `<span class="pos-usd">$${Number(p.realized_pnl_usd).toFixed(0)}</span>`
+          : "";
+    const when = isOpen
+      ? p.hold_hours != null
+        ? p.hold_hours >= 24
+          ? (p.hold_hours / 24).toFixed(1) + "d held"
+          : p.hold_hours + "h held"
+        : ""
+      : p.closed_ago_seconds != null
+        ? "closed " +
+          (function () {
+            const sec = p.closed_ago_seconds;
+            if (sec < 60) return Math.round(sec) + "s ago";
+            if (sec < 3600) return Math.round(sec / 60) + "m ago";
+            if (sec < 86400) return (sec / 3600).toFixed(1) + "h ago";
+            return (sec / 86400).toFixed(1) + "d ago";
+          })()
+        : p.hold_hours != null
+          ? "held " + p.hold_hours + "h"
+          : "";
+    const sizeBit = isOpen
+      ? p.size_remaining != null
+        ? "qty " + Number(p.size_remaining).toFixed(2)
+        : "qty —"
+      : p.size_qty != null
+        ? "sz " + Number(p.size_qty).toFixed(2)
+        : "sz —";
+    const buys = (p.buy_orders || [])
+      .map(
+        (o) =>
+          `<div class="pos-fill buy">BUY ${
+            o.price != null ? fmtPx(o.price) : "—"
+          } × ${o.qty != null ? o.qty : "—"} · ${fmtTime(o.ts)}</div>`
+      )
+      .join("");
+    const sells = (p.sell_orders || [])
+      .map(
+        (o) =>
+          `<div class="pos-fill sell">SELL ${
+            o.price != null ? fmtPx(o.price) : "—"
+          } × ${o.qty != null ? o.qty : "—"} · ${fmtTime(o.ts)}</div>`
+      )
+      .join("");
+    const canCloseJournal =
+      isOpen && p.journal_id != null && Number(p.journal_id) > 0;
+    const priceDetail = isOpen
+      ? `avg ${entry != null ? fmtPx(entry) : "—"} · mark ${
+          mark != null ? fmtPx(mark) : "—"
+        }`
+      : `in ${entry != null ? fmtPx(entry) : "—"} → out ${
+          exit_ != null ? fmtPx(exit_) : "—"
+        }`;
+    return `<details class="pos-card ${isOpen ? "is-open" : "is-closed"} outcome-${
+      (p.outcome || "flat").toLowerCase()
+    }">
+      <summary class="pos-sum">
+        <span class="pos-sym">${p.symbol}</span>
+        ${posOutcomeBadge(p)}
+        <span class="pos-pnl">${pnlS}${usd ? " " + usd : ""}</span>
+        <span class="pos-when">${when}</span>
+        <span class="pos-size">${sizeBit}</span>
+        ${posMarketPill(p.market)}
+        <span class="pos-chev" aria-hidden="true">▾</span>
+      </summary>
+      <div class="pos-detail">
+        <div class="learn-card-meta">${priceDetail} · ${
+      isOpen ? "opened" : "cycle"
+    } ${fmtTime(p.opened_at)}${
+      p.closed_at ? " → " + fmtTime(p.closed_at) : ""
+    }</div>
+        <div class="learn-card-meta">bought ${p.size_qty ?? "—"} / sold ${
+      p.size_sold ?? "—"
+    } · ${p.n_buys || 0} buys · ${p.n_sells || 0} sells</div>
+        <div class="learn-card-meta">Notes: ${(p.notes || "—").slice(0, 120)}</div>
+        <div class="pos-fills-h">Buy layers</div>
+        ${buys || "<div class='mute'>No fill rows</div>"}
+        <div class="pos-fills-h">Sell layers</div>
+        ${
+          sells ||
+          (isOpen
+            ? "<div class='mute'>No sells yet</div>"
+            : "<div class='mute'>No sells recorded</div>")
+        }
+        ${
+          canCloseJournal
+            ? `<div class="row-gap mt">
+          <button type="button" class="btn soft sm" data-close="${p.journal_id}">Close journal</button>
+        </div>`
+            : ""
+        }
+      </div>
+    </details>`;
+  }
+
   async function loadPositions() {
-    const d = await api("/api/positions");
-    const positions = d.positions || [];
     const host = $("#posTable");
     if (!host) return;
-    if (!positions.length) {
-      host.innerHTML = rankEmpty("No open positions");
+    host.innerHTML = rankEmpty("Loading positions…");
+    let d;
+    try {
+      d = await api("/api/positions?closed=true");
+    } catch (e) {
+      host.innerHTML = rankEmpty("Failed to load positions — " + (e.message || e));
       return;
     }
-    host.innerHTML = positions
-      .map((p) => {
-        const entry = p.entry_display != null ? p.entry_display : p.entry_avg;
-        const mark = p.mark_price;
-        const upnl = p.upnl_pct;
-        const upnlS =
-          upnl != null
-            ? `<span class="${upnl >= 0 ? "up" : "dn"}">${
-                upnl >= 0 ? "+" : ""
-              }${Number(upnl).toFixed(2)}%</span>`
-            : "—";
-        const chg =
-          p.change_24h_pct != null
-            ? `${Number(p.change_24h_pct).toFixed(2)}% 24h`
-            : "";
-        const buys = (p.buy_orders || [])
-          .map(
-            (o) =>
-              `<div class="pos-fill">BUY ${
-                o.price != null ? fmtPx(o.price) : "—"
-              } × ${o.qty != null ? o.qty : "—"} · ${fmtTime(o.ts)}</div>`
-          )
-          .join("");
-        const sells = (p.sell_orders || [])
-          .map(
-            (o) =>
-              `<div class="pos-fill">SELL ${
-                o.price != null ? fmtPx(o.price) : "—"
-              } × ${o.qty != null ? o.qty : "—"} · ${fmtTime(o.ts)}</div>`
-          )
-          .join("");
-        return `<details class="pos-card">
-          <summary class="pos-sum">
-            <span class="pos-sym">${p.symbol}</span>
-            <span class="pos-meta">${(p.market || "?").toString().slice(0, 1).toUpperCase()}</span>
-            <span class="pos-meta">avg ${entry != null ? fmtPx(entry) : "—"}</span>
-            <span class="pos-meta">mark ${mark != null ? fmtPx(mark) : "—"}</span>
-            <span class="pos-meta">${upnlS}</span>
-            <span class="pos-meta">${
-              p.hold_hours != null ? p.hold_hours + "h" : ""
-            }</span>
-          </summary>
-          <div class="pos-detail">
-            <div class="learn-card-meta">Opened ${fmtTime(p.opened_at)} · size ${
-          p.size_remaining != null
-            ? p.size_remaining
-            : p.size_qty != null
-              ? p.size_qty
-              : "—"
-        } (bought ${p.size_qty ?? "—"} / sold ${p.size_sold ?? "—"})</div>
-            <div class="learn-card-meta">uPnL ${upnlS}${
-          p.upnl_usd_est != null ? " · ~$" + Number(p.upnl_usd_est).toFixed(2) : ""
-        } · ${chg} · src ${p.mark_source || "—"}</div>
-            <div class="learn-card-meta">Notes: ${(p.notes || "—").slice(0, 120)}</div>
-            <div class="pos-fills-h">Buy orders / layers</div>
-            ${buys || "<div class='mute'>No fill rows — journal entry only</div>"}
-            <div class="pos-fills-h">Sell orders / layers</div>
-            ${sells || "<div class='mute'>No sells yet</div>"}
-            <div class="row-gap mt">
-              <button type="button" class="btn soft sm" data-close="${
-                p.id
-              }">Close journal</button>
-            </div>
-          </div>
-        </details>`;
-      })
-      .join("");
+    const positions = d.positions || [];
+    if (!positions.length) {
+      host.innerHTML = rankEmpty("No positions yet — fills sync or log manual");
+      const head0 = $("#posListHead");
+      if (head0) head0.textContent = "0 open · 0 closed";
+      return;
+    }
+    const opens = positions.filter((p) => p.status === "open" || p.is_open);
+    const closed = positions.filter((p) => !(p.status === "open" || p.is_open));
+    const head = $("#posListHead");
+    if (head) {
+      head.textContent = `${opens.length} open · ${closed.length} closed`;
+    }
+    let html = "";
+    if (opens.length) {
+      html += `<div class="pos-band-h">Open risk <span class="pos-band-n">${opens.length}</span></div>`;
+      html += opens.map(posCardHtml).join("");
+    } else {
+      html += `<div class="pos-band-h mute">No open risk</div>`;
+    }
+    if (closed.length) {
+      html += `<div class="pos-band-h closed">Closed outcomes <span class="pos-band-n">${closed.length}</span></div>`;
+      html += closed.map(posCardHtml).join("");
+    }
+    host.innerHTML = html;
     $$("[data-close]", host).forEach((b) =>
       b.addEventListener("click", async (ev) => {
         ev.preventDefault();

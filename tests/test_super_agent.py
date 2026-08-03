@@ -221,6 +221,87 @@ class TestReconstructFills(unittest.TestCase):
         self.assertEqual(r["n_sells"], 1)
 
 
+class TestSegmentPositionEntities(unittest.TestCase):
+    """Fully closed cycles are discrete entities; next open is separate."""
+
+    def test_two_closed_cycles_then_open(self):
+        from mexc_bot.learning.trades import segment_positions_from_fills
+
+        fills = [
+            # Cycle 1 — success
+            {"symbol": "SYNUSDT", "side": "buy", "price": 1.0, "qty": 100, "ts": 1000},
+            {"symbol": "SYNUSDT", "side": "sell", "price": 1.2, "qty": 100, "ts": 2000},
+            # Cycle 2 — miss
+            {"symbol": "SYNUSDT", "side": "buy", "price": 1.1, "qty": 50, "ts": 3000},
+            {"symbol": "SYNUSDT", "side": "sell", "price": 0.9, "qty": 50, "ts": 4000},
+            # Cycle 3 — still open
+            {"symbol": "SYNUSDT", "side": "buy", "price": 1.0, "qty": 20, "ts": 5000},
+            {"symbol": "SYNUSDT", "side": "buy", "price": 0.95, "qty": 10, "ts": 5100},
+        ]
+        segs = segment_positions_from_fills(fills, symbol="SYNUSDT", market="spot")
+        self.assertEqual(len(segs), 3)
+        # newest first
+        self.assertEqual(segs[0]["status"], "open")
+        self.assertAlmostEqual(segs[0]["size_remaining"], 30.0, places=5)
+        self.assertEqual(segs[0]["outcome"], "open")
+        self.assertEqual(segs[0]["n_buys"], 2)
+        self.assertEqual(segs[0]["n_sells"], 0)
+
+        closed = [s for s in segs if s["status"] == "closed"]
+        self.assertEqual(len(closed), 2)
+        # newest closed first among closed? overall sort by closed_at/opened_at
+        by_open = sorted(closed, key=lambda x: x["opened_at"])
+        c1, c2 = by_open[0], by_open[1]
+        self.assertEqual(c1["outcome"], "success")
+        self.assertAlmostEqual(c1["realized_pnl_pct"], 20.0, places=2)
+        self.assertEqual(c1["n_buys"], 1)
+        self.assertEqual(c1["n_sells"], 1)
+        self.assertEqual(c2["outcome"], "miss")
+        self.assertAlmostEqual(c2["realized_pnl_pct"], -100.0 * (1.1 - 0.9) / 1.1, places=2)
+        # closed cycle does not mix cycle-3 buys
+        self.assertEqual(c2["n_buys"], 1)
+        self.assertAlmostEqual(c2["size_qty"], 50.0, places=5)
+
+    def test_partial_sells_one_entity_until_flat(self):
+        from mexc_bot.learning.trades import segment_positions_from_fills
+
+        fills = [
+            {"symbol": "XUSDT", "side": "buy", "price": 10.0, "qty": 10, "ts": 100},
+            {"symbol": "XUSDT", "side": "sell", "price": 11.0, "qty": 4, "ts": 200},
+            {"symbol": "XUSDT", "side": "sell", "price": 12.0, "qty": 6, "ts": 300},
+            # new cycle after flat
+            {"symbol": "XUSDT", "side": "buy", "price": 9.0, "qty": 5, "ts": 400},
+        ]
+        segs = segment_positions_from_fills(fills, symbol="XUSDT", market="spot")
+        self.assertEqual(len(segs), 2)
+        closed = next(s for s in segs if s["status"] == "closed")
+        open_ = next(s for s in segs if s["status"] == "open")
+        self.assertEqual(closed["n_buys"], 1)
+        self.assertEqual(closed["n_sells"], 2)
+        self.assertEqual(closed["outcome"], "success")
+        self.assertAlmostEqual(open_["size_remaining"], 5.0, places=5)
+        self.assertEqual(open_["n_buys"], 1)
+        self.assertEqual(open_["n_sells"], 0)
+
+    def test_newest_first_ordering(self):
+        from mexc_bot.learning.trades import segment_positions_from_fills
+
+        fills = [
+            {"symbol": "YUSDT", "side": "buy", "price": 1, "qty": 1, "ts": 100},
+            {"symbol": "YUSDT", "side": "sell", "price": 2, "qty": 1, "ts": 200},
+            {"symbol": "YUSDT", "side": "buy", "price": 1, "qty": 1, "ts": 300},
+            {"symbol": "YUSDT", "side": "sell", "price": 0.5, "qty": 1, "ts": 400},
+        ]
+        segs = segment_positions_from_fills(fills, symbol="YUSDT", market="spot")
+        self.assertEqual(len(segs), 2)
+        self.assertGreaterEqual(
+            float(segs[0].get("closed_at") or 0),
+            float(segs[1].get("closed_at") or 0),
+        )
+        self.assertEqual(segs[0]["outcome"], "miss")
+        self.assertEqual(segs[1]["outcome"], "success")
+
+
 class TestFatalNewsJudge(unittest.TestCase):
     def test_hard_fatal_forces_no_trade(self):
         from mexc_bot.learning.fatal_news import apply_fatal_to_verdict

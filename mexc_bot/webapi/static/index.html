@@ -84,14 +84,21 @@
       <!-- POSITIONS -->
       <section class="view" id="view-positions">
         <div class="panel clean">
-          <form id="posForm" class="form-row">
-            <input name="symbol" placeholder="Symbol" required />
-            <select name="market"><option value="futures">Futures</option><option value="spot">Spot</option></select>
-            <input name="entry_avg" type="number" step="any" placeholder="Entry" />
-            <input name="notes" placeholder="Notes" />
-            <button class="btn" type="submit">Open</button>
-          </form>
-          <div id="posTable" class="scroll"></div>
+          <header class="panel-h pos-page-h">
+            <h3>Positions</h3>
+            <span class="badge quiet" id="posListHead">open first · closed latest</span>
+          </header>
+          <div id="posTable" class="scroll pos-list"></div>
+          <details class="pos-manual">
+            <summary class="pos-manual-sum">Log manual journal</summary>
+            <form id="posForm" class="form-row">
+              <input name="symbol" placeholder="Symbol" required />
+              <select name="market"><option value="futures">Futures</option><option value="spot">Spot</option></select>
+              <input name="entry_avg" type="number" step="any" placeholder="Entry" />
+              <input name="notes" placeholder="Notes" />
+              <button class="btn" type="submit">Open</button>
+            </form>
+          </details>
         </div>
       </section>
 

@@ -282,21 +282,20 @@ def set_movers(
 # ---- Journal / positions ----
 
 def list_positions(user_id: Optional[int] = None, include_closed: bool = False) -> List[dict]:
-    """Positions rebuilt from full fill history + live mark."""
-    from .positions_enrich import enrich_positions
+    """Discrete position entities from segmented fills (newest first).
+
+    Open and closed cycles are separate entities: a full flat ends a cycle;
+    the next buy starts a new one. Each closed cycle has its own success/miss.
+
+    include_closed=False → overview (open only).
+    include_closed=True → Positions page (`?closed=true`).
+    """
+    from .positions_enrich import list_position_entities
 
     uid = _uid(user_id)
-    if include_closed:
-        rows = db.fetch_all(
-            "SELECT * FROM journal_trades WHERE user_id = ? ORDER BY opened_at DESC LIMIT 50",
-            (uid,),
-        )
-    else:
-        rows = db.fetch_all(
-            "SELECT * FROM journal_trades WHERE user_id = ? AND status = 'open' ORDER BY opened_at DESC",
-            (uid,),
-        )
-    return enrich_positions(rows, uid)
+    return list_position_entities(
+        uid, include_closed=bool(include_closed), closed_limit=40
+    )
 
 
 def open_position(
