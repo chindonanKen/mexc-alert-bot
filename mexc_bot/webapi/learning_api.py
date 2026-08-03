@@ -918,3 +918,10 @@ def approve_draft(lesson_id: int, **kwargs):
         uid, int(lesson_id), dismiss=bool(kwargs.get("dismiss"))
     )
     return {"ok": ok}
+
+
+def delete_lesson(lesson_id: int, *, user_id: Optional[int] = None) -> Dict[str, Any]:
+    """Remove a durable lesson so the agent no longer recalls it."""
+    uid = int(user_id or uid_or_raise())
+    ok = event_store().delete_lesson(uid, int(lesson_id))
+    return {"ok": ok, "lesson_id": int(lesson_id), "deleted": bool(ok)}

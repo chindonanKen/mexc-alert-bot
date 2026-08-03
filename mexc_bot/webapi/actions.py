@@ -612,6 +612,12 @@ TOOL_DEFS = [
         ["text"],
     ),
     _tool(
+        "delete_lesson",
+        "Permanently delete a durable lesson by lesson_id (unteach the agent)",
+        {"lesson_id": {"type": "integer"}},
+        ["lesson_id"],
+    ),
+    _tool(
         "learning_stats",
         "Aggregate learning stats from event log (took/skip/bounce)",
         {},
@@ -852,6 +858,10 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 behaviors=args.get("behaviors"),
                 context_type=args.get("context_type"),
             )
+        if name == "delete_lesson":
+            from .learning_api import delete_lesson
+
+            return delete_lesson(int(args["lesson_id"]))
         if name == "learning_stats":
             from .learning_v1 import learning_home_v1
 

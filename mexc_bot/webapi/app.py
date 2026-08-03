@@ -872,6 +872,20 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(400, str(e))
 
+    @app.delete("/api/learning/lessons/{lesson_id}")
+    def learning_delete_lesson(lesson_id: int, _: bool = Depends(require_auth)):
+        from .learning_api import delete_lesson
+
+        try:
+            out = delete_lesson(int(lesson_id))
+            if not out.get("ok"):
+                raise HTTPException(404, "Lesson not found")
+            return out
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
     @app.post("/api/learning/answer")
     def learning_answer(body: AnswerBody, _: bool = Depends(require_auth)):
         from .learning_api import answer_question

@@ -748,6 +748,10 @@ class EventStore:
             logger.error("approve_lesson failed: %s", e)
             return False
 
+    def delete_lesson(self, user_id: int, lesson_id: int) -> bool:
+        """Permanently remove a lesson (owner unteach)."""
+        return self.approve_lesson(user_id, lesson_id, dismiss=True)
+
     def learning_stats(self, user_id: int) -> Dict[str, Any]:
         """Aggregate stats for coach/desk — store-backed only."""
         with self._lock:

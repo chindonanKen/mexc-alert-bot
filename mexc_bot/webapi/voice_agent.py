@@ -43,7 +43,8 @@ Sensors: list_alerts, add/update/delete_alert, list_watchlist, add/remove_watch,
 Positions: list_positions (exchange money truth when available)
 Learning (primary for teach/recall):
   what_have_you_learned — lessons + stats + teach_ok trade cites
-  teach — durable lesson from his words
+  teach — durable lesson from his words (always pass symbol when about a trade)
+  delete_lesson — remove a lesson by lesson_id (unteach)
   list_pending_questions / answer_question — max 1–2 open questions
   list_fires / list_trade_reviews (teach_ok only for $ claims)
   learning_stats / agent_ask

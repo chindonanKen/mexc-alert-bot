@@ -1181,7 +1181,7 @@
       );
     }
 
-    // 4 Lessons with about context
+    // 4 Lessons with about context + delete
     const lesEl = $("#learnLessons");
     if (lesEl) {
       lesEl.innerHTML = lessons.length
@@ -1203,14 +1203,34 @@
                   ? "linked"
                   : "general";
               return `<div class="learn-lesson">
-                <span class="learn-about">${escHtml(about)}</span>
-                ${escHtml((l.text || "").slice(0, 220))}
+                <div class="learn-lesson-main">
+                  <span class="learn-about">${escHtml(about)}</span>
+                  ${escHtml((l.text || "").slice(0, 220))}
+                </div>
+                <button type="button" class="btn soft sm learn-del" data-del-lesson="${
+                  l.id
+                }" title="Remove this lesson">Delete</button>
               </div>`;
             })
             .join("")
         : rankEmpty(
             "No lessons yet. Select a trade → teach about it → Save lesson."
           );
+      $$("[data-del-lesson]", lesEl).forEach((b) =>
+        b.addEventListener("click", async () => {
+          const id = +b.dataset.delLesson;
+          if (!id) return;
+          if (!confirm("Delete this lesson? The agent will no longer recall it."))
+            return;
+          try {
+            await api(`/api/learning/lessons/${id}`, { method: "DELETE" });
+            toast("Lesson deleted");
+            loadMemory();
+          } catch (err) {
+            toast(err.message);
+          }
+        })
+      );
     }
 
     // restore selection highlight after re-render

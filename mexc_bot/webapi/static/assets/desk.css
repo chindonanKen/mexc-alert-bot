@@ -325,6 +325,17 @@ body::before {
   color: var(--cyan, #7dd3fc);
   margin-right: 0.4rem;
 }
+.learn-lesson {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.learn-lesson-main { flex: 1; min-width: 0; font-size: 0.82rem; line-height: 1.4; }
+.learn-del { flex-shrink: 0; opacity: 0.75; }
+.learn-del:hover { opacity: 1; }
 .learn-v1-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
