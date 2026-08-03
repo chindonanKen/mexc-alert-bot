@@ -866,12 +866,14 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         if name == "list_trade_reviews":
             from .learning_api import trades_api
 
+            # Default teach_only True unless explicitly false
+            to = args.get("teach_only")
             return trades_api(
                 closed_only=bool(args.get("closed_only")),
                 open_only=bool(args.get("open_only")),
                 symbol=args.get("symbol"),
                 limit=int(args.get("limit") or 20),
-                teach_only=bool(args.get("teach_only")),
+                teach_only=True if to is None else bool(to),
             )
         if name == "get_trade_review":
             from .learning_api import trade_api

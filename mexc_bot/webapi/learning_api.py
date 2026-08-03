@@ -594,16 +594,18 @@ def record_process(
     # Prefer money-truth entity (entity_key / synthetic id)
     d = get_money_review(uid, trade_id, store=store)
     if d is None:
-        # legacy journal id
+        # legacy journal id — never treat as exchange money truth
         try:
             d = get_trade_dossier(store, uid, int(trade_id))
+            if d:
+                d = dict(d)
+                d["money_truth"] = "journal_manual"
+                d["teach_ok"] = False
+                d["verified"] = False
         except (TypeError, ValueError):
             d = None
     if not d:
         raise ValueError("Trade/review not found")
-    if d.get("money_truth") == "fill_recon_unverified":
-        # still allow process tags but mark belief path careful
-        pass
     # Persist process tags: journal notes when numeric id; else durable lesson
     if tags or note:
         journal_updated = False
@@ -647,28 +649,34 @@ def record_process(
                 logger = __import__("logging").getLogger(__name__)
                 logger.debug("teach_lesson process: %s", e)
 
-    # Train exec edge: exchange-verified closed, OR journal with process tags
     mt = d.get("money_truth")
-    if d.get("status") == "closed" and mt == "fill_recon_unverified" and not tags:
-        return {
-            "ok": True,
-            "trade_id": trade_id,
-            "belief_update": {"updated": False, "reason": "not_exchange_verified"},
-            "money_truth": mt,
-        }
+    teach_ok = d.get("teach_ok") is True or mt == "exchange"
     tid_key = d.get("entity_key") or trade_id
     try:
         tid_int = int(trade_id)
     except (TypeError, ValueError):
         tid_int = abs(hash(str(tid_key))) % (10**9)
-    # journal open tags still train process (teach_ok may be absent)
-    if d.get("teach_ok") is False and d.get("status") == "closed" and not tags:
+
+    # Never train exec edge on non-exchange $ PnL
+    if not teach_ok:
+        safe = dict(d)
+        safe["pnl_pct"] = None
+        safe["pnl_usd"] = None
+        if tags:
+            # process tags only — no PnL signal
+            upd = beliefs().update_from_trade_close(
+                uid, tid_int, dossier=safe, process_tags=tags
+            )
+        else:
+            upd = {"updated": False, "reason": "not_exchange_verified"}
         return {
             "ok": True,
             "trade_id": trade_id,
-            "belief_update": {"updated": False, "reason": "not_exchange_verified"},
+            "entity_key": d.get("entity_key"),
             "money_truth": mt,
+            "belief_update": upd,
         }
+
     upd = beliefs().update_from_trade_close(
         uid, tid_int, dossier=d, process_tags=tags
     )
@@ -723,12 +731,34 @@ def answer_question(
 
 
 def on_trade_closed(user_id: int, trade_id: int) -> Dict[str, Any]:
-    """Call after journal close — trains exec edge."""
+    """After close: train exec edge only if exchange money-truth review exists."""
     store = event_store()
-    d = get_trade_dossier(store, user_id, int(trade_id))
-    if not d:
-        return {"ok": False}
-    return beliefs().update_from_trade_close(user_id, int(trade_id), dossier=d)
+    from ..learning.money_truth import get_money_review, list_money_reviews
+
+    d = get_money_review(user_id, trade_id, store=store)
+    if not d or not d.get("teach_ok"):
+        # Prefer latest exchange closed for symbol if journal id is stale
+        try:
+            j = get_trade_dossier(store, user_id, int(trade_id))
+        except Exception:
+            j = None
+        if j and j.get("symbol"):
+            for r in list_money_reviews(
+                user_id, closed_only=True, teach_only=True, limit=20, store=store
+            ):
+                if str(r.get("symbol") or "").upper().replace("_", "") == str(
+                    j.get("symbol") or ""
+                ).upper().replace("_", ""):
+                    d = r
+                    break
+        if not d or not d.get("teach_ok"):
+            return {
+                "ok": False,
+                "reason": "no_exchange_verified_close",
+                "hint": "Use list_trade_reviews teach_only for money truth",
+            }
+    tid = abs(hash(str(d.get("entity_key") or trade_id))) % (10**9)
+    return beliefs().update_from_trade_close(user_id, tid, dossier=d)
 
 
 # Back-compat aliases used by older routes
@@ -741,6 +771,10 @@ def trades_api(**kwargs):
     uid = int(kwargs.get("user_id") or uid_or_raise())
     from ..learning.money_truth import list_money_reviews
 
+    # Default teach_only=True so agents don't pull journal $ by accident
+    teach_only = kwargs.get("teach_only")
+    if teach_only is None:
+        teach_only = True
     return {
         "trades": list_money_reviews(
             uid,
@@ -748,10 +782,11 @@ def trades_api(**kwargs):
             open_only=bool(kwargs.get("open_only")),
             symbol=kwargs.get("symbol"),
             limit=int(kwargs.get("limit") or 30),
-            teach_only=bool(kwargs.get("teach_only")),
+            teach_only=bool(teach_only),
             store=event_store(),
         ),
         "money_truth": "exchange_when_available",
+        "teach_only": bool(teach_only),
     }
 
 
@@ -761,9 +796,15 @@ def trade_api(trade_id: Any, user_id: Optional[int] = None):
 
     d = get_money_review(uid, trade_id, store=event_store())
     if not d:
-        # legacy journal
         try:
             d = get_trade_dossier(event_store(), uid, int(trade_id))
+            if d:
+                d = dict(d)
+                d["money_truth"] = "journal_manual"
+                d["teach_ok"] = False
+                d["verified"] = False
+                d["pnl_pct"] = None  # do not expose journal PnL as teachable
+                d["pnl_usd"] = None
         except (TypeError, ValueError):
             d = None
     if not d:
