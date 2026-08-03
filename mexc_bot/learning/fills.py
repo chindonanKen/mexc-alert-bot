@@ -161,11 +161,9 @@ class FillSyncPoller:
         try:
             bals = self.client.get_account_balances()
             # exclude pure stables from trading open list (still cached)
-            alt = [
-                b
-                for b in bals
-                if b.get("asset") not in ("USDT", "USDC", "BUSD", "USD")
-            ]
+            # Skip stables + known dead bags (delisted residual)
+            _ignore = {"USDT", "USDC", "BUSD", "USD", "GOONC"}
+            alt = [b for b in bals if b.get("asset") not in _ignore]
             self._last_spot_balances = alt
             _write_spot_balances_cache(self.event_store, self.user_id, alt)
             for b in alt:
@@ -325,11 +323,8 @@ def fetch_live_spot_balances(
     try:
         client = MexcPrivateSpotClient(key, sec)
         bals = client.get_account_balances()
-        alt = [
-            b
-            for b in bals
-            if b.get("asset") not in ("USDT", "USDC", "BUSD", "USD")
-        ]
+        _ignore = {"USDT", "USDC", "BUSD", "USD", "GOONC"}
+        alt = [b for b in bals if b.get("asset") not in _ignore]
         if event_store is not None and int(user_id) > 0:
             _write_spot_balances_cache(event_store, user_id, alt)
         return alt

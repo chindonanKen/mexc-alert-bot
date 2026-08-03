@@ -470,6 +470,14 @@ class TestSpotBalanceReconcile(unittest.TestCase):
                 "size_remaining": 100,
                 "recon_from_fills": True,
             },
+            {
+                "symbol": "GOONCUSDT",
+                "market": "spot",
+                "status": "open",
+                "is_open": True,
+                "size_remaining": 54830,
+                "recon_from_fills": False,
+            },
         ]
         bals = [
             {
@@ -478,10 +486,21 @@ class TestSpotBalanceReconcile(unittest.TestCase):
                 "locked": 34096.4,
                 "total": 84096.4,
                 "symbol": "SYNUSDT",
-            }
+            },
+            {
+                "asset": "GOONC",
+                "free": 54830.0,
+                "locked": 0.0,
+                "total": 54830.0,
+                "symbol": "GOONCUSDT",
+            },
         ]
         with patch(
             "mexc_bot.learning.fills.fetch_live_spot_balances", return_value=bals
+        ), patch(
+            "mexc_bot.webapi.positions_enrich._spot_symbol_tradeable",
+            side_effect=lambda s: "GOONC" not in str(s).upper()
+            and "GHOST" not in str(s).upper(),
         ):
             out = _reconcile_spot_with_balances(
                 entities, store=None, user_id=1, fills_all=[]
@@ -492,6 +511,7 @@ class TestSpotBalanceReconcile(unittest.TestCase):
         self.assertAlmostEqual(opens[0]["size_remaining"], 84096.4)
         self.assertTrue(opens[0]["exchange_hold"])
         self.assertEqual(opens[0]["money_truth"], "exchange")
+        self.assertFalse(any("GOONC" in str(e.get("symbol")) for e in opens))
 
 
 class TestMoneyTruthReviews(unittest.TestCase):

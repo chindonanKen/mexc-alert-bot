@@ -251,6 +251,29 @@ def _spot_base_asset(symbol: str) -> str:
     return s
 
 
+# Dust / delisted wallets still on account but not tradeable (no USDT market).
+_SPOT_BALANCE_IGNORE_ASSETS = frozenset(
+    {
+        "GOONC",  # delisted; residual bag, not a trade
+    }
+)
+
+
+def _spot_symbol_tradeable(symbol: str) -> bool:
+    """False if MEXC has no spot ticker (delisted / invalid pair)."""
+    sym = str(symbol or "").upper().replace("_", "").replace("-", "")
+    if not sym.endswith("USDT"):
+        sym = sym + "USDT"
+    asset = _spot_base_asset(sym)
+    if asset in _SPOT_BALANCE_IGNORE_ASSETS:
+        return False
+    try:
+        t = ticker_24h(sym)
+        return bool(t and t.get("price") and float(t["price"]) > 0)
+    except Exception:
+        return False
+
+
 def _reconcile_spot_with_balances(
     entities: List[dict],
     store: Any,
@@ -288,8 +311,16 @@ def _reconcile_spot_with_balances(
     for b in bals:
         asset = str(b.get("asset") or "").upper()
         tot = float(b.get("total") or 0)
-        if asset and tot > 1e-8:
-            by_asset[asset] = b
+        if not asset or tot <= 1e-8:
+            continue
+        if asset in _SPOT_BALANCE_IGNORE_ASSETS:
+            logger.info("Ignoring delisted/dust spot asset %s", asset)
+            continue
+        sym = str(b.get("symbol") or f"{asset}USDT")
+        if not _spot_symbol_tradeable(sym):
+            logger.info("Ignoring untradeable spot asset %s (no market)", asset)
+            continue
+        by_asset[asset] = b
 
     kept: List[dict] = []
     matched: Set[str] = set()
@@ -298,10 +329,15 @@ def _reconcile_spot_with_balances(
             kept.append(e)
             continue
         if e.get("status") != "open" and not e.get("is_open"):
-            # closed fill-walk spot — keep, still unverified closed
+            # closed fill-walk spot — keep for history when we have fills
             kept.append(e)
             continue
         asset = _spot_base_asset(str(e.get("symbol") or ""))
+        if asset in _SPOT_BALANCE_IGNORE_ASSETS:
+            continue
+        if not _spot_symbol_tradeable(str(e.get("symbol") or "")):
+            logger.info("Dropping untradeable spot open %s", e.get("symbol"))
+            continue
         bal = by_asset.get(asset)
         if not bal:
             # Ghost residual — zero on exchange
@@ -315,7 +351,7 @@ def _reconcile_spot_with_balances(
         e["spot_locked"] = bal.get("locked")
         e["money_truth"] = "exchange"
         e["verified"] = True
-        e["teach_ok"] = True  # size+live entry from fills+balance
+        e["teach_ok"] = True  # size balance-true; entry from fills when present
         e["source"] = "mexc_spot_account"
         e["notes"] = (
             f"spot balance {tot} (free {bal.get('free')} locked {bal.get('locked')})"
