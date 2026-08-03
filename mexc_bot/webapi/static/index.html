@@ -183,11 +183,18 @@
                 <button type="button" class="chip" data-beh="pride" title="Wouldn’t cut a failed AD (“has to come back”). Agent: ego hold.">pride</button>
                 <button type="button" class="chip" data-beh="rule_break" title="Broke a hard rule (size, grind, isolated…). Agent: hard do-not.">rule_break</button>
                 <button type="button" class="chip" data-beh="process_skip" title="Should have taken/skipped per plan, but didn’t. Agent: process miss, not setup miss.">process_skip</button>
+                <button type="button" class="chip" data-beh="false_panic" title="Looked like panic but not a real tradeable AD setup.">false_panic</button>
               </div>
+              <p class="learn-chip-hint mute">AD zone — did price reach your buy area?</p>
+              <div class="learn-chips" id="learnAdChips" aria-label="AD zone">
+                <button type="button" class="chip chip-ad" data-beh="ad_met" title="Price entered your AD / buy zone">ad_met</button>
+                <button type="button" class="chip chip-ad" data-beh="ad_missed" title="Fire/panic OK but price never hit your AD zone — correct skip">ad_missed</button>
+              </div>
+              <p class="learn-hint mute">If <code>ad_missed</code>: always write prices — “wanted 13.0–13.2, low only 13.73”.</p>
               <details class="learn-guide">
-                <summary class="learn-guide-sum">Process chip guide</summary>
+                <summary class="learn-guide-sum">Process + AD chip guide</summary>
                 <div class="learn-guide-body">
-                  <p class="learn-guide-lede">These label <strong>process</strong>, not “did I make money?” Lucky green can still be <code>fomo</code>.</p>
+                  <p class="learn-guide-lede">Process chips = how you traded. AD chips = did the market give you your zone. Lucky green can still be <code>fomo</code>.</p>
                   <table class="learn-guide-table">
                     <thead>
                       <tr><th>Chip</th><th>When you tap it</th><th>Agent learns</th></tr>
@@ -195,7 +202,7 @@
                     <tbody>
                       <tr>
                         <td><code>plan_ok</code></td>
-                        <td>Followed AD plan: size, layers, exit idea</td>
+                        <td>Followed AD plan (including a disciplined skip)</td>
                         <td>Repeat this process</td>
                       </tr>
                       <tr>
@@ -228,11 +235,26 @@
                         <td>Should have taken/skipped, but didn’t</td>
                         <td>Process miss — setup may still be fine</td>
                       </tr>
+                      <tr>
+                        <td><code>false_panic</code></td>
+                        <td>Looked like panic; not a real tradeable setup</td>
+                        <td>Don’t treat this dump type as AD</td>
+                      </tr>
+                      <tr>
+                        <td><code>ad_met</code></td>
+                        <td>Price hit your buy / AD zone</td>
+                        <td>Zone was available to trade</td>
+                      </tr>
+                      <tr>
+                        <td><code>ad_missed</code></td>
+                        <td>Never reached your zone — often a correct skip</td>
+                        <td>Need zone prices in the note</td>
+                      </tr>
                     </tbody>
                   </table>
                 </div>
               </details>
-              <textarea name="text" id="teachText" rows="4" placeholder="What should the agent remember about THIS trade/fire? (process, size, timing…)" required></textarea>
+              <textarea name="text" id="teachText" rows="4" placeholder="About THIS fire/trade: e.g. wanted AD 13.0–13.2, only printed 13.73 — skipped. plan_ok + ad_missed." required></textarea>
               <div class="row-gap">
                 <button class="btn" type="submit" id="teachSubmit" disabled>Save lesson on selection</button>
                 <button class="btn soft" type="button" id="teachClear">Clear selection</button>

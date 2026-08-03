@@ -711,10 +711,37 @@ def teach(
     if not body:
         return {"ok": False, "error": "empty"}
 
-    tag_list: List[str] = list(tags or [])
+    from ..learning.integrity import ALLOWED_BEHAVIOR
+
+    # Process chips only — closed set (voice often invents free tags)
+    allowed_beh = {b for b in ALLOWED_BEHAVIOR if b}
+    # AD context (not process — setup quality)
+    allowed_ad = {"ad_met", "ad_missed"}
+    tag_list: List[str] = []
+    beh_clean: List[str] = []
+    ad_clean: List[str] = []
     for b in behaviors or []:
-        if b and b not in tag_list:
-            tag_list.append(str(b))
+        s = str(b or "").strip().lower().replace(" ", "_")
+        if s in allowed_beh and s not in beh_clean:
+            beh_clean.append(s)
+            tag_list.append(s)
+        elif s in allowed_ad and s not in ad_clean:
+            ad_clean.append(s)
+            tag_list.append(s)
+    # Keep only non-process free tags that look structured (sym: already added below)
+    for t in tags or []:
+        ts = str(t or "").strip()
+        if not ts or ts in tag_list:
+            continue
+        low = ts.lower()
+        if low in allowed_beh or low in allowed_ad:
+            if low not in tag_list:
+                tag_list.append(low)
+            continue
+        # drop invented free tags like skip_no_ad / panic_needs_ad_zone
+        if ":" in ts:  # structured ok
+            tag_list.append(ts)
+
     if symbol:
         tag_list.append(f"sym:{str(symbol).upper()}")
     if market:
@@ -734,8 +761,9 @@ def teach(
             about += f" {str(market).lower()}"
         if context_type:
             about += f" · {context_type}"
-        if behaviors:
-            about += f" · {','.join(behaviors)}"
+        bits = beh_clean + ad_clean
+        if bits:
+            about += f" · {','.join(bits)}"
         about += "] "
     full_text = about + body
 

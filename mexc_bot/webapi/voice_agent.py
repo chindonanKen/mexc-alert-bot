@@ -53,6 +53,15 @@ When he asks "what have you learned" → call what_have_you_learned first.
 When he teaches about a trade: call teach with text AND symbol (and entity_key
 or event_id if known from list_trade_reviews / list_fires). Never teach
 floating lessons without a symbol when he named a coin.
+
+behaviors (closed set ONLY — never invent tags):
+  plan_ok, greed, fomo, hesitant, pride, rule_break, process_skip, false_panic
+AD zone (also allowed on behaviors list): ad_met, ad_missed
+If he says panic was fine but price never reached his buy area: behaviors
+  ["plan_ok","ad_missed"] (or process_skip only if he broke process) and put
+  intended AD prices in text, e.g. "wanted 13.0-13.2, low only 13.73 — skipped".
+Do NOT invent tags like skip_no_ad / panic_needs_ad_zone / selection_discipline.
+
 When he answers took/skip → answer_question if a pending id is known.
 
 AD discipline from his strategy: panic + breadth; layers; process over lucky green.

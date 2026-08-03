@@ -20,15 +20,15 @@
   // Calmer VAD: only commit a turn after sustained real speech + silence.
   // Avoids spam on ambient noise / empty STT loops.
   const VAD = {
-    speakRms: 0.045, // higher — room noise should not count as speech
+    speakRms: 0.038, // slightly more sensitive so it arms faster on your voice
     silenceRms: 0.02,
-    endSilenceMs: 900, // pause after you finish talking
-    minSpeechMs: 700, // must talk this long before we consider a turn
-    speechHoldMs: 280, // need continuous speech this long to arm "heard you"
-    maxTurnMs: 45000, // safety cap only (never sends without real speech)
+    endSilenceMs: 2000, // allow thinking pauses without cutting you off
+    minSpeechMs: 550,
+    speechHoldMs: 180, // arm "hearing you" sooner
+    maxTurnMs: 60000,
     pollMs: 70,
-    postReplyCooldownMs: 900, // ignore mic right after Grok speaks (echo)
-    emptyBackoffMs: 1200,
+    postReplyCooldownMs: 1200, // longer ignore after TTS (less echo false-turns)
+    emptyBackoffMs: 1000,
   };
 
   const HIST_KEY = "desk_agent_history_v1";
@@ -1235,14 +1235,26 @@
       });
     });
 
-    // behavior chips
-    const chips = $("#learnBehaviorChips");
-    if (chips && !chips.dataset.bound) {
+    // process + AD chips (same handler)
+    const chipRoots = [$("#learnBehaviorChips"), $("#learnAdChips")].filter(
+      Boolean
+    );
+    chipRoots.forEach((chips) => {
+      if (chips.dataset.bound) return;
       chips.dataset.bound = "1";
       chips.addEventListener("click", (ev) => {
         const b = ev.target.closest("[data-beh]");
         if (!b) return;
         const code = b.dataset.beh;
+        // AD met/missed mutually exclusive
+        if (code === "ad_met" || code === "ad_missed") {
+          $$(".chip-ad", $("#learnAdChips")).forEach((c) => {
+            if (c !== b) c.classList.remove("on");
+          });
+          state.learnBehaviors = state.learnBehaviors.filter(
+            (x) => x !== "ad_met" && x !== "ad_missed"
+          );
+        }
         b.classList.toggle("on");
         if (b.classList.contains("on")) {
           if (!state.learnBehaviors.includes(code))
@@ -1251,7 +1263,7 @@
           state.learnBehaviors = state.learnBehaviors.filter((x) => x !== code);
         }
       });
-    }
+    });
 
     const clear = $("#teachClear");
     if (clear && !clear.dataset.bound) {
