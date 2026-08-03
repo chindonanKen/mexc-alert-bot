@@ -56,16 +56,25 @@ def list_position_entities(
         pass
 
     entities: List[dict] = []
+    # Spot only from fill walk. Futures closed fill-walk is untrustworthy
+    # (truncated deals + side model) — use history_positions instead.
     for sym, mkt in pairs:
+        if mkt == "futures":
+            continue
         segs = segment_positions_from_fills(fills_all, symbol=sym, market=mkt)
         for s in segs:
             if not include_closed and s.get("status") != "open":
                 continue
             entities.append(s)
 
-    # Futures: exchange open_positions is the only source of truth for OPEN risk.
-    # Incomplete deal history leaves ghost residuals (LAB/B/ZHIPU…) — demote those.
+    # Futures OPEN: exchange open_positions only
     entities = _reconcile_futures_with_exchange(entities, store, user_id)
+
+    # Futures CLOSED: exchange history_positions (openAvg/closeAvg/realised)
+    if include_closed:
+        entities = _merge_futures_closed_history(
+            entities, store, user_id, fills_all, closed_limit=closed_limit
+        )
 
     # Journal opens with no fill inventory still need to show (manual log / test)
     open_keys = {
@@ -185,24 +194,26 @@ def _norm_fut_key(symbol: str) -> str:
 def _reconcile_futures_with_exchange(
     entities: List[dict], store: Any, user_id: int
 ) -> List[dict]:
-    """Keep only exchange-confirmed futures opens; drop fill-history ghosts.
-
-    Incomplete order_deals history leaves residual qty on closed contracts.
-    MEXC ``open_positions`` is authoritative for what is actually open.
-    """
+    """Futures OPEN only from exchange open_positions (drop fill ghosts)."""
     from ..learning.fills import (
         fetch_live_futures_opens,
         read_futures_open_authority,
     )
 
-    # Prefer live API (desk/bot share keys on droplet); else fresh cache
     fut_opens = fetch_live_futures_opens(user_id, event_store=store)
     if fut_opens is None:
         fut_opens = read_futures_open_authority(store, user_id, max_age_s=900.0)
     if fut_opens is None:
-        # No authority — leave fill-based opens (offline / no keys)
-        logger.debug("futures open authority unavailable; keeping fill residual opens")
-        return entities
+        logger.debug("futures open authority unavailable")
+        # Strip any residual futures opens from fills (we no longer emit them)
+        return [
+            e
+            for e in entities
+            if not (
+                (e.get("market") or "").lower() == "futures"
+                and (e.get("status") == "open" or e.get("is_open"))
+            )
+        ]
 
     by_exch: Dict[str, dict] = {}
     for fo in fut_opens:
@@ -211,41 +222,16 @@ def _reconcile_futures_with_exchange(
         if k and hold > 0:
             by_exch[k] = fo
 
-    kept: List[dict] = []
-    matched_exch: Set[str] = set()
-    dropped_ghosts = 0
-    for e in entities:
-        if (e.get("market") or "").lower() != "futures":
-            kept.append(e)
-            continue
-        if e.get("status") != "open" and not e.get("is_open"):
-            kept.append(e)
-            continue
-        # open futures entity
-        k = _norm_fut_key(str(e.get("symbol") or ""))
-        fo = by_exch.get(k)
-        if not fo:
-            # Ghost residual — not open on exchange (incomplete fills)
-            dropped_ghosts += 1
-            continue
-        hold = float(fo.get("hold_vol") or 0)
-        e["size_remaining"] = hold
-        if fo.get("entry_avg") is not None:
-            e["entry_avg"] = fo["entry_avg"]
-            e["entry_display"] = fo["entry_avg"]
-        e["exchange_hold"] = True
-        e["leverage"] = fo.get("leverage")
-        e["realized_on_pos"] = fo.get("realized")
-        e["status"] = "open"
-        e["is_open"] = True
-        e["outcome"] = "open"
-        matched_exch.add(k)
-        kept.append(e)
-
-    # Exchange open with no fill cycle yet
+    # Drop all fill-based futures opens; rebuild from exchange only
+    kept = [
+        e
+        for e in entities
+        if not (
+            (e.get("market") or "").lower() == "futures"
+            and (e.get("status") == "open" or e.get("is_open"))
+        )
+    ]
     for k, fo in by_exch.items():
-        if k in matched_exch:
-            continue
         fsym = str(fo.get("symbol") or "").upper()
         hold = float(fo.get("hold_vol") or 0)
         kept.append(
@@ -271,16 +257,90 @@ def _reconcile_futures_with_exchange(
                 "exchange_hold": True,
                 "leverage": fo.get("leverage"),
                 "realized_on_pos": fo.get("realized"),
+                "entity_key": f"fopen:{fsym}",
                 "notes": "open on MEXC futures",
             }
         )
+    return kept
 
-    if dropped_ghosts:
-        logger.info(
-            "Dropped %s ghost futures open(s); exchange open=%s",
-            dropped_ghosts,
-            list(by_exch.keys()),
+
+def _attach_fills_to_closed(
+    ent: dict, fills_all: List[dict], *, pad_s: float = 120.0
+) -> None:
+    """Optional expand layers: deals in [opened_at, closed_at] for same symbol."""
+    from ..learning.engagement import symbols_match
+
+    o = float(ent.get("opened_at") or 0)
+    c = float(ent.get("closed_at") or 0)
+    if o <= 0 or c <= 0:
+        return
+    buys, sells = [], []
+    for f in fills_all:
+        if (f.get("market") or "").lower() != "futures":
+            continue
+        if not symbols_match(ent.get("symbol") or "", f.get("symbol") or ""):
+            continue
+        ts = float(f.get("ts") or 0)
+        if ts < o - pad_s or ts > c + pad_s:
+            continue
+        layer = {
+            "price": f.get("price"),
+            "qty": f.get("qty"),
+            "ts": ts,
+            "side": f.get("side"),
+        }
+        if (f.get("side") or "").lower() == "buy":
+            buys.append(layer)
+        else:
+            sells.append(layer)
+    buys.sort(key=lambda x: x.get("ts") or 0)
+    sells.sort(key=lambda x: x.get("ts") or 0)
+    ent["buy_orders"] = buys
+    ent["sell_orders"] = sells
+    ent["n_buys"] = len(buys)
+    ent["n_sells"] = len(sells)
+
+
+def _merge_futures_closed_history(
+    entities: List[dict],
+    store: Any,
+    user_id: int,
+    fills_all: List[dict],
+    *,
+    closed_limit: int,
+) -> List[dict]:
+    """Replace fill-walk futures closed with history_positions entities."""
+    from ..learning.fills import (
+        fetch_live_futures_closed,
+        read_futures_closed_authority,
+    )
+
+    # Drop any futures closed from other sources
+    kept = [
+        e
+        for e in entities
+        if not (
+            (e.get("market") or "").lower() == "futures"
+            and e.get("status") == "closed"
         )
+    ]
+    closed = fetch_live_futures_closed(user_id, event_store=store, max_pages=4)
+    if closed is None:
+        closed = read_futures_closed_authority(store, user_id, max_age_s=900.0)
+    if not closed:
+        return kept
+
+    closed = sorted(
+        closed,
+        key=lambda x: float(x.get("closed_at") or x.get("opened_at") or 0),
+        reverse=True,
+    )[:closed_limit]
+    for ent in closed:
+        e = dict(ent)
+        e.setdefault("buy_orders", [])
+        e.setdefault("sell_orders", [])
+        _attach_fills_to_closed(e, fills_all)
+        kept.append(e)
     return kept
 
 

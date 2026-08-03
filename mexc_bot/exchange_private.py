@@ -271,6 +271,26 @@ class MexcPrivateFuturesClient:
         rows = data.get("data") if isinstance(data, dict) else data
         return rows if isinstance(rows, list) else []
 
+    def get_history_positions(
+        self,
+        *,
+        symbol: Optional[str] = None,
+        page_num: int = 1,
+        page_size: int = 50,
+    ) -> List[dict]:
+        """GET /api/v1/private/position/list/history_positions — closed rounds."""
+        params: Dict[str, Any] = {
+            "page_num": max(1, int(page_num)),
+            "page_size": max(1, min(int(page_size), 100)),
+        }
+        if symbol:
+            params["symbol"] = normalize_futures_symbol(symbol)
+        data = self._get("/api/v1/private/position/list/history_positions", params)
+        if not data:
+            return []
+        rows = data.get("data") if isinstance(data, dict) else data
+        return rows if isinstance(rows, list) else []
+
     def close(self) -> None:
         try:
             self.session.close()
@@ -355,6 +375,108 @@ def futures_position_snapshot(pos: dict) -> Optional[dict]:
             "leverage": pos.get("leverage"),
             "update_time": pos.get("updateTime") or pos.get("createTime"),
             "raw": pos,
+        }
+    except Exception:
+        return None
+
+
+def _ms_to_s(ts: Any) -> Optional[float]:
+    try:
+        v = float(ts)
+    except (TypeError, ValueError):
+        return None
+    if v <= 0:
+        return None
+    return v / 1000.0 if v > 1e12 else v
+
+
+def history_position_to_closed_entity(pos: dict) -> Optional[dict]:
+    """Map MEXC history_positions row → desk closed entity (exchange truth).
+
+    Uses openAvg/closeAvg/realised from the exchange — not fill reconstruction.
+    """
+    try:
+        symbol = normalize_futures_symbol(str(pos.get("symbol") or ""))
+        if not symbol:
+            return None
+        hold = float(pos.get("holdVol") or 0)
+        if hold > 1e-12:
+            return None  # still open — not a closed history row
+        close_vol = float(pos.get("closeVol") or 0)
+        if close_vol <= 0:
+            return None
+
+        entry = pos.get("openAvgPrice") or pos.get("newOpenAvgPrice") or pos.get(
+            "holdAvgPrice"
+        )
+        exit_ = pos.get("closeAvgPrice") or pos.get("newCloseAvgPrice")
+        entry_f = float(entry) if entry is not None else None
+        exit_f = float(exit_) if exit_ is not None else None
+        realised = float(pos.get("realised") or pos.get("realized") or 0)
+        ptype = int(pos.get("positionType") or 1)
+        # profitRatio is fraction (0.1379 = +13.79%) — exchange already side-aware
+        pr = pos.get("profitRatio")
+        pnl_pct = None
+        if pr is not None:
+            try:
+                pnl_pct = float(pr) * 100.0
+            except (TypeError, ValueError):
+                pnl_pct = None
+        if pnl_pct is None and entry_f and exit_f and entry_f > 0:
+            raw = (exit_f - entry_f) / entry_f * 100.0
+            pnl_pct = -raw if ptype == 2 else raw
+        if pnl_pct is None:
+            if realised > 0.5:
+                pnl_pct = 1.0
+            elif realised < -0.5:
+                pnl_pct = -1.0
+            else:
+                pnl_pct = 0.0
+
+        outcome = "flat"
+        if pnl_pct > 0.5 or realised > 0.5:
+            outcome = "success"
+        elif pnl_pct < -0.5 or realised < -0.5:
+            outcome = "miss"
+
+        opened_at = _ms_to_s(pos.get("createTime"))
+        closed_at = _ms_to_s(pos.get("updateTime")) or opened_at
+        hold_s = None
+        if opened_at is not None and closed_at is not None:
+            hold_s = max(0.0, closed_at - opened_at)
+        pid = pos.get("positionId") or pos.get("id")
+        return {
+            "symbol": symbol,
+            "market": "futures",
+            "status": "closed",
+            "is_open": False,
+            "outcome": outcome,
+            "opened_at": opened_at,
+            "closed_at": closed_at,
+            "hold_seconds": hold_s,
+            "hold_hours": round(hold_s / 3600.0, 2) if hold_s is not None else None,
+            "entry_avg": entry_f,
+            "exit_avg": exit_f,
+            "entry_display": entry_f,
+            "size_remaining": 0.0,
+            "size_qty": close_vol,
+            "size_sold": close_vol,
+            "buy_orders": [],
+            "sell_orders": [],
+            "n_buys": 0,
+            "n_sells": 0,
+            "realized_pnl_pct": round(pnl_pct, 3) if pnl_pct is not None else None,
+            "realized_pnl_usd": round(realised, 4),
+            "leverage": pos.get("leverage"),
+            "position_type": ptype,
+            "position_side": "long" if ptype == 1 else "short",
+            "recon_from_fills": False,
+            "exchange_history": True,
+            "entity_key": f"fhist:{pid or symbol}:{int(closed_at or 0)}",
+            "exchange_position_id": pid,
+            "close_profit_loss": pos.get("closeProfitLoss"),
+            "fee": pos.get("totalFee") or pos.get("fee"),
+            "notes": "MEXC history_positions",
         }
     except Exception:
         return None

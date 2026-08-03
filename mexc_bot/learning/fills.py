@@ -18,6 +18,7 @@ from ..exchange_private import (
     MexcPrivateSpotClient,
     futures_deal_to_fill_row,
     futures_position_snapshot,
+    history_position_to_closed_entity,
     normalize_futures_symbol,
     trade_to_fill_row,
 )
@@ -189,6 +190,33 @@ class FillSyncPoller:
             logger.debug("futures open_positions: %s", e)
             snaps = list(self._last_open_futures)
 
+        # Closed rounds — exchange history_positions is truth (not deal walk)
+        try:
+            closed_ents: List[dict] = []
+            for page in range(1, 5):
+                if self._stop.is_set():
+                    break
+                hist = self.futures_client.get_history_positions(
+                    page_num=page, page_size=50
+                )
+                if not hist:
+                    break
+                for p in hist:
+                    ent = history_position_to_closed_entity(p)
+                    if ent:
+                        closed_ents.append(ent)
+                if len(hist) < 50:
+                    break
+                time.sleep(0.12)
+            _write_futures_closed_cache(self.event_store, self.user_id, closed_ents)
+            logger.info(
+                "Futures history_positions cached n=%s user=%s",
+                len(closed_ents),
+                self.user_id,
+            )
+        except Exception as e:
+            logger.debug("futures history_positions: %s", e)
+
         try:
             fsyms = set(self.get_futures_symbols() or set()) if self.get_futures_symbols else set()
         except Exception:
@@ -199,8 +227,8 @@ class FillSyncPoller:
         fsyms = {normalize_futures_symbol(s) for s in fsyms if s}
         fsyms.discard("")
 
+        # Deals still synced for optional expand layers only (not closed PnL)
         for sym in list(fsyms)[:40]:
-            # two pages max (200 deals) — soft rate limit
             for page in (1, 2):
                 if self._stop.is_set():
                     break
@@ -225,6 +253,10 @@ class FillSyncPoller:
 
 def _futures_cache_path(event_store: EventStore) -> Path:
     return Path(event_store.db_path).parent / "futures_open_cache.json"
+
+
+def _futures_closed_cache_path(event_store: EventStore) -> Path:
+    return Path(event_store.db_path).parent / "futures_closed_cache.json"
 
 
 def _write_futures_open_cache(
@@ -273,6 +305,46 @@ def read_futures_open_authority(
         return None
 
 
+def _write_futures_closed_cache(
+    event_store: EventStore, user_id: int, entities: List[dict]
+) -> None:
+    path = _futures_closed_cache_path(event_store)
+    try:
+        # strip bulky empty lists for cache size
+        slim = []
+        for e in entities:
+            slim.append(
+                {
+                    k: v
+                    for k, v in e.items()
+                    if k not in ("buy_orders", "sell_orders")
+                }
+            )
+        payload = {"user_id": user_id, "ts": time.time(), "positions": slim}
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    except Exception as e:
+        logger.debug("futures closed cache write: %s", e)
+
+
+def read_futures_closed_authority(
+    event_store: EventStore, user_id: int, *, max_age_s: float = 900.0
+) -> Optional[List[dict]]:
+    """Closed futures entities from history_positions cache (exchange truth)."""
+    path = _futures_closed_cache_path(event_store)
+    try:
+        if not path.is_file():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if int(data.get("user_id") or 0) != int(user_id):
+            return None
+        if time.time() - float(data.get("ts") or 0) > max_age_s:
+            return None
+        rows = data.get("positions") or []
+        return rows if isinstance(rows, list) else []
+    except Exception:
+        return None
+
+
 def fetch_live_futures_opens(
     user_id: int, event_store: Optional[EventStore] = None
 ) -> Optional[List[dict]]:
@@ -300,4 +372,44 @@ def fetch_live_futures_opens(
         return snaps
     except Exception as e:
         logger.debug("live futures opens: %s", e)
+        return None
+
+
+def fetch_live_futures_closed(
+    user_id: int,
+    event_store: Optional[EventStore] = None,
+    *,
+    max_pages: int = 4,
+) -> Optional[List[dict]]:
+    """Live history_positions → closed entities (exchange PnL truth)."""
+    import os
+
+    key = (os.getenv("MEXC_API_KEY") or "").strip()
+    sec = (os.getenv("MEXC_API_SECRET") or "").strip()
+    if not key or not sec:
+        return None
+    try:
+        client = MexcPrivateFuturesClient(key, sec)
+        if not client.configured:
+            return None
+        closed_ents: List[dict] = []
+        for page in range(1, max_pages + 1):
+            hist = client.get_history_positions(page_num=page, page_size=50)
+            if not hist:
+                break
+            for p in hist:
+                ent = history_position_to_closed_entity(p)
+                if ent:
+                    closed_ents.append(ent)
+            if len(hist) < 50:
+                break
+            time.sleep(0.08)
+        if event_store is not None and int(user_id) > 0:
+            try:
+                _write_futures_closed_cache(event_store, user_id, closed_ents)
+            except Exception:
+                pass
+        return closed_ents
+    except Exception as e:
+        logger.debug("live futures closed: %s", e)
         return None

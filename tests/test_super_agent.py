@@ -395,33 +395,17 @@ class TestFuturesDealMap(unittest.TestCase):
 
 
 class TestFuturesOpenAuthority(unittest.TestCase):
-    def test_ghost_opens_dropped_when_exchange_known(self):
+    def test_only_exchange_opens_kept(self):
         from unittest.mock import patch
 
         from mexc_bot.webapi.positions_enrich import _reconcile_futures_with_exchange
 
         entities = [
             {
-                "symbol": "SYN_USDT",
-                "market": "futures",
-                "status": "open",
-                "is_open": True,
-                "size_remaining": 9999,
-                "entry_avg": 0.1,
-            },
-            {
-                "symbol": "LAB_USDT",
-                "market": "futures",
-                "status": "open",
-                "is_open": True,
-                "size_remaining": 222,
-            },
-            {
                 "symbol": "LAB_USDT",
                 "market": "futures",
                 "status": "closed",
                 "outcome": "success",
-                "realized_pnl_pct": 1.0,
             },
             {
                 "symbol": "SYNUSDT",
@@ -444,17 +428,62 @@ class TestFuturesOpenAuthority(unittest.TestCase):
             "mexc_bot.learning.fills.fetch_live_futures_opens", return_value=exch
         ):
             out = _reconcile_futures_with_exchange(entities, store=None, user_id=1)
-        opens = [e for e in out if e.get("status") == "open"]
-        fut_opens = [e for e in opens if e.get("market") == "futures"]
+        fut_opens = [
+            e
+            for e in out
+            if e.get("market") == "futures" and e.get("status") == "open"
+        ]
         self.assertEqual(len(fut_opens), 1)
         self.assertEqual(fut_opens[0]["symbol"], "SYN_USDT")
         self.assertAlmostEqual(fut_opens[0]["size_remaining"], 4352.0)
         self.assertTrue(fut_opens[0].get("exchange_hold"))
-        # closed futures + spot open kept
-        self.assertTrue(any(e.get("status") == "closed" for e in out))
         self.assertTrue(
             any(e.get("market") == "spot" and e.get("status") == "open" for e in out)
         )
+
+
+class TestHistoryPositionEntity(unittest.TestCase):
+    def test_maps_exchange_realised_and_profit_ratio(self):
+        from mexc_bot.exchange_private import history_position_to_closed_entity
+
+        row = {
+            "positionId": 99,
+            "symbol": "KORU_USDT",
+            "positionType": 1,
+            "holdVol": 0,
+            "closeVol": 133292,
+            "openAvgPrice": 14.19,
+            "closeAvgPrice": 14.29,
+            "realised": 11.8107,
+            "profitRatio": 0.00705,
+            "leverage": 1,
+            "createTime": 1785216000000,
+            "updateTime": 1785217200000,
+            "positionShowStatus": "CLOSED",
+            "totalFee": 1.2,
+        }
+        ent = history_position_to_closed_entity(row)
+        self.assertIsNotNone(ent)
+        self.assertEqual(ent["status"], "closed")
+        self.assertTrue(ent["exchange_history"])
+        self.assertFalse(ent["recon_from_fills"])
+        self.assertEqual(ent["outcome"], "success")
+        self.assertAlmostEqual(ent["realized_pnl_usd"], 11.8107, places=3)
+        self.assertAlmostEqual(ent["realized_pnl_pct"], 0.705, places=2)
+        self.assertEqual(ent["symbol"], "KORU_USDT")
+
+    def test_skips_still_open_hold(self):
+        from mexc_bot.exchange_private import history_position_to_closed_entity
+
+        ent = history_position_to_closed_entity(
+            {
+                "symbol": "SYN_USDT",
+                "holdVol": 100,
+                "closeVol": 0,
+                "openAvgPrice": 0.1,
+            }
+        )
+        self.assertIsNone(ent)
 
 
 class TestFatalNewsJudge(unittest.TestCase):

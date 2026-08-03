@@ -574,9 +574,25 @@
       : `in ${entry != null ? fmtPx(entry) : "—"} → out ${
           exit_ != null ? fmtPx(exit_) : "—"
         }`;
+    const posId =
+      p.entity_key ||
+      p.exchange_position_id ||
+      `${p.market || "?"}:${p.symbol}:${p.status}:${p.opened_at || ""}:${p.closed_at || ""}`;
+    const exchBadge =
+      p.exchange_history
+        ? `<span class="pos-src" title="MEXC history_positions">EXCH</span>`
+        : p.exchange_hold
+          ? `<span class="pos-src" title="MEXC open_positions">LIVE</span>`
+          : "";
+    const sideBit =
+      p.position_side === "short"
+        ? " · short"
+        : p.position_side === "long"
+          ? " · long"
+          : "";
     return `<details class="pos-card ${isOpen ? "is-open" : "is-closed"} outcome-${
       (p.outcome || "flat").toLowerCase()
-    }">
+    }" data-pos-id="${String(posId).replace(/"/g, "")}">
       <summary class="pos-sum">
         <span class="pos-sym">${p.symbol}</span>
         ${posOutcomeBadge(p)}
@@ -584,17 +600,26 @@
         <span class="pos-when">${when}</span>
         <span class="pos-size">${sizeBit}</span>
         ${posMarketPill(p.market)}
+        ${exchBadge}
         <span class="pos-chev" aria-hidden="true">▾</span>
       </summary>
       <div class="pos-detail">
-        <div class="learn-card-meta">${priceDetail} · ${
-      isOpen ? "opened" : "cycle"
-    } ${fmtTime(p.opened_at)}${
+        <div class="learn-card-meta">${priceDetail}${sideBit}${
+      p.leverage != null ? " · " + p.leverage + "x" : ""
+    } · ${isOpen ? "opened" : "cycle"} ${fmtTime(p.opened_at)}${
       p.closed_at ? " → " + fmtTime(p.closed_at) : ""
     }</div>
-        <div class="learn-card-meta">bought ${p.size_qty ?? "—"} / sold ${
-      p.size_sold ?? "—"
-    } · ${p.n_buys || 0} buys · ${p.n_sells || 0} sells</div>
+        <div class="learn-card-meta">${
+          p.exchange_history
+            ? "Exchange realised $" +
+              (p.realized_pnl_usd != null
+                ? Number(p.realized_pnl_usd).toFixed(2)
+                : "—") +
+              (p.fee != null ? " · fee " + p.fee : "")
+            : `bought ${p.size_qty ?? "—"} / sold ${p.size_sold ?? "—"} · ${
+                p.n_buys || 0
+              } buys · ${p.n_sells || 0} sells`
+        }</div>
         <div class="learn-card-meta">Notes: ${(p.notes || "—").slice(0, 120)}</div>
         <div class="pos-fills-h">Buy layers</div>
         ${buys || "<div class='mute'>No fill rows</div>"}
@@ -616,24 +641,24 @@
     </details>`;
   }
 
-  async function loadPositions() {
+  let _posFingerprint = "";
+  let _posLastInteract = 0;
+  let _posWired = false;
+
+  function posFingerprint(positions) {
+    return (positions || [])
+      .map(
+        (p) =>
+          `${p.entity_key || p.symbol}:${p.status}:${p.realized_pnl_usd ?? ""}:${
+            p.upnl_pct ?? ""
+          }:${p.size_remaining ?? ""}:${p.outcome || ""}`
+      )
+      .join("|");
+  }
+
+  function renderPositionsList(positions) {
     const host = $("#posTable");
     if (!host) return;
-    host.innerHTML = rankEmpty("Loading positions…");
-    let d;
-    try {
-      d = await api("/api/positions?closed=true");
-    } catch (e) {
-      host.innerHTML = rankEmpty("Failed to load positions — " + (e.message || e));
-      return;
-    }
-    const positions = d.positions || [];
-    if (!positions.length) {
-      host.innerHTML = rankEmpty("No positions yet — fills sync or log manual");
-      const head0 = $("#posListHead");
-      if (head0) head0.textContent = "0 open · 0 closed";
-      return;
-    }
     const opens = positions.filter((p) => p.status === "open" || p.is_open);
     const closed = positions.filter((p) => !(p.status === "open" || p.is_open));
     const head = $("#posListHead");
@@ -652,21 +677,85 @@
       html += closed.map(posCardHtml).join("");
     }
     host.innerHTML = html;
-    $$("[data-close]", host).forEach((b) =>
-      b.addEventListener("click", async (ev) => {
-        ev.preventDefault();
-        try {
-          await api("/api/positions/close", {
-            method: "POST",
-            body: JSON.stringify({ trade_id: +b.dataset.close }),
-          });
-          toast("Position closed");
-          loadPositions();
-        } catch (e) {
-          toast(e.message);
-        }
-      })
+  }
+
+  function wirePosTableOnce() {
+    const host = $("#posTable");
+    if (!host || _posWired) return;
+    _posWired = true;
+    const bump = () => {
+      _posLastInteract = Date.now();
+    };
+    host.addEventListener("scroll", bump, { passive: true });
+    host.addEventListener("pointerdown", bump);
+    host.addEventListener("click", async (ev) => {
+      const b = ev.target.closest("[data-close]");
+      if (!b || !host.contains(b)) return;
+      ev.preventDefault();
+      try {
+        await api("/api/positions/close", {
+          method: "POST",
+          body: JSON.stringify({ trade_id: +b.dataset.close }),
+        });
+        toast("Position closed");
+        loadPositions({ force: true });
+      } catch (e) {
+        toast(e.message);
+      }
+    });
+  }
+
+  /** @param {{ force?: boolean, soft?: boolean }} [opts] */
+  async function loadPositions(opts) {
+    const force = !!(opts && opts.force);
+    const soft = !!(opts && opts.soft) || (!force && !!_posFingerprint);
+    const host = $("#posTable");
+    if (!host) return;
+    wirePosTableOnce();
+
+    // Soft: skip while user is interacting (scroll / expand)
+    if (soft && Date.now() - _posLastInteract < 8000) return;
+    if (soft && host.querySelector("details[open]")) return;
+    if (soft && host.matches(":hover")) return;
+
+    if (!soft && !host.querySelector(".pos-card")) {
+      host.innerHTML = rankEmpty("Loading positions…");
+    }
+    let d;
+    try {
+      d = await api("/api/positions?closed=true");
+    } catch (e) {
+      if (!soft) {
+        host.innerHTML = rankEmpty(
+          "Failed to load positions — " + (e.message || e)
+        );
+      }
+      return;
+    }
+    const positions = d.positions || [];
+    const fp = posFingerprint(positions);
+    if (soft && fp === _posFingerprint) return; // nothing changed — keep scroll
+
+    const scrollY = host.scrollTop;
+    const openIds = new Set(
+      [...host.querySelectorAll("details[open]")].map((el) => el.dataset.posId)
     );
+
+    if (!positions.length) {
+      host.innerHTML = rankEmpty("No positions yet — fills sync or log manual");
+      const head0 = $("#posListHead");
+      if (head0) head0.textContent = "0 open · 0 closed";
+      _posFingerprint = fp;
+      return;
+    }
+    renderPositionsList(positions);
+    _posFingerprint = fp;
+
+    // restore expand + scroll after rebuild
+    host.querySelectorAll("details[data-pos-id]").forEach((el) => {
+      if (openIds.has(el.dataset.posId)) el.open = true;
+    });
+    host.scrollTop = scrollY;
   }
 
   async function loadMovers() {
@@ -2074,7 +2163,7 @@
     }
     const map = {
       overview: loadOverview,
-      positions: loadPositions,
+      positions: () => loadPositions({ force: true }),
       movers: loadMovers,
       targets: loadTargets,
       memory: loadMemory,
@@ -2117,9 +2206,9 @@
   });
 
   wireLearningForms();
-  // Soft auto-refresh: health often, full view rarely. Never while tab hidden or in call.
-  const SOFT_MS = 120000; // 2 min full view reload (was 40s — too jumpy)
-  const HEALTH_MS = 45000;
+  // Soft auto-refresh: health only by default. Positions never full-wipe on timer.
+  const HEALTH_MS = 60000;
+  const OVERVIEW_SOFT_MS = 180000; // 3 min overview only
   let softTimer = null;
   let healthTimer = null;
 
@@ -2143,14 +2232,27 @@
     }
   }
 
+  async function softRefreshView() {
+    if (document.hidden || state.inCall || state.busy) return;
+    // Positions: soft patch only (skip if interacting / unchanged)
+    if (state.view === "positions") {
+      await loadPositions({ soft: true });
+      return;
+    }
+    // Overview can soft-reload; other tabs are manual / nav only
+    if (state.view === "overview") {
+      try {
+        await loadOverview();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }
+
   function scheduleSoftRefresh() {
     if (softTimer) clearInterval(softTimer);
     if (healthTimer) clearInterval(healthTimer);
-    softTimer = setInterval(() => {
-      if (document.hidden || state.inCall || state.busy) return;
-      // Only reload current view data — not a hard page refresh
-      refreshAll();
-    }, SOFT_MS);
+    softTimer = setInterval(softRefreshView, OVERVIEW_SOFT_MS);
     healthTimer = setInterval(refreshHealthOnly, HEALTH_MS);
   }
 
