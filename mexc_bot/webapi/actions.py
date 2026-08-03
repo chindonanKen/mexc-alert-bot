@@ -571,6 +571,11 @@ TOOL_DEFS = [
         {"limit": {"type": "integer"}},
     ),
     _tool(
+        "what_have_you_learned",
+        "Agent recall: lessons + stats + real teach_ok trade cites (no inventions)",
+        {},
+    ),
+    _tool(
         "list_pending_questions",
         "List open desk learning questions needing owner answer",
         {},
@@ -598,22 +603,13 @@ TOOL_DEFS = [
         ["text"],
     ),
     _tool(
-        "approve_draft",
-        "Approve or dismiss a coach lesson/behavior draft",
-        {
-            "lesson_id": {"type": "integer"},
-            "dismiss": {"type": "boolean"},
-        },
-        ["lesson_id"],
-    ),
-    _tool(
         "learning_stats",
         "Aggregate learning stats from event log (took/skip/bounce)",
         {},
     ),
     _tool(
-        "coach_ask",
-        "Ask AD Super-Agent (beliefs + judgment + chart)",
+        "agent_ask",
+        "Ask the AD agent (student): what learned, brief, or point to tools",
         {"question": {"type": "string"}},
         ["question"],
     ),
@@ -808,11 +804,21 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             )
         if name == "list_fires":
             return {"fires": list_recent_fires(limit=int(args.get("limit") or 12))}
-        if name == "list_pending_questions":
-            from .learning_api import learning_bundle
+        if name == "what_have_you_learned":
+            from .learning_v1 import what_have_you_learned
 
-            b = learning_bundle()
-            return {"pending_questions": b.get("pending_questions") or []}
+            return what_have_you_learned()
+        if name == "list_pending_questions":
+            from .learning_v1 import learning_home_v1
+
+            b = learning_home_v1()
+            return {
+                "pending_questions": (b.get("needs_you") or {}).get(
+                    "pending_questions"
+                )
+                or b.get("pending_questions")
+                or []
+            }
         if name == "answer_question":
             from .learning_api import answer_question
 
@@ -831,20 +837,16 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 tags=args.get("tags"),
                 needs_approval=bool(args.get("needs_approval")),
             )
-        if name == "approve_draft":
-            from .learning_api import approve_draft
-
-            return approve_draft(
-                int(args["lesson_id"]), dismiss=bool(args.get("dismiss"))
-            )
         if name == "learning_stats":
-            from .learning_api import learning_bundle
+            from .learning_v1 import learning_home_v1
 
-            return {"stats": learning_bundle().get("stats")}
-        if name == "coach_ask":
-            from .learning_api import coach_ask
+            return {"stats": learning_home_v1().get("stats") or {}}
+        if name == "agent_ask" or name == "coach_ask":
+            from .learning_v1 import agent_ask
 
-            return coach_ask(str(args.get("question") or "brief"))
+            return agent_ask(
+                str(args.get("question") or "What have you learned so far?")
+            )
         if name == "judge_fire":
             from .learning_api import judge_fire
 

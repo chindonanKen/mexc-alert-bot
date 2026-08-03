@@ -26,7 +26,7 @@
         <button data-view="movers">Movers</button>
         <button data-view="positions">Positions</button>
         <div class="nav-sep">More</div>
-        <button data-view="memory" class="nav-dim" id="navLearning">Agent <span id="navLearnBadge" class="nav-badge" hidden>0</span></button>
+        <button data-view="memory" class="nav-dim" id="navLearning">Learning <span id="navLearnBadge" class="nav-badge" hidden>0</span></button>
         <button data-view="intel" class="nav-dim">Intel</button>
         <button data-view="voice" class="nav-dim">Voice log</button>
         <button data-view="playbook" class="nav-dim">Playbook</button>
@@ -48,7 +48,7 @@
         </div>
       </header>
 
-      <!-- OVERVIEW — Needs you · Targets · Movers · Positions · Coach -->
+      <!-- OVERVIEW — Needs you · Targets · Movers · Positions -->
       <section class="view on" id="view-overview">
         <div id="ovNeedsYou" class="ov-needs-you" hidden></div>
         <div id="ovBookNews" class="ov-book-news" hidden></div>
@@ -78,7 +78,7 @@
           </article>
         </div>
         <div id="ovBookIntel" class="ov-book-intel panel clean mt" hidden></div>
-        <div id="ovCoachPulse" class="ov-coach-pulse panel clean mt"></div>
+        <div id="ovAgentLearned" class="ov-agent-learned panel clean mt" hidden></div>
       </section>
 
       <!-- POSITIONS -->
@@ -134,57 +134,49 @@
         </div>
       </section>
 
-      <!-- AD SUPER-AGENT training cockpit -->
+      <!-- LEARNING V1 — you teach the agent -->
       <section class="view" id="view-memory">
-        <div class="panel agent-hero">
-          <div class="panel-h">
-            <h3>Active case</h3>
-            <button type="button" class="btn soft sm" id="btnJudgeLatest">Re-judge latest fire</button>
-          </div>
-          <div id="agentActiveCase" class="agent-case"></div>
-        </div>
-        <div id="ovNeedsYouLearn" class="panel mt" hidden>
-          <div class="panel-h">
-            <h3>Needs you</h3>
+        <p class="learn-lede mute">You teach. The agent stores. Voice uses the same tools.</p>
+        <div id="ovNeedsYouLearn" class="panel learn-pending-panel" hidden>
+          <header class="panel-h">
+            <h3>Pending answers</h3>
             <span class="badge quiet" id="learnPendingBadge">0</span>
-          </div>
+          </header>
           <div id="learnPending" class="scroll learn-block"></div>
         </div>
-        <div class="learn-grid mt">
+        <div class="learn-v1-grid">
           <div class="panel">
-            <div class="panel-h"><h3>Trained setup edges</h3></div>
-            <div id="agentSetups" class="scroll learn-block"></div>
+            <header class="panel-h"><h3>Teach the agent</h3></header>
+            <form id="teachForm" class="form-col">
+              <textarea name="text" rows="3" placeholder="Rule, process note, size discipline… (agent stores this)" required></textarea>
+              <button class="btn" type="submit">Save lesson</button>
+            </form>
           </div>
           <div class="panel">
-            <div class="panel-h"><h3>Ticker edges</h3></div>
-            <div id="agentTickers" class="scroll learn-block"></div>
+            <header class="panel-h">
+              <h3>What I’ve learned</h3>
+              <button type="button" class="btn soft sm" id="btnWhatLearned">Refresh</button>
+            </header>
+            <pre id="whatLearnedReply" class="learn-recall scroll"></pre>
+            <div id="learnLessons" class="learn-lessons-list mt"></div>
           </div>
         </div>
         <div class="panel mt">
-          <div class="panel-h"><h3>Execution feedback (closed trades)</h3></div>
-          <div id="learnTrades" class="scroll learn-block tall"></div>
+          <header class="panel-h">
+            <h3>Recent</h3>
+            <span class="badge quiet" id="learnStatsBadge">stats</span>
+          </header>
+          <div id="learnStats" class="learn-stats-line mute"></div>
+          <div id="learnRecent" class="scroll learn-block tall mt"></div>
         </div>
         <div class="panel mt">
-          <div class="panel-h"><h3>Talk to the agent</h3></div>
-          <form id="coachForm" class="form-row">
-            <input name="question" placeholder="Judge latest · SIREN edge · why no_trade…" class="grow" />
-            <button class="btn" type="submit">Ask agent</button>
+          <header class="panel-h"><h3>Ask the agent</h3></header>
+          <form id="agentRecallForm" class="form-row">
+            <input name="question" placeholder="What have you learned so far?" class="grow" />
+            <button class="btn soft" type="submit">Ask</button>
           </form>
-          <pre id="coachReply" class="coach-reply scroll"></pre>
-          <form id="teachForm" class="form-row mt">
-            <input name="text" placeholder="Teach a rule (agent stores it)" class="grow" />
-            <button class="btn soft" type="submit">Teach</button>
-          </form>
-          <div id="learnLessons" class="hint mt"></div>
+          <pre id="agentRecallReply" class="learn-recall scroll mt"></pre>
         </div>
-        <div class="panel mt">
-          <div class="panel-h"><h3>Recent fires</h3><span class="badge quiet" id="learnStatsBadge"></span></div>
-          <div id="learnStats" class="hint"></div>
-          <div id="memoryTable" class="scroll mt"></div>
-        </div>
-        <div id="learnDrafts" hidden></div>
-        <div id="learnTickers" hidden></div>
-        <div id="learnTickerDetail" hidden></div>
       </section>
 
       <!-- INTEL -->

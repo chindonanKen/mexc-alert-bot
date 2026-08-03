@@ -158,7 +158,8 @@ class TestWebApi(unittest.TestCase):
         self.assertIn("AD Desk", r.text)
         self.assertIn("ovNeedsYou", r.text)
         self.assertIn("teachForm", r.text)
-        self.assertIn("ovCoachPulse", r.text)
+        self.assertIn("whatLearnedReply", r.text)
+        self.assertIn("ovAgentLearned", r.text)
 
     def test_learning_endpoints(self):
         r = self.client.get("/api/learning")
@@ -166,21 +167,28 @@ class TestWebApi(unittest.TestCase):
         body = r.json()
         self.assertIn("needs_you", body)
         self.assertIn("stats", body)
-        self.assertIn("coach_pulse", body)
-        self.assertTrue(
-            "trades" in body or "beliefs" in body or "agent" in body
-        )
+        self.assertIn("what_learned_reply", body)
+        self.assertEqual(body.get("product"), "learning_v1")
+        self.assertTrue("trades" in body or "lessons" in body)
         r2 = self.client.post(
             "/api/learning/teach",
             json={"text": "webapi test lesson no full size on grind"},
         )
         self.assertEqual(r2.status_code, 200)
         self.assertTrue(r2.json().get("ok"))
+        r_ask = self.client.post(
+            "/api/learning/ask",
+            json={"question": "What have you learned so far?"},
+        )
+        self.assertEqual(r_ask.status_code, 200)
+        self.assertIn("reply", r_ask.json())
         r3 = self.client.get("/api/overview")
         self.assertEqual(r3.status_code, 200)
         ov = r3.json()
         self.assertIn("needs_you", ov)
-        self.assertIn("coach_pulse", ov)
+        self.assertTrue(
+            "agent_summary" in ov or "what_learned_reply" in ov or "hierarchy" in ov
+        )
         r4 = self.client.get("/api/notify/stub")
         self.assertEqual(r4.status_code, 200)
         self.assertEqual(r4.json().get("status"), "stub")

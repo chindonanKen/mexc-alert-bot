@@ -30,20 +30,19 @@ Shared SQLite is plumbing. Owner: `DESK_USER_ID=8630949601`.
 
 ---
 
-## Learning plan — WIPED (do not continue old roadmap)
+## Learning V1 (shipped 2026-08-03) — teach the agent
 
-**Effective immediately:** all prior **active** learning build plans are cancelled for planning purposes:
+**Model:** You teach · agent is student · no coach product.
 
-- L1–L5 “learning environment” ship order in AGENTS.md  
-- Super-Agent / belief / coach UX as the current delivery goal  
-- Assumed “desk = complete teach loop without Telegram” as **done**
+| Surface | Role |
+|---------|------|
+| **Learning** nav | Pending · Teach · What I’ve learned · Recent · Ask agent |
+| **Overview** | Needs you (pending only) · Agent memory strip |
+| **Voice** | `what_have_you_learned`, `teach`, pending, fires/trades, `agent_ask` |
 
-**What remains (assets, not a product plan):**
-- MEXC private fill/position truth (`money_truth`, `teach_ok`, `LEARNING_TEACH_SINCE`)
-- Tables / APIs / voice tools in code — may be reused later  
-- Do **not** expand Learning UI or coach “spine” until owner writes a **new** learning goal
-
-**Next time Learning is in scope:** start from Positions + real MEXC data + a single clear loop. New plan only when owner asks.
+- Money truth: `teach_ok` / `LEARNING_TEACH_SINCE` for $ claims  
+- Old Super-Agent / coach UI removed from Learning view  
+- Module: `mexc_bot/webapi/learning_v1.py`
 
 ---
 

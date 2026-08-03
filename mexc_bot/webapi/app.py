@@ -50,6 +50,10 @@ class CoachBody(BaseModel):
     question: str = ""
 
 
+class AgentAskBody(BaseModel):
+    question: str = "What have you learned so far?"
+
+
 class LabelBody(BaseModel):
     event_id: Optional[int] = None
     action: Optional[str] = None
@@ -421,21 +425,20 @@ def create_app() -> FastAPI:
         )
         needs_you: Dict[str, Any] = {
             "pending_questions": [],
-            "drafts": [],
             "count": 0,
         }
-        coach_pulse = "Memory: open Learning when ready."
+        agent_summary = ""
         learn_stats: Dict[str, Any] = {}
         if uid:
             try:
-                from .learning_api import learning_bundle
+                from .learning_v1 import learning_home_v1
 
-                lb = learning_bundle(uid)
+                lb = learning_home_v1(uid)
                 needs_you = lb.get("needs_you") or needs_you
-                coach_pulse = lb.get("coach_pulse") or coach_pulse
+                agent_summary = lb.get("agent_summary") or lb.get("what_learned_reply") or ""
                 learn_stats = lb.get("stats") or {}
             except Exception as e:
-                logger.debug("learning_bundle: %s", e)
+                logger.debug("learning_home_v1: %s", e)
 
         # Simple journal PnL sketch (closed trades with entry+exit)
         closed = (
@@ -490,7 +493,7 @@ def create_app() -> FastAPI:
                 "book_intel": book_intel,
                 "book_news": book_news,
                 "positions": positions,
-                "coach_pulse": coach_pulse,
+                "agent_summary": agent_summary,
                 "learning": {
                     "recent_labels": labels_recent,
                     "stats": learn_stats,
@@ -498,7 +501,8 @@ def create_app() -> FastAPI:
                 "pnl": pnl,
             },
             "needs_you": needs_you,
-            "coach_pulse": coach_pulse,
+            "agent_summary": agent_summary,
+            "what_learned_reply": agent_summary,
             "positions": positions,
             "recent_events": recent_events[:12],
             "recent_investigations": recent_inv[:8],
@@ -512,7 +516,7 @@ def create_app() -> FastAPI:
                     else "Risk-on — demand quality setups"
                 ),
                 "rule": "Panic + breadth + volume. Isolated + news → no-trade bias.",
-                "coach": coach_pulse,
+                "agent": agent_summary,
             },
             "vision": "docs/AD_DESK_VISION.md",
             "ts": time.time(),
@@ -731,11 +735,29 @@ def create_app() -> FastAPI:
 
     @app.get("/api/learning")
     def learning_home(_: bool = Depends(require_auth)):
-        """AD Super-Agent training cockpit payload."""
+        """Learning V1 — teach the agent / what it has learned."""
         try:
-            from .learning_api import agent_bundle
+            from .learning_v1 import learning_home_v1
 
-            return agent_bundle()
+            return learning_home_v1()
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/learning/ask")
+    def learning_ask(payload: AgentAskBody, _: bool = Depends(require_auth)):
+        try:
+            from .learning_v1 import agent_ask
+
+            return agent_ask(payload.question or "What have you learned so far?")
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/learning/what-learned")
+    def learning_what_learned(_: bool = Depends(require_auth)):
+        try:
+            from .learning_v1 import what_have_you_learned
+
+            return what_have_you_learned()
         except Exception as e:
             raise HTTPException(400, str(e))
 
@@ -915,20 +937,17 @@ def create_app() -> FastAPI:
 
     @app.post("/api/coach")
     def coach(body: CoachBody, _: bool = Depends(require_auth)):
-        from .learning_api import coach_ask
+        """Back-compat → agent recall (no coach product)."""
+        from .learning_v1 import agent_ask
 
-        q = (body.question or body.message or "checklist").strip()
+        q = (body.question or body.message or "What have you learned so far?").strip()
         try:
-            out = coach_ask(q)
+            out = agent_ask(q)
         except Exception as e:
             raise HTTPException(400, str(e))
         return {
             "reply": out.get("reply"),
             "stats": out.get("stats"),
-            "draft_id": out.get("draft_id"),
-            "pulse": out.get("pulse"),
-            "ticker": out.get("ticker"),
-            "closed_trades": out.get("closed_trades"),
             "market": market_context(),
             "ts": time.time(),
         }

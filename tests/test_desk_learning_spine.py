@@ -378,12 +378,12 @@ class TestDeskSurfacesStructural(unittest.TestCase):
     def test_html_has_needs_you_and_learning(self):
         html = (ROOT / "mexc_bot/webapi/static/index.html").read_text()
         self.assertIn("ovNeedsYou", html)
-        self.assertIn("ovCoachPulse", html)
+        self.assertIn("ovAgentLearned", html)
         self.assertIn("ovBookIntel", html)
         self.assertIn("teachForm", html)
-        self.assertIn("coachForm", html)
+        self.assertIn("whatLearnedReply", html)
         self.assertIn("learnPending", html)
-        self.assertIn("learnDrafts", html)
+        self.assertIn("agentRecallForm", html)
         self.assertIn("navLearnBadge", html)
         self.assertIn("navLearning", html)
 
@@ -391,7 +391,7 @@ class TestDeskSurfacesStructural(unittest.TestCase):
         js = (ROOT / "mexc_bot/webapi/static/assets/desk.js").read_text()
         self.assertIn("/api/learning", js)
         self.assertIn("/api/learning/teach", js)
-        self.assertIn("/api/learning/approve", js)
+        self.assertIn("/api/learning/ask", js)
         self.assertIn("/api/learning/answer", js)
         self.assertIn("Needs you", js)
         self.assertIn("updateLearningNavBadge", js)
@@ -426,8 +426,8 @@ class TestLearningApiIntegration(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_learning_bundle_and_coach_ask(self):
-        from mexc_bot.webapi import learning_api
+    def test_learning_v1_home_and_agent_ask(self):
+        from mexc_bot.webapi import learning_api, learning_v1
 
         eid = self.store.log_event(
             self.uid,
@@ -442,21 +442,22 @@ class TestLearningApiIntegration(unittest.TestCase):
         self.store.enqueue_pending_question(
             self.uid, question="Was skip intentional?", event_id=None, max_open=2
         )
-        bundle = learning_api.learning_bundle(self.uid)
+        bundle = learning_v1.learning_home_v1(self.uid)
         self.assertIn("needs_you", bundle)
-        self.assertIn("coach_pulse", bundle)
+        self.assertIn("what_learned_reply", bundle)
+        self.assertEqual(bundle.get("product"), "learning_v1")
         self.assertGreaterEqual(bundle["needs_you"]["count"], 1)
         self.assertEqual(bundle["stats"]["took"], 1)
 
-        out = learning_api.coach_ask("panic setup?", user_id=self.uid)
-        self.assertIn("reply", out)
-        self.assertTrue(
-            "SUPER-AGENT" in out["reply"] or "Judgment" in out["reply"] or "PANIC" in out["reply"]
+        out = learning_v1.agent_ask(
+            "What have you learned so far?", user_id=self.uid
         )
+        self.assertIn("reply", out)
         teach = learning_api.teach("Test lesson from desk", user_id=self.uid)
         self.assertTrue(teach["ok"])
+        learned = learning_v1.what_have_you_learned(self.uid)
+        self.assertGreaterEqual(learned.get("lesson_count") or 0, 1)
 
-        # answer pending
         qs = self.store.list_pending_questions(self.uid)
         self.assertTrue(qs)
         ans = learning_api.answer_question(
