@@ -219,7 +219,11 @@ body::before {
   margin: -0.25rem 0 0.55rem;
   padding: 0 0.15rem;
 }
-.learn-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.45rem; }
+.learn-chip-hint {
+  font-size: 0.72rem;
+  margin: 0 0 0.35rem;
+}
+.learn-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.4rem; }
 .chip {
   font-size: 0.72rem;
   font-weight: 600;
@@ -231,11 +235,81 @@ body::before {
   color: var(--mute);
   cursor: pointer;
 }
+.chip:hover {
+  border-color: rgba(125, 211, 252, 0.45);
+  color: var(--cyan, #7dd3fc);
+}
 .chip.on {
   border-color: var(--mint, #34d399);
   color: var(--mint, #34d399);
   background: rgba(52, 211, 153, 0.12);
 }
+/* Subtle collapsible process guide */
+.learn-guide {
+  margin: 0 0 0.55rem;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  background: rgba(0,0,0,0.15);
+}
+.learn-guide-sum {
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mute);
+  padding: 0.4rem 0.6rem;
+  opacity: 0.85;
+}
+.learn-guide-sum::-webkit-details-marker { display: none; }
+.learn-guide-sum::before {
+  content: "▸ ";
+  opacity: 0.6;
+}
+.learn-guide[open] .learn-guide-sum::before { content: "▾ "; }
+.learn-guide[open] .learn-guide-sum { color: var(--cyan, #7dd3fc); opacity: 1; }
+.learn-guide-body {
+  padding: 0 0.65rem 0.65rem;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.learn-guide-lede {
+  font-size: 0.78rem;
+  color: var(--mute);
+  margin: 0.5rem 0 0.45rem;
+  line-height: 1.4;
+}
+.learn-guide-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.74rem;
+}
+.learn-guide-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--mute);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.3rem 0.4rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.learn-guide-table td {
+  padding: 0.4rem 0.4rem;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.82);
+  line-height: 1.35;
+}
+.learn-guide-table tr:last-child td { border-bottom: none; }
+.learn-guide-table code {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--mint, #34d399);
+  font-weight: 600;
+}
+.learn-guide-table td:first-child { white-space: nowrap; width: 6.5rem; }
+.learn-guide-table td:last-child { color: var(--mute); }
 .learn-about {
   display: inline-block;
   font-size: 0.65rem;

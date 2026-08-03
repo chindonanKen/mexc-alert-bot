@@ -174,15 +174,64 @@
               <input type="hidden" name="market" id="teachMarket" value="" />
               <input type="hidden" name="event_id" id="teachEventId" value="" />
               <input type="hidden" name="context_type" id="teachContextType" value="" />
+              <p class="learn-chip-hint mute">Process labels (not PnL). Hover a chip · or open the guide.</p>
               <div class="learn-chips" id="learnBehaviorChips" aria-label="Process tags">
-                <button type="button" class="chip" data-beh="plan_ok">plan_ok</button>
-                <button type="button" class="chip" data-beh="greed">greed</button>
-                <button type="button" class="chip" data-beh="fomo">fomo</button>
-                <button type="button" class="chip" data-beh="hesitant">hesitant</button>
-                <button type="button" class="chip" data-beh="pride">pride</button>
-                <button type="button" class="chip" data-beh="rule_break">rule_break</button>
-                <button type="button" class="chip" data-beh="process_skip">process_skip</button>
+                <button type="button" class="chip" data-beh="plan_ok" title="Followed AD plan: size, layers, exit idea. Agent: repeat this process.">plan_ok</button>
+                <button type="button" class="chip" data-beh="greed" title="Held too long / oversized / wouldn’t scale out. Agent: stayed past the plan.">greed</button>
+                <button type="button" class="chip" data-beh="fomo" title="Chased after the fire; late “can’t miss it”. Agent: late / emotional entry.">fomo</button>
+                <button type="button" class="chip" data-beh="hesitant" title="Right idea but tiny size or delayed. Agent: under-committed.">hesitant</button>
+                <button type="button" class="chip" data-beh="pride" title="Wouldn’t cut a failed AD (“has to come back”). Agent: ego hold.">pride</button>
+                <button type="button" class="chip" data-beh="rule_break" title="Broke a hard rule (size, grind, isolated…). Agent: hard do-not.">rule_break</button>
+                <button type="button" class="chip" data-beh="process_skip" title="Should have taken/skipped per plan, but didn’t. Agent: process miss, not setup miss.">process_skip</button>
               </div>
+              <details class="learn-guide">
+                <summary class="learn-guide-sum">Process chip guide</summary>
+                <div class="learn-guide-body">
+                  <p class="learn-guide-lede">These label <strong>process</strong>, not “did I make money?” Lucky green can still be <code>fomo</code>.</p>
+                  <table class="learn-guide-table">
+                    <thead>
+                      <tr><th>Chip</th><th>When you tap it</th><th>Agent learns</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><code>plan_ok</code></td>
+                        <td>Followed AD plan: size, layers, exit idea</td>
+                        <td>Repeat this process</td>
+                      </tr>
+                      <tr>
+                        <td><code>greed</code></td>
+                        <td>Held too long / oversized / no scale-out</td>
+                        <td>Stayed past the plan</td>
+                      </tr>
+                      <tr>
+                        <td><code>fomo</code></td>
+                        <td>Chased after the fire; late entry</td>
+                        <td>Late / emotional — not clean fire take</td>
+                      </tr>
+                      <tr>
+                        <td><code>hesitant</code></td>
+                        <td>Right idea, tiny size or delayed</td>
+                        <td>Under-committed</td>
+                      </tr>
+                      <tr>
+                        <td><code>pride</code></td>
+                        <td>Wouldn’t cut a failed AD</td>
+                        <td>Ego hold (even if later green)</td>
+                      </tr>
+                      <tr>
+                        <td><code>rule_break</code></td>
+                        <td>Broke a hard rule (size, grind…)</td>
+                        <td>Hard do-not on that pattern</td>
+                      </tr>
+                      <tr>
+                        <td><code>process_skip</code></td>
+                        <td>Should have taken/skipped, but didn’t</td>
+                        <td>Process miss — setup may still be fine</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </details>
               <textarea name="text" id="teachText" rows="4" placeholder="What should the agent remember about THIS trade/fire? (process, size, timing…)" required></textarea>
               <div class="row-gap">
                 <button class="btn" type="submit" id="teachSubmit" disabled>Save lesson on selection</button>
