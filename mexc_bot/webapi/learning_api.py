@@ -281,7 +281,9 @@ def agent_bundle(user_id: Optional[int] = None) -> Dict[str, Any]:
     from ..learning.money_truth import coach_last_closed_line, list_money_reviews
 
     # Money facts for teaching = exchange-backed entities (not journal dossiers)
-    trades = list_money_reviews(uid, limit=12, store=store)
+    trades = list_money_reviews(
+        uid, limit=12, teach_only=True, store=store
+    )
     closed = [t for t in trades if t.get("status") == "closed"]
     stats = store.learning_stats(uid)
     lessons = store.list_lessons(uid, approved_only=True, limit=8)
