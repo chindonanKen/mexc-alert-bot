@@ -29,7 +29,7 @@ def list_position_entities(
         from ..learning.trades import segment_positions_from_fills
 
         store = EventStore(db.db_path())
-        fills_all = store.recent_fills(user_id, limit=500)
+        fills_all = store.recent_fills(user_id, limit=1500)
     except Exception as e:
         logger.debug("list_position_entities fills: %s", e)
         return _fallback_journal(user_id, include_closed=include_closed)
@@ -62,6 +62,64 @@ def list_position_entities(
             if not include_closed and s.get("status") != "open":
                 continue
             entities.append(s)
+
+    # Futures exchange open positions override residual (holdVol is truth)
+    try:
+        from ..learning.fills import read_futures_open_cache
+
+        fut_opens = read_futures_open_cache(store, user_id)
+    except Exception:
+        fut_opens = []
+    for fo in fut_opens:
+        fsym = str(fo.get("symbol") or "").upper()
+        hold = float(fo.get("hold_vol") or 0)
+        if not fsym or hold <= 0:
+            continue
+        # match open futures entity
+        matched = False
+        for e in entities:
+            if e.get("status") != "open":
+                continue
+            if (e.get("market") or "").lower() != "futures":
+                continue
+            es = str(e.get("symbol") or "").upper().replace("_", "")
+            if es == fsym.replace("_", ""):
+                e["size_remaining"] = hold
+                if fo.get("entry_avg") is not None:
+                    e["entry_avg"] = fo["entry_avg"]
+                    e["entry_display"] = fo["entry_avg"]
+                e["exchange_hold"] = True
+                e["leverage"] = fo.get("leverage")
+                e["realized_on_pos"] = fo.get("realized")
+                matched = True
+                break
+        if not matched:
+            # open on exchange but no fill cycle yet
+            entities.append(
+                {
+                    "symbol": fsym,
+                    "market": "futures",
+                    "status": "open",
+                    "outcome": "open",
+                    "is_open": True,
+                    "opened_at": None,
+                    "closed_at": None,
+                    "entry_avg": fo.get("entry_avg"),
+                    "entry_display": fo.get("entry_avg"),
+                    "exit_avg": None,
+                    "size_remaining": hold,
+                    "size_qty": hold,
+                    "size_sold": 0,
+                    "buy_orders": [],
+                    "sell_orders": [],
+                    "n_buys": 0,
+                    "n_sells": 0,
+                    "recon_from_fills": False,
+                    "exchange_hold": True,
+                    "leverage": fo.get("leverage"),
+                    "notes": "open on MEXC futures (awaiting deal sync)",
+                }
+            )
 
     # Journal opens with no fill inventory still need to show (manual log / test)
     open_keys = {

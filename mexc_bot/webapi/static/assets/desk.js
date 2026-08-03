@@ -2117,8 +2117,49 @@
   });
 
   wireLearningForms();
+  // Soft auto-refresh: health often, full view rarely. Never while tab hidden or in call.
+  const SOFT_MS = 120000; // 2 min full view reload (was 40s — too jumpy)
+  const HEALTH_MS = 45000;
+  let softTimer = null;
+  let healthTimer = null;
+
+  async function refreshHealthOnly() {
+    if (document.hidden || state.inCall || state.busy) return;
+    try {
+      const h = await api("/api/health");
+      const st = $("#connStatus");
+      if (st) {
+        st.textContent = h.db_exists ? "live · db" : "live · empty db";
+        st.className = "pill ok";
+      }
+      const xb = $("#xaiBadge");
+      if (xb) xb.textContent = h.xai_configured ? "XAI ready" : "set XAI_API_KEY";
+    } catch (_) {
+      const st = $("#connStatus");
+      if (st) {
+        st.textContent = "offline";
+        st.className = "pill err";
+      }
+    }
+  }
+
+  function scheduleSoftRefresh() {
+    if (softTimer) clearInterval(softTimer);
+    if (healthTimer) clearInterval(healthTimer);
+    softTimer = setInterval(() => {
+      if (document.hidden || state.inCall || state.busy) return;
+      // Only reload current view data — not a hard page refresh
+      refreshAll();
+    }, SOFT_MS);
+    healthTimer = setInterval(refreshHealthOnly, HEALTH_MS);
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshHealthOnly();
+  });
+
   setView("overview");
   updateMicUi();
   refreshAll();
-  setInterval(refreshAll, 40000);
+  scheduleSoftRefresh();
 })();

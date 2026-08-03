@@ -48,11 +48,13 @@ def fills_for_trade(
     opened_at: Optional[float],
     closed_at: Optional[float],
     all_history: bool = False,
+    strict_market: bool = False,
 ) -> Dict[str, List[dict]]:
     """Split fills into buy/sell layers.
 
     Default: window around journal open/close.
     ``all_history=True``: every fill for the symbol (for correct size/avg).
+    ``strict_market=True``: never mix spot and futures books (position entities).
     """
     o = _f(opened_at) or 0.0
     c = _f(closed_at) or (time.time() + 1)
@@ -60,15 +62,18 @@ def fills_for_trade(
     win_end = c + 120
     buys: List[dict] = []
     sells: List[dict] = []
+    mwant = (market or "").lower()
     for f in fills:
         if not symbols_match(symbol, f.get("symbol") or ""):
             continue
         fm = (f.get("market") or "").lower()
-        if market and fm and fm not in ("", market.lower()):
-            # spot fills often market=spot; journal may say futures for stock perps
-            if market.lower() == "futures" and fm == "spot":
-                pass  # allow spot fills for desk journal rows
-            elif fm not in ("", market.lower()):
+        if mwant and fm and fm not in ("", mwant):
+            if strict_market:
+                continue
+            # dossier convenience: futures journal may still want spot fills
+            if mwant == "futures" and fm == "spot":
+                pass
+            else:
                 continue
         ts = _f(f.get("ts")) or 0.0
         if not all_history and (ts < win_start or ts > win_end):
@@ -81,6 +86,7 @@ def fills_for_trade(
             "side": side,
             "exchange_trade_id": f.get("exchange_trade_id"),
             "quote_qty": _f(f.get("quote_qty")),
+            "market": fm or mwant or "spot",
         }
         if side in ("buy", "long", "bid"):
             buys.append(layer)
@@ -101,6 +107,7 @@ def _all_fills_chronological(
         opened_at=0,
         closed_at=time.time() + 1,
         all_history=True,
+        strict_market=True,
     )
     all_fills: List[dict] = []
     for b in layers["buys"]:

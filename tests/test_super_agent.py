@@ -321,6 +321,78 @@ class TestSegmentPositionEntities(unittest.TestCase):
         self.assertAlmostEqual(open_["size_remaining"], 40000.0, places=3)
         self.assertEqual(open_["n_buys"], 1)
 
+    def test_spot_and_futures_books_isolated(self):
+        from mexc_bot.learning.trades import segment_positions_from_fills
+
+        fills = [
+            {
+                "symbol": "SYNUSDT",
+                "market": "spot",
+                "side": "buy",
+                "price": 0.1,
+                "qty": 100,
+                "ts": 100,
+            },
+            {
+                "symbol": "SYN_USDT",
+                "market": "futures",
+                "side": "buy",
+                "price": 0.1,
+                "qty": 50,
+                "ts": 200,
+            },
+            {
+                "symbol": "SYN_USDT",
+                "market": "futures",
+                "side": "sell",
+                "price": 0.12,
+                "qty": 50,
+                "ts": 300,
+            },
+        ]
+        fut = segment_positions_from_fills(fills, symbol="SYN_USDT", market="futures")
+        spot = segment_positions_from_fills(fills, symbol="SYNUSDT", market="spot")
+        self.assertEqual(len(fut), 1)
+        self.assertEqual(fut[0]["status"], "closed")
+        self.assertEqual(fut[0]["outcome"], "success")
+        self.assertEqual(len(spot), 1)
+        self.assertEqual(spot[0]["status"], "open")
+        self.assertAlmostEqual(spot[0]["size_remaining"], 100.0, places=5)
+
+
+class TestFuturesDealMap(unittest.TestCase):
+    def test_side_codes_to_buy_sell(self):
+        from mexc_bot.exchange_private import futures_deal_to_fill_row
+
+        buy = futures_deal_to_fill_row(
+            {
+                "id": "1",
+                "symbol": "SYN_USDT",
+                "side": 1,
+                "vol": 10,
+                "price": 0.1,
+                "timestamp": 1_700_000_000_000,
+            },
+            1,
+        )
+        sell = futures_deal_to_fill_row(
+            {
+                "id": "2",
+                "symbol": "SYN_USDT",
+                "side": 3,
+                "vol": 10,
+                "price": 0.12,
+                "timestamp": 1_700_000_100_000,
+                "reduceOnly": True,
+            },
+            1,
+        )
+        self.assertEqual(buy["side"], "buy")
+        self.assertEqual(buy["market"], "futures")
+        self.assertEqual(buy["exchange_trade_id"], "f:1")
+        self.assertEqual(sell["side"], "sell")
+        self.assertEqual(sell["symbol"], "SYN_USDT")
+
 
 class TestFatalNewsJudge(unittest.TestCase):
     def test_hard_fatal_forces_no_trade(self):

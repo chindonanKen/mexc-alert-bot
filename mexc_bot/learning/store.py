@@ -1138,7 +1138,7 @@ class EventStore:
                 WHERE user_id = ?
                 ORDER BY ts DESC LIMIT ?
                 """,
-                (user_id, max(1, min(limit, 500))),
+                (user_id, max(1, min(limit, 2000))),
             ).fetchall()
             return [dict(r) for r in rows]
 
@@ -1152,12 +1152,23 @@ class EventStore:
         return [r for r in rows if symbols_match(symbol, r.get("symbol") or "")]
 
     def symbols_for_fill_sync(self, user_id: int) -> List[str]:
-        """Symbols from open journal + recent events (spot-ish form)."""
+        """Spot-compact symbols for myTrades (BTCUSDT form)."""
         with self._lock:
             conn = self._get_conn()
             syms = set()
             for row in conn.execute(
-                "SELECT symbol FROM journal_trades WHERE user_id = ? AND status = 'open'",
+                "SELECT symbol, market FROM journal_trades WHERE user_id = ?",
+                (user_id,),
+            ):
+                m = (row["market"] or "spot").lower()
+                if m == "futures":
+                    continue
+                syms.add(str(row["symbol"]).upper().replace("_", ""))
+            for row in conn.execute(
+                """
+                SELECT DISTINCT symbol FROM journal_fills
+                WHERE user_id = ? AND market = 'spot' ORDER BY ts DESC LIMIT 80
+                """,
                 (user_id,),
             ):
                 syms.add(str(row["symbol"]).upper().replace("_", ""))
@@ -1168,10 +1179,58 @@ class EventStore:
                 """,
                 (user_id,),
             ):
+                if (row["market"] or "").lower() == "futures":
+                    continue
                 s = str(row["symbol"]).upper().replace("_", "")
-                if row["market"] == "spot" or "USDT" in s:
+                if "USDT" in s:
                     syms.add(s)
             return sorted(syms)
+
+    def futures_symbols_for_fill_sync(self, user_id: int) -> List[str]:
+        """Futures contract symbols in BASE_USDT form."""
+        from ..exchange_private import normalize_futures_symbol
+
+        with self._lock:
+            conn = self._get_conn()
+            syms = set()
+            for row in conn.execute(
+                """
+                SELECT DISTINCT symbol FROM journal_fills
+                WHERE user_id = ? AND market = 'futures' ORDER BY ts DESC LIMIT 80
+                """,
+                (user_id,),
+            ):
+                s = normalize_futures_symbol(str(row["symbol"]))
+                if s:
+                    syms.add(s)
+            for row in conn.execute(
+                """
+                SELECT symbol, market FROM learning_events
+                WHERE user_id = ? AND market = 'futures' ORDER BY ts DESC LIMIT 50
+                """,
+                (user_id,),
+            ):
+                s = normalize_futures_symbol(str(row["symbol"]))
+                if s:
+                    syms.add(s)
+            return sorted(syms)
+
+    def purge_auto_journal_trades(self, user_id: int) -> int:
+        """Delete auto-generated journal rows that polluted position history."""
+        with self._lock:
+            conn = self._get_conn()
+            cur = conn.execute(
+                """
+                DELETE FROM journal_trades
+                WHERE user_id = ?
+                  AND (
+                    notes LIKE '%auto from MEXC fill%'
+                    OR notes LIKE '%auto close from MEXC fill%'
+                  )
+                """,
+                (user_id,),
+            )
+            return int(cur.rowcount or 0)
 
     def upsert_journal_from_fill(self, fill: dict) -> None:
         """Open journal on buy; close on sell if open exists (heuristic)."""

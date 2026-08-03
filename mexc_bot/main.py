@@ -280,21 +280,32 @@ def main() -> None:
         and settings.mexc_api_secret
         and settings.mexc_private_telegram_user_id
     ):
-        from .exchange_private import MexcPrivateSpotClient
+        from .exchange_private import (
+            MexcPrivateFuturesClient,
+            MexcPrivateSpotClient,
+            normalize_futures_symbol,
+        )
         from .learning.fills import FillSyncPoller
 
+        spot_base = settings.mexc_api_base.replace("/api/v3", "")
+        if "/api/v3" in settings.mexc_api_base:
+            spot_base = (
+                settings.mexc_api_base.split("/api/v3")[0] or "https://api.mexc.com"
+            )
         priv = MexcPrivateSpotClient(
             settings.mexc_api_key,
             settings.mexc_api_secret,
-            base_url=settings.mexc_api_base.replace("/api/v3", ""),
+            base_url=spot_base,
         )
-        # base_url for private is https://api.mexc.com — fix if mexc_api_base includes path
-        if "/api/v3" in settings.mexc_api_base:
-            priv = MexcPrivateSpotClient(
-                settings.mexc_api_key,
-                settings.mexc_api_secret,
-                base_url=settings.mexc_api_base.split("/api/v3")[0] or "https://api.mexc.com",
-            )
+        fut_base = "https://contract.mexc.com"
+        if getattr(settings, "mexc_futures_api_base", None):
+            fb = settings.mexc_futures_api_base
+            fut_base = fb.split("/api/")[0] if "/api/" in fb else fb.rstrip("/")
+        fut_priv = MexcPrivateFuturesClient(
+            settings.mexc_api_key,
+            settings.mexc_api_secret,
+            base_url=fut_base or "https://contract.mexc.com",
+        )
         uid = int(settings.mexc_private_telegram_user_id)
 
         def _fill_syms():
@@ -302,6 +313,41 @@ def main() -> None:
                 return set(event_store.symbols_for_fill_sync(uid))
             except Exception:
                 return set()
+
+        def _fut_syms():
+            try:
+                out = set(event_store.futures_symbols_for_fill_sync(uid))
+            except Exception:
+                out = set()
+            try:
+                if mover_store is not None:
+                    for row in mover_store.get_watchlist(uid):
+                        if (row.get("market") or "").lower() != "futures":
+                            continue
+                        s = normalize_futures_symbol(str(row.get("symbol") or ""))
+                        if s:
+                            out.add(s)
+            except Exception:
+                pass
+            try:
+                for a in store.get_user_alerts(uid):
+                    if (a.get("market") or "").lower() != "futures":
+                        continue
+                    s = normalize_futures_symbol(str(a.get("symbol") or ""))
+                    if s:
+                        out.add(s)
+            except Exception:
+                pass
+            out.discard("")
+            return out
+
+        # Cleanup auto journal junk that mixed with fill-based entities
+        try:
+            n = event_store.purge_auto_journal_trades(uid)
+            if n:
+                logger.info("Purged %s auto journal_trades for user %s", n, uid)
+        except Exception as e:
+            logger.debug("purge auto journal: %s", e)
 
         fill_sync = FillSyncPoller(
             event_store,
@@ -311,8 +357,13 @@ def main() -> None:
             poll_seconds=settings.mexc_fill_sync_poll_seconds,
             notifier=send_telegram_notification,
             notify_on_new=settings.mexc_fill_notify,
+            futures_client=fut_priv,
+            get_futures_symbols=_fut_syms,
+            write_auto_journal=False,
         )
-        logger.info("MEXC private fill sync configured for user_id=%s", uid)
+        logger.info(
+            "MEXC private fill sync configured for user_id=%s (spot+futures)", uid
+        )
     elif settings.feature_mexc_private_read:
         logger.warning(
             "FEATURE_MEXC_PRIVATE_READ on but missing keys, learning, or "
