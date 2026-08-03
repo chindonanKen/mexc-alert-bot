@@ -38,17 +38,26 @@ def _norm_sym(symbol: str) -> str:
 
 
 def symbols_match(a: str, b: str) -> bool:
+    """Exact symbol identity after normalize (compact/underscore/STOCK).
+
+    Do **not** use substring contains — short bases like B match inside LABUSDT.
+    """
     na, nb = _norm_sym(a), _norm_sym(b)
     if not na or not nb:
         return False
     if na == nb:
         return True
+
+    def base(s: str) -> str:
+        return s[:-4] if s.endswith("USDT") else s
+
+    ba, bb = base(na), base(nb)
+    if ba and ba == bb:
+        return True
     # compact vs base: BTCUSDT vs BTC
-    if na.endswith("USDT") and na[:-4] == nb:
+    if ba == nb or bb == na:
         return True
-    if nb.endswith("USDT") and nb[:-4] == na:
-        return True
-    return na in nb or nb in na
+    return False
 
 
 def infer_engagement(
