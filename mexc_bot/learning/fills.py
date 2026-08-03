@@ -241,16 +241,63 @@ def _write_futures_open_cache(
 def read_futures_open_cache(
     event_store: EventStore, user_id: int, *, max_age_s: float = 600.0
 ) -> List[dict]:
+    """Positions list if cache fresh; [] if missing/stale/wrong user.
+
+    Prefer ``read_futures_open_authority`` when empty must mean “no opens”.
+    """
+    auth = read_futures_open_authority(event_store, user_id, max_age_s=max_age_s)
+    return auth if auth is not None else []
+
+
+def read_futures_open_authority(
+    event_store: EventStore, user_id: int, *, max_age_s: float = 900.0
+) -> Optional[List[dict]]:
+    """Authoritative futures opens from bot fill-sync cache.
+
+    Returns:
+      list (possibly empty) when cache is fresh for this user;
+      None when cache is missing/stale (caller must not demote fill opens).
+    """
     path = _futures_cache_path(event_store)
     try:
         if not path.is_file():
-            return []
+            return None
         data = json.loads(path.read_text(encoding="utf-8"))
         if int(data.get("user_id") or 0) != int(user_id):
-            return []
+            return None
         if time.time() - float(data.get("ts") or 0) > max_age_s:
-            return []
+            return None
         rows = data.get("positions") or []
         return rows if isinstance(rows, list) else []
     except Exception:
-        return []
+        return None
+
+
+def fetch_live_futures_opens(
+    user_id: int, event_store: Optional[EventStore] = None
+) -> Optional[List[dict]]:
+    """Best-effort live open_positions when API keys are in the environment."""
+    import os
+
+    key = (os.getenv("MEXC_API_KEY") or "").strip()
+    sec = (os.getenv("MEXC_API_SECRET") or "").strip()
+    if not key or not sec:
+        return None
+    try:
+        client = MexcPrivateFuturesClient(key, sec)
+        if not client.configured:
+            return None
+        snaps = []
+        for p in client.get_open_positions():
+            s = futures_position_snapshot(p)
+            if s and (s.get("hold_vol") or 0) > 0:
+                snaps.append({k: v for k, v in s.items() if k != "raw"})
+        if event_store is not None and int(user_id) > 0:
+            try:
+                _write_futures_open_cache(event_store, user_id, snaps)
+            except Exception:
+                pass
+        return snaps
+    except Exception as e:
+        logger.debug("live futures opens: %s", e)
+        return None

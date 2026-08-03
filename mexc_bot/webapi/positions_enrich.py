@@ -63,63 +63,9 @@ def list_position_entities(
                 continue
             entities.append(s)
 
-    # Futures exchange open positions override residual (holdVol is truth)
-    try:
-        from ..learning.fills import read_futures_open_cache
-
-        fut_opens = read_futures_open_cache(store, user_id)
-    except Exception:
-        fut_opens = []
-    for fo in fut_opens:
-        fsym = str(fo.get("symbol") or "").upper()
-        hold = float(fo.get("hold_vol") or 0)
-        if not fsym or hold <= 0:
-            continue
-        # match open futures entity
-        matched = False
-        for e in entities:
-            if e.get("status") != "open":
-                continue
-            if (e.get("market") or "").lower() != "futures":
-                continue
-            es = str(e.get("symbol") or "").upper().replace("_", "")
-            if es == fsym.replace("_", ""):
-                e["size_remaining"] = hold
-                if fo.get("entry_avg") is not None:
-                    e["entry_avg"] = fo["entry_avg"]
-                    e["entry_display"] = fo["entry_avg"]
-                e["exchange_hold"] = True
-                e["leverage"] = fo.get("leverage")
-                e["realized_on_pos"] = fo.get("realized")
-                matched = True
-                break
-        if not matched:
-            # open on exchange but no fill cycle yet
-            entities.append(
-                {
-                    "symbol": fsym,
-                    "market": "futures",
-                    "status": "open",
-                    "outcome": "open",
-                    "is_open": True,
-                    "opened_at": None,
-                    "closed_at": None,
-                    "entry_avg": fo.get("entry_avg"),
-                    "entry_display": fo.get("entry_avg"),
-                    "exit_avg": None,
-                    "size_remaining": hold,
-                    "size_qty": hold,
-                    "size_sold": 0,
-                    "buy_orders": [],
-                    "sell_orders": [],
-                    "n_buys": 0,
-                    "n_sells": 0,
-                    "recon_from_fills": False,
-                    "exchange_hold": True,
-                    "leverage": fo.get("leverage"),
-                    "notes": "open on MEXC futures (awaiting deal sync)",
-                }
-            )
+    # Futures: exchange open_positions is the only source of truth for OPEN risk.
+    # Incomplete deal history leaves ghost residuals (LAB/B/ZHIPU…) — demote those.
+    entities = _reconcile_futures_with_exchange(entities, store, user_id)
 
     # Journal opens with no fill inventory still need to show (manual log / test)
     open_keys = {
@@ -230,6 +176,112 @@ def list_position_entities(
             e["journal_id"] = None
         e["band"] = "open" if e.get("status") == "open" else "closed"
     return entities
+
+
+def _norm_fut_key(symbol: str) -> str:
+    return str(symbol or "").upper().replace("_", "").replace("-", "")
+
+
+def _reconcile_futures_with_exchange(
+    entities: List[dict], store: Any, user_id: int
+) -> List[dict]:
+    """Keep only exchange-confirmed futures opens; drop fill-history ghosts.
+
+    Incomplete order_deals history leaves residual qty on closed contracts.
+    MEXC ``open_positions`` is authoritative for what is actually open.
+    """
+    from ..learning.fills import (
+        fetch_live_futures_opens,
+        read_futures_open_authority,
+    )
+
+    # Prefer live API (desk/bot share keys on droplet); else fresh cache
+    fut_opens = fetch_live_futures_opens(user_id, event_store=store)
+    if fut_opens is None:
+        fut_opens = read_futures_open_authority(store, user_id, max_age_s=900.0)
+    if fut_opens is None:
+        # No authority — leave fill-based opens (offline / no keys)
+        logger.debug("futures open authority unavailable; keeping fill residual opens")
+        return entities
+
+    by_exch: Dict[str, dict] = {}
+    for fo in fut_opens:
+        k = _norm_fut_key(str(fo.get("symbol") or ""))
+        hold = float(fo.get("hold_vol") or 0)
+        if k and hold > 0:
+            by_exch[k] = fo
+
+    kept: List[dict] = []
+    matched_exch: Set[str] = set()
+    dropped_ghosts = 0
+    for e in entities:
+        if (e.get("market") or "").lower() != "futures":
+            kept.append(e)
+            continue
+        if e.get("status") != "open" and not e.get("is_open"):
+            kept.append(e)
+            continue
+        # open futures entity
+        k = _norm_fut_key(str(e.get("symbol") or ""))
+        fo = by_exch.get(k)
+        if not fo:
+            # Ghost residual — not open on exchange (incomplete fills)
+            dropped_ghosts += 1
+            continue
+        hold = float(fo.get("hold_vol") or 0)
+        e["size_remaining"] = hold
+        if fo.get("entry_avg") is not None:
+            e["entry_avg"] = fo["entry_avg"]
+            e["entry_display"] = fo["entry_avg"]
+        e["exchange_hold"] = True
+        e["leverage"] = fo.get("leverage")
+        e["realized_on_pos"] = fo.get("realized")
+        e["status"] = "open"
+        e["is_open"] = True
+        e["outcome"] = "open"
+        matched_exch.add(k)
+        kept.append(e)
+
+    # Exchange open with no fill cycle yet
+    for k, fo in by_exch.items():
+        if k in matched_exch:
+            continue
+        fsym = str(fo.get("symbol") or "").upper()
+        hold = float(fo.get("hold_vol") or 0)
+        kept.append(
+            {
+                "symbol": fsym,
+                "market": "futures",
+                "status": "open",
+                "outcome": "open",
+                "is_open": True,
+                "opened_at": None,
+                "closed_at": None,
+                "entry_avg": fo.get("entry_avg"),
+                "entry_display": fo.get("entry_avg"),
+                "exit_avg": None,
+                "size_remaining": hold,
+                "size_qty": hold,
+                "size_sold": 0,
+                "buy_orders": [],
+                "sell_orders": [],
+                "n_buys": 0,
+                "n_sells": 0,
+                "recon_from_fills": False,
+                "exchange_hold": True,
+                "leverage": fo.get("leverage"),
+                "realized_on_pos": fo.get("realized"),
+                "notes": "open on MEXC futures",
+            }
+        )
+
+    if dropped_ghosts:
+        logger.info(
+            "Dropped %s ghost futures open(s); exchange open=%s",
+            dropped_ghosts,
+            list(by_exch.keys()),
+        )
+    return kept
 
 
 def enrich_positions(rows: List[dict], user_id: int) -> List[dict]:

@@ -394,6 +394,69 @@ class TestFuturesDealMap(unittest.TestCase):
         self.assertEqual(sell["symbol"], "SYN_USDT")
 
 
+class TestFuturesOpenAuthority(unittest.TestCase):
+    def test_ghost_opens_dropped_when_exchange_known(self):
+        from unittest.mock import patch
+
+        from mexc_bot.webapi.positions_enrich import _reconcile_futures_with_exchange
+
+        entities = [
+            {
+                "symbol": "SYN_USDT",
+                "market": "futures",
+                "status": "open",
+                "is_open": True,
+                "size_remaining": 9999,
+                "entry_avg": 0.1,
+            },
+            {
+                "symbol": "LAB_USDT",
+                "market": "futures",
+                "status": "open",
+                "is_open": True,
+                "size_remaining": 222,
+            },
+            {
+                "symbol": "LAB_USDT",
+                "market": "futures",
+                "status": "closed",
+                "outcome": "success",
+                "realized_pnl_pct": 1.0,
+            },
+            {
+                "symbol": "SYNUSDT",
+                "market": "spot",
+                "status": "open",
+                "is_open": True,
+                "size_remaining": 100,
+            },
+        ]
+        exch = [
+            {
+                "symbol": "SYN_USDT",
+                "hold_vol": 4352.0,
+                "entry_avg": 0.0998,
+                "leverage": 1,
+                "realized": 28.0,
+            }
+        ]
+        with patch(
+            "mexc_bot.learning.fills.fetch_live_futures_opens", return_value=exch
+        ):
+            out = _reconcile_futures_with_exchange(entities, store=None, user_id=1)
+        opens = [e for e in out if e.get("status") == "open"]
+        fut_opens = [e for e in opens if e.get("market") == "futures"]
+        self.assertEqual(len(fut_opens), 1)
+        self.assertEqual(fut_opens[0]["symbol"], "SYN_USDT")
+        self.assertAlmostEqual(fut_opens[0]["size_remaining"], 4352.0)
+        self.assertTrue(fut_opens[0].get("exchange_hold"))
+        # closed futures + spot open kept
+        self.assertTrue(any(e.get("status") == "closed" for e in out))
+        self.assertTrue(
+            any(e.get("market") == "spot" and e.get("status") == "open" for e in out)
+        )
+
+
 class TestFatalNewsJudge(unittest.TestCase):
     def test_hard_fatal_forces_no_trade(self):
         from mexc_bot.learning.fatal_news import apply_fatal_to_verdict
