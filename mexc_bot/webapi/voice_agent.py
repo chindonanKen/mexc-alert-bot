@@ -42,7 +42,9 @@ ALWAYS use tools — never invent edges, fills, PnL, or RSI:
 Sensors: list_alerts, add/update/delete_alert, list_watchlist, add/remove_watch, set_movers, get_overview
 Positions: list_positions, open_position, close_position
 Agent brain (required for learning claims):
-  judge_fire — structured verdict on a fire (setup edge + ticker edge + chart)
+  judge_fire — structured verdict on a fire (setup edge + ticker edge + full chart thesis)
+  read_chart — discretionary multi-TF chart read (regime, AD history, volume, RSI div, invalidation)
+  refresh_book_charts — re-read every chart in targets+watchlist+positions
   belief_setup_top — trained setup cells
   belief_ticker / ticker_stats — per-chart setup_edge + exec_edge
   list_trade_reviews / get_trade_review — dossiers with layers/PnL/hold
@@ -52,6 +54,7 @@ Agent brain (required for learning claims):
   list_fires, label_fire (override only), list_pending_questions, answer_question
   teach — durable rule with evidence
   learning_stats
+When user asks about a coin chart/history/AD/RSI/volume: call read_chart first.
 
 AD discipline:
 - Panic + breadth + volume > grind/isolated

@@ -685,6 +685,21 @@ TOOL_DEFS = [
         {"limit": {"type": "integer"}},
     ),
     _tool(
+        "read_chart",
+        "Full discretionary AD chart read (regime, AD zone, volume, RSI div, thesis) for a symbol you follow",
+        {
+            "symbol": {"type": "string"},
+            "market": {"type": "string"},
+            "refresh": {"type": "boolean"},
+        },
+        ["symbol"],
+    ),
+    _tool(
+        "refresh_book_charts",
+        "Re-read charts for entire book: targets + movers watchlist + open positions",
+        {},
+    ),
+    _tool(
         "list_intel",
         "List isolated-dump investigations and recent news",
         {},
@@ -864,6 +879,18 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                     uid_or_raise(), limit=int(args.get("limit") or 15)
                 )
             }
+        if name == "read_chart":
+            from .learning_api import read_symbol_chart
+
+            return read_symbol_chart(
+                str(args["symbol"]),
+                market=args.get("market"),
+                refresh=args.get("refresh", True),
+            )
+        if name == "refresh_book_charts":
+            from .learning_api import refresh_book_charts
+
+            return refresh_book_charts()
         if name == "list_intel":
             return {"investigations": list_investigations(), "news": list_news()}
         if name == "get_overview":

@@ -722,12 +722,19 @@ class BeliefEngine:
                 f"exec_edge={float(ticker.get('exec_edge') or 0):+.2f} n_fires={t_n} "
                 f"took={ticker.get('n_took')} skip={ticker.get('n_skip')}"
             )
-        if chart.get("ok"):
+        if chart.get("ok") or chart.get("thesis"):
             cite.append(
                 f"Chart: prior={chart.get('setup_prior')} zone={chart.get('ad_zone')} "
                 f"vol={chart.get('vol_flag')} rsi={chart.get('rsi_now_5m')} "
-                f"div_bull={chart.get('div_bull')}"
+                f"div_bull={chart.get('div_bull')} regime={chart.get('regime')} "
+                f"bias={chart.get('bias')}"
             )
+            thesis = chart.get("thesis") or ""
+            if thesis:
+                # first 2 lines of discretionary thesis
+                for line in thesis.split("\n")[1:4]:
+                    if line.strip():
+                        cite.append(line.strip())
 
         conf = 0.35
         if n >= 5:

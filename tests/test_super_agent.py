@@ -177,6 +177,49 @@ class TestBeliefEngine(unittest.TestCase):
         self.assertFalse(f.get("ok"))
 
 
+class TestChartReader(unittest.TestCase):
+    def test_read_chart_with_synthetic_bars(self):
+        from mexc_bot.learning.chart_reader import read_chart
+
+        bars = []
+        px = 100.0
+        for i in range(80):
+            # slow grind down then dump
+            if i < 50:
+                px = 100 - i * 0.1
+            else:
+                px = px * 0.985
+            bars.append(
+                {
+                    "ts": 1_700_000_000 + i * 300,
+                    "o": px * 1.001,
+                    "h": px * 1.005,
+                    "l": px * 0.99,
+                    "c": px,
+                    "v": 1000 + i * 10,
+                }
+            )
+        with patch(
+            "mexc_bot.learning.chart_reader.fetch_bars",
+            side_effect=lambda m, s, tf, limit=96: bars,
+        ):
+            r = read_chart(
+                "futures",
+                "TEST_USDT",
+                fire_price=bars[-1]["c"],
+                peak_price=100.0,
+                velocity_band="PANIC",
+                heat_breadth=4,
+            )
+        self.assertTrue(r.get("ok"))
+        self.assertIn("thesis", r)
+        self.assertIn("regime", r)
+        self.assertIn("ad_zone", r)
+        self.assertIn("invalidation", r)
+        self.assertIn("levels", r)
+        self.assertTrue(len(r["thesis"]) > 80)
+
+
 class TestAgentApi(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

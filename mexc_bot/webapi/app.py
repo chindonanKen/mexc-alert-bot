@@ -687,6 +687,31 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(400, str(e))
 
+    class ChartReadBody(BaseModel):
+        symbol: str
+        market: Optional[str] = None
+        refresh: bool = True
+
+    @app.post("/api/learning/chart")
+    def learning_chart(body: ChartReadBody, _: bool = Depends(require_auth)):
+        from .learning_api import read_symbol_chart
+
+        try:
+            return read_symbol_chart(
+                body.symbol, market=body.market, refresh=bool(body.refresh)
+            )
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/learning/chart/book")
+    def learning_chart_book(_: bool = Depends(require_auth)):
+        from .learning_api import refresh_book_charts
+
+        try:
+            return refresh_book_charts()
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
     @app.post("/api/learning/teach")
     def learning_teach(body: TeachBody, _: bool = Depends(require_auth)):
         from .learning_api import teach

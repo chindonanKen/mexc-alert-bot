@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from ..learning.beliefs import BeliefEngine
 from ..learning.chart_features import compute_fire_features
+from ..learning.chart_reader import ChartProfileStore, read_chart
 from ..learning.store import EventStore
 from ..learning.trades import (
     enrich_pending_row,
@@ -49,23 +50,59 @@ def _event_row(store: EventStore, user_id: int, event_id: int) -> Optional[dict]
 
 
 def _attach_chart(event: dict) -> dict:
-    feats = compute_fire_features(
-        market=str(event.get("market") or "futures"),
-        symbol=str(event.get("symbol") or ""),
+    """Full discretionary chart read + numeric features for a fire."""
+    mkt = str(event.get("market") or "futures")
+    sym = str(event.get("symbol") or "")
+    read = read_chart(
+        mkt,
+        sym,
+        mark_price=float(event.get("price") or 0) or None,
+        fire_price=float(event.get("price") or 0) or None,
+        fire_ts=float(event.get("ts") or time.time()),
+        peak_price=float(event["ref_price"]) if event.get("ref_price") else None,
+        heat_breadth=event.get("heat_breadth"),
+        velocity_band=event.get("velocity_band"),
+    )
+    feats = read.get("features") or compute_fire_features(
+        market=mkt,
+        symbol=sym,
         fire_px=float(event.get("price") or 0),
         fire_ts=float(event.get("ts") or time.time()),
         peak_px=float(event["ref_price"]) if event.get("ref_price") else None,
         heat_breadth=event.get("heat_breadth"),
         velocity_band=event.get("velocity_band"),
     )
-    # persist into payload_json
+    feats = dict(feats or {})
+    feats["thesis"] = read.get("thesis")
+    feats["bias"] = read.get("bias")
+    feats["regime"] = read.get("regime")
+    feats["ad_zone"] = read.get("ad_zone") or feats.get("ad_zone")
+    feats["ok"] = bool(read.get("ok") or feats.get("ok"))
+    feats["discretionary_read"] = {
+        k: read.get(k)
+        for k in (
+            "regime",
+            "pace",
+            "vol_flag",
+            "ad_zone",
+            "bias",
+            "levels",
+            "invalidation",
+            "happening_now",
+            "history_summary",
+            "thesis",
+        )
+    }
     try:
         store = event_store()
+        uid = int(event.get("user_id") or uid_or_raise())
+        ChartProfileStore(store).save(uid, read)
         with store._lock:
             conn = store._get_conn()
             raw = event.get("payload_json")
             payload = json.loads(raw) if raw else {}
             payload["chart_features"] = feats
+            payload["chart_read"] = read
             conn.execute(
                 "UPDATE learning_events SET payload_json=? WHERE id=?",
                 (json.dumps(payload), int(event["id"])),
@@ -73,6 +110,94 @@ def _attach_chart(event: dict) -> dict:
     except Exception:
         pass
     return feats
+
+
+def read_symbol_chart(
+    symbol: str,
+    market: Optional[str] = None,
+    user_id: Optional[int] = None,
+    *,
+    refresh: bool = True,
+) -> Dict[str, Any]:
+    """On-demand full chart thesis for a book symbol (voice/UI)."""
+    uid = int(user_id or uid_or_raise())
+    store = event_store()
+    mkt = (market or "futures").lower()
+    # Prefer last event price context
+    fire_px = peak = heat = band = None
+    fts = None
+    for e in store.recent_events(uid, limit=40):
+        if symbol.upper().replace("_", "") in (e.get("symbol") or "").upper().replace(
+            "_", ""
+        ):
+            fire_px = e.get("price")
+            peak = e.get("ref_price")
+            heat = e.get("heat_breadth")
+            band = e.get("velocity_band")
+            fts = e.get("ts")
+            mkt = e.get("market") or mkt
+            symbol = e.get("symbol") or symbol
+            break
+    if not refresh:
+        cached = ChartProfileStore(store).get(uid, symbol, mkt)
+        if cached and cached.get("ok"):
+            return {"chart": cached, "cached": True}
+    read = read_chart(
+        mkt,
+        symbol,
+        fire_price=float(fire_px) if fire_px else None,
+        peak_price=float(peak) if peak else None,
+        fire_ts=float(fts) if fts else None,
+        heat_breadth=heat,
+        velocity_band=band,
+    )
+    ChartProfileStore(store).save(uid, read)
+    return {"chart": read, "cached": False}
+
+
+def refresh_book_charts(user_id: Optional[int] = None) -> Dict[str, Any]:
+    """Re-read all book charts: targets + watchlist + open positions."""
+    uid = int(user_id or uid_or_raise())
+    book: List[tuple] = []
+    try:
+        from . import actions
+
+        for a in actions.list_alerts(uid):
+            book.append((a.get("market") or "spot", a.get("symbol")))
+        for w in actions.list_watchlist(uid):
+            book.append((w.get("market") or "futures", w.get("symbol")))
+        for p in actions.list_positions(uid):
+            book.append((p.get("market") or "futures", p.get("symbol")))
+    except Exception:
+        pass
+    # dedupe
+    seen = set()
+    uniq = []
+    for m, s in book:
+        if not s:
+            continue
+        key = (m, str(s).upper())
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append((m, s))
+    store = event_store()
+    cps = ChartProfileStore(store)
+    results = []
+    for m, s in uniq[:30]:
+        r = read_chart(m, s)
+        cps.save(uid, r)
+        results.append(
+            {
+                "symbol": s,
+                "market": m,
+                "ok": r.get("ok"),
+                "bias": r.get("bias"),
+                "ad_zone": r.get("ad_zone"),
+                "thesis_head": (r.get("thesis") or "")[:160],
+            }
+        )
+    return {"n": len(results), "charts": results}
 
 
 def judge_fire(
@@ -294,6 +419,11 @@ def coach_ask(question: str, user_id: Optional[int] = None) -> Dict[str, Any]:
         )
         for c in judgment.get("cite") or []:
             lines.append(f"  · {c}")
+        ch = judgment.get("chart") or {}
+        if ch.get("thesis"):
+            lines.append("")
+            lines.append("CHART THESIS:")
+            lines.append(ch.get("thesis"))
         lines.append("")
 
     setups = eng.list_setup_beliefs(uid, limit=5)
