@@ -26,7 +26,7 @@
         <button data-view="movers">Movers</button>
         <button data-view="positions">Positions</button>
         <div class="nav-sep">More</div>
-        <button data-view="memory" class="nav-dim" id="navLearning">Learning <span id="navLearnBadge" class="nav-badge" hidden>0</span></button>
+        <button data-view="memory" class="nav-dim" id="navLearning">Agent <span id="navLearnBadge" class="nav-badge" hidden>0</span></button>
         <button data-view="intel" class="nav-dim">Intel</button>
         <button data-view="voice" class="nav-dim">Voice log</button>
         <button data-view="playbook" class="nav-dim">Playbook</button>
@@ -127,71 +127,57 @@
         </div>
       </section>
 
-      <!-- LEARNING — needs you · trades · ticker · teach · coach · fires -->
+      <!-- AD SUPER-AGENT training cockpit -->
       <section class="view" id="view-memory">
-        <div class="learn-grid">
+        <div class="panel agent-hero">
+          <div class="panel-h">
+            <h3>Active case</h3>
+            <button type="button" class="btn soft sm" id="btnJudgeLatest">Re-judge latest fire</button>
+          </div>
+          <div id="agentActiveCase" class="agent-case"></div>
+        </div>
+        <div id="ovNeedsYouLearn" class="panel mt" hidden>
+          <div class="panel-h">
+            <h3>Needs you</h3>
+            <span class="badge quiet" id="learnPendingBadge">0</span>
+          </div>
+          <div id="learnPending" class="scroll learn-block"></div>
+        </div>
+        <div class="learn-grid mt">
           <div class="panel">
-            <div class="panel-h">
-              <h3>Needs you</h3>
-              <span class="badge quiet" id="learnPendingBadge">0</span>
-            </div>
-            <div id="learnPending" class="scroll learn-block tall"></div>
+            <div class="panel-h"><h3>Trained setup edges</h3></div>
+            <div id="agentSetups" class="scroll learn-block"></div>
           </div>
           <div class="panel">
-            <div class="panel-h">
-              <h3>Coach drafts</h3>
-              <span class="badge quiet" id="learnDraftBadge">0</span>
-            </div>
-            <div id="learnDrafts" class="scroll learn-block tall"></div>
+            <div class="panel-h"><h3>Ticker edges</h3></div>
+            <div id="agentTickers" class="scroll learn-block"></div>
           </div>
         </div>
         <div class="panel mt">
-          <div class="panel-h">
-            <h3>Trade reviews</h3>
-            <span class="badge quiet">closed + open</span>
-          </div>
+          <div class="panel-h"><h3>Execution feedback (closed trades)</h3></div>
           <div id="learnTrades" class="scroll learn-block tall"></div>
         </div>
         <div class="panel mt">
-          <div class="panel-h">
-            <h3>By ticker</h3>
-          </div>
-          <div id="learnTickers" class="ticker-chips"></div>
-          <div id="learnTickerDetail" class="hint mt"></div>
-        </div>
-        <div class="panel mt">
-          <div class="panel-h"><h3>Teach</h3></div>
-          <form id="teachForm" class="form-row">
-            <input name="text" placeholder="Lesson for a chart or rule (tag ticker in text)" required class="grow" />
-            <button class="btn" type="submit">Save lesson</button>
+          <div class="panel-h"><h3>Talk to the agent</h3></div>
+          <form id="coachForm" class="form-row">
+            <input name="question" placeholder="Judge latest · SIREN edge · why no_trade…" class="grow" />
+            <button class="btn" type="submit">Ask agent</button>
+          </form>
+          <pre id="coachReply" class="coach-reply scroll"></pre>
+          <form id="teachForm" class="form-row mt">
+            <input name="text" placeholder="Teach a rule (agent stores it)" class="grow" />
+            <button class="btn soft" type="submit">Teach</button>
           </form>
           <div id="learnLessons" class="hint mt"></div>
         </div>
         <div class="panel mt">
-          <div class="panel-h"><h3>Ask coach</h3></div>
-          <form id="coachForm" class="form-row">
-            <input name="question" placeholder="SIREN last trade? · panic · pride · brief…" class="grow" />
-            <button class="btn soft" type="submit">Ask</button>
-          </form>
-          <pre id="coachReply" class="coach-reply scroll"></pre>
-        </div>
-        <div class="panel mt">
-          <div class="panel-h">
-            <h3>Book stats</h3>
-            <span class="badge quiet" id="learnStatsBadge"></span>
-          </div>
+          <div class="panel-h"><h3>Recent fires</h3><span class="badge quiet" id="learnStatsBadge"></span></div>
           <div id="learnStats" class="hint"></div>
+          <div id="memoryTable" class="scroll mt"></div>
         </div>
-        <div class="panel mt">
-          <div class="panel-h">
-            <h3>Recent fires</h3>
-            <div class="row-gap">
-              <button type="button" class="btn soft sm" data-label="took">Took latest</button>
-              <button type="button" class="btn soft sm" data-label="skip">Skip latest</button>
-            </div>
-          </div>
-          <div id="memoryTable" class="scroll"></div>
-        </div>
+        <div id="learnDrafts" hidden></div>
+        <div id="learnTickers" hidden></div>
+        <div id="learnTickerDetail" hidden></div>
       </section>
 
       <!-- INTEL -->

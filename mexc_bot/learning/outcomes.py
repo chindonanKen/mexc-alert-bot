@@ -128,6 +128,21 @@ class OutcomePoller:
                     last_price=px,
                 )
                 self._outcomes_written += 1
+                # Super-agent: update beliefs from path quality (setup edge)
+                try:
+                    from .beliefs import BeliefEngine
+
+                    uid = int(sample.get("user_id") or item.get("user_id") or 0)
+                    if uid:
+                        BeliefEngine(self.event_store).update_from_outcome(
+                            uid,
+                            eid,
+                            max_bounce_pct=bounce,
+                            max_dd_pct=dd,
+                            horizon_seconds=h,
+                        )
+                except Exception as be:
+                    logger.debug("belief update skipped: %s", be)
                 logger.info(
                     "learning.outcome event=%s h=%ss bounce=%.2f%% dd=%.2f%% last=%s",
                     eid,

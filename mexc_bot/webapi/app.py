@@ -651,11 +651,39 @@ def create_app() -> FastAPI:
 
     @app.get("/api/learning")
     def learning_home(_: bool = Depends(require_auth)):
-        """Full Learning view payload: pending, drafts, teach data, fires, stats."""
+        """AD Super-Agent training cockpit payload."""
         try:
-            from .learning_api import learning_bundle
+            from .learning_api import agent_bundle
 
-            return learning_bundle()
+            return agent_bundle()
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/learning/judge")
+    def learning_judge(
+        event_id: Optional[int] = None,
+        symbol: Optional[str] = None,
+        _: bool = Depends(require_auth),
+    ):
+        from .learning_api import judge_fire
+
+        try:
+            return judge_fire(event_id=event_id, symbol=symbol, open_case=True)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    class JudgeBody(BaseModel):
+        event_id: Optional[int] = None
+        symbol: Optional[str] = None
+
+    @app.post("/api/learning/judge_body")
+    def learning_judge_body(body: JudgeBody, _: bool = Depends(require_auth)):
+        from .learning_api import judge_fire
+
+        try:
+            return judge_fire(
+                event_id=body.event_id, symbol=body.symbol, open_case=True
+            )
         except Exception as e:
             raise HTTPException(400, str(e))
 

@@ -370,6 +370,13 @@ def close_position(
             (exit_avg, f" | {notes}" if notes else "", time.time(), tid),
         )
         conn.commit()
+        # Super-agent: train execution edge on close
+        try:
+            from .learning_api import on_trade_closed
+
+            on_trade_closed(uid, int(tid))
+        except Exception:
+            pass
         return {"ok": True, "id": tid}
     finally:
         conn.close()
@@ -602,9 +609,31 @@ TOOL_DEFS = [
     ),
     _tool(
         "coach_ask",
-        "Ask AD Desk coach (strategy + store-backed memory)",
+        "Ask AD Super-Agent (beliefs + judgment + chart)",
         {"question": {"type": "string"}},
         ["question"],
+    ),
+    _tool(
+        "judge_fire",
+        "Judge a fire/event with trained setup+ticker edges and chart features",
+        {
+            "event_id": {"type": "integer"},
+            "symbol": {"type": "string"},
+        },
+    ),
+    _tool(
+        "belief_setup_top",
+        "Best/worst trained setup cells (band+heat+drop edges)",
+        {"limit": {"type": "integer"}},
+    ),
+    _tool(
+        "belief_ticker",
+        "Trained ticker setup_edge + exec_edge + chart features",
+        {
+            "symbol": {"type": "string"},
+            "market": {"type": "string"},
+        },
+        ["symbol"],
     ),
     _tool(
         "list_trade_reviews",
@@ -622,8 +651,18 @@ TOOL_DEFS = [
         ["trade_id"],
     ),
     _tool(
+        "record_process",
+        "Record process tags on a trade and update agent exec edge",
+        {
+            "trade_id": {"type": "integer"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "note": {"type": "string"},
+        },
+        ["trade_id"],
+    ),
+    _tool(
         "ticker_stats",
-        "Per-ticker learning profile (fires, trades, win rate, notes)",
+        "Alias of belief_ticker",
         {
             "symbol": {"type": "string"},
             "market": {"type": "string"},
@@ -632,13 +671,18 @@ TOOL_DEFS = [
     ),
     _tool(
         "tag_trade",
-        "Tag a closed/open trade with behavior code + notes for learning",
+        "Tag trade process (updates exec beliefs)",
         {
             "trade_id": {"type": "integer"},
             "behavior": {"type": "string"},
             "notes": {"type": "string"},
         },
         ["trade_id"],
+    ),
+    _tool(
+        "list_agent_cases",
+        "List open training cases with agent judgments",
+        {"limit": {"type": "integer"}},
     ),
     _tool(
         "list_intel",
@@ -768,6 +812,24 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             from .learning_api import coach_ask
 
             return coach_ask(str(args.get("question") or "brief"))
+        if name == "judge_fire":
+            from .learning_api import judge_fire
+
+            return judge_fire(
+                event_id=args.get("event_id"),
+                symbol=args.get("symbol"),
+                open_case=True,
+            )
+        if name == "belief_setup_top":
+            from .learning_api import belief_setup_top
+
+            return belief_setup_top(limit=int(args.get("limit") or 15))
+        if name == "belief_ticker" or name == "ticker_stats":
+            from .learning_api import belief_ticker
+
+            return belief_ticker(
+                str(args["symbol"]), market=args.get("market")
+            )
         if name == "list_trade_reviews":
             from .learning_api import trades_api
 
@@ -780,20 +842,28 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             from .learning_api import trade_api
 
             return trade_api(int(args["trade_id"]))
-        if name == "ticker_stats":
-            from .learning_api import ticker_api
+        if name == "record_process" or name == "tag_trade":
+            from .learning_api import record_process, tag_trade
 
-            return ticker_api(
-                str(args["symbol"]), market=args.get("market")
-            )
-        if name == "tag_trade":
-            from .learning_api import tag_trade
-
-            return tag_trade(
+            if name == "tag_trade":
+                return tag_trade(
+                    int(args["trade_id"]),
+                    behavior=args.get("behavior"),
+                    notes=args.get("notes"),
+                )
+            return record_process(
                 int(args["trade_id"]),
-                behavior=args.get("behavior"),
-                notes=args.get("notes"),
+                tags=args.get("tags") or [],
+                note=args.get("note"),
             )
+        if name == "list_agent_cases":
+            from .learning_api import beliefs as _bel, uid_or_raise
+
+            return {
+                "cases": _bel().list_cases(
+                    uid_or_raise(), limit=int(args.get("limit") or 15)
+                )
+            }
         if name == "list_intel":
             return {"investigations": list_investigations(), "news": list_news()}
         if name == "get_overview":

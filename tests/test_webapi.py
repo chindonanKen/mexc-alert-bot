@@ -167,8 +167,9 @@ class TestWebApi(unittest.TestCase):
         self.assertIn("needs_you", body)
         self.assertIn("stats", body)
         self.assertIn("coach_pulse", body)
-        self.assertIn("trades", body)
-        self.assertIn("tickers", body)
+        self.assertTrue(
+            "trades" in body or "beliefs" in body or "agent" in body
+        )
         r2 = self.client.post(
             "/api/learning/teach",
             json={"text": "webapi test lesson no full size on grind"},

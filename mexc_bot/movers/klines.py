@@ -64,6 +64,24 @@ class KlineClient:
             out[tf] = consecutive_red_count(candles)
         return out
 
+    def get_ohlcv(
+        self, market: str, symbol: str, tf: str, limit: int = 96
+    ) -> List[dict]:
+        """Full OHLCV closed bars oldest→newest. Soft-fail → []."""
+        if tf not in _INTERVALS:
+            return []
+        try:
+            if market.lower() == "futures":
+                bars = self._fetch_futures_ohlcv(symbol, tf, limit=limit)
+            else:
+                bars = self._fetch_spot_ohlcv(symbol, tf, limit=limit)
+            if len(bars) > 1:
+                bars = bars[:-1]  # drop forming
+            return bars
+        except Exception as e:
+            logger.debug("get_ohlcv failed %s:%s %s: %s", market, symbol, tf, e)
+            return []
+
     def _get_ohlc_closed(
         self, market: str, symbol: str, tf: str
     ) -> List[Tuple[float, float]]:
@@ -76,10 +94,8 @@ class KlineClient:
 
         candles: List[Tuple[float, float]] = []
         try:
-            if market.lower() == "futures":
-                candles = self._fetch_futures(symbol, tf)
-            else:
-                candles = self._fetch_spot(symbol, tf)
+            bars = self.get_ohlcv(market, symbol, tf, limit=50)
+            candles = [(b["o"], b["c"]) for b in bars]
         except Exception as e:
             logger.debug("Kline fetch failed %s:%s %s: %s", market, symbol, tf, e)
             candles = []
@@ -87,12 +103,21 @@ class KlineClient:
         self._cache[key] = (now, candles)
         return candles
 
-    def _fetch_spot(self, symbol: str, tf: str) -> List[Tuple[float, float]]:
+    def _fetch_spot_ohlcv(
+        self, symbol: str, tf: str, limit: int = 96
+    ) -> List[dict]:
         spot_iv, _ = _INTERVALS[tf]
+        sym = symbol.upper().replace("_", "")
+        if not sym.endswith("USDT") and "USDT" not in sym:
+            sym = sym + "USDT"
         url = f"{self.spot_base}/klines"
         resp = self.session.get(
             url,
-            params={"symbol": symbol.upper(), "interval": spot_iv, "limit": 50},
+            params={
+                "symbol": sym,
+                "interval": spot_iv,
+                "limit": max(10, min(int(limit), 500)),
+            },
             timeout=self.timeout,
         )
         if resp.status_code != 200:
@@ -100,23 +125,33 @@ class KlineClient:
         data = resp.json()
         if not isinstance(data, list):
             return []
-        # [openTime, open, high, low, close, volume, ...]
-        # Drop last if it might be forming — MEXC includes current bar; treat last as open
-        rows = data[:-1] if len(data) > 1 else data
-        out: List[Tuple[float, float]] = []
-        for row in rows:
+        out: List[dict] = []
+        for row in data:
             try:
-                o = float(row[1])
-                c = float(row[4])
-                out.append((o, c))
+                out.append(
+                    {
+                        "ts": float(row[0]) / 1000.0,
+                        "o": float(row[1]),
+                        "h": float(row[2]),
+                        "l": float(row[3]),
+                        "c": float(row[4]),
+                        "v": float(row[5]),
+                    }
+                )
             except (TypeError, ValueError, IndexError):
                 continue
         return out
 
-    def _fetch_futures(self, symbol: str, tf: str) -> List[Tuple[float, float]]:
+    def _fetch_futures_ohlcv(
+        self, symbol: str, tf: str, limit: int = 96
+    ) -> List[dict]:
         _, fut_iv = _INTERVALS[tf]
-        # GET /api/v1/contract/kline/{symbol}?interval=Min15
-        url = f"{self.futures_base}/contract/kline/{symbol.upper()}"
+        sym = symbol.upper()
+        if "_" not in sym and sym.endswith("USDT"):
+            # compact → try BASE_USDT
+            base = sym[:-4]
+            sym = f"{base}_USDT"
+        url = f"{self.futures_base}/contract/kline/{sym}"
         resp = self.session.get(
             url,
             params={"interval": fut_iv},
@@ -126,45 +161,79 @@ class KlineClient:
             return []
         payload = resp.json()
         data = payload.get("data") if isinstance(payload, dict) else None
-        # Common shapes: dict of arrays, or list of candles
-        pairs = _parse_futures_kline_payload(data)
-        if len(pairs) > 1:
-            pairs = pairs[:-1]  # drop forming
-        return pairs
+        return _parse_futures_ohlcv(data, limit=limit)
+
+
+def _parse_futures_ohlcv(data, limit: int = 96) -> List[dict]:
+    if data is None:
+        return []
+    out: List[dict] = []
+    if isinstance(data, dict):
+        times = data.get("time") or data.get("t") or []
+        opens = data.get("open") or data.get("o") or []
+        highs = data.get("high") or data.get("h") or []
+        lows = data.get("low") or data.get("l") or []
+        closes = data.get("close") or data.get("c") or []
+        vols = data.get("vol") or data.get("volume") or data.get("v") or []
+        n = min(len(opens), len(closes), len(highs), len(lows))
+        for i in range(n):
+            try:
+                ts = float(times[i]) if i < len(times) else float(i)
+                if ts > 1e12:
+                    ts /= 1000.0
+                out.append(
+                    {
+                        "ts": ts,
+                        "o": float(opens[i]),
+                        "h": float(highs[i]),
+                        "l": float(lows[i]),
+                        "c": float(closes[i]),
+                        "v": float(vols[i]) if i < len(vols) else 0.0,
+                    }
+                )
+            except (TypeError, ValueError, IndexError):
+                continue
+        return out[-limit:] if limit else out
+    if isinstance(data, list):
+        for row in data:
+            try:
+                if isinstance(row, dict):
+                    ts = float(row.get("time", row.get("t", 0)))
+                    if ts > 1e12:
+                        ts /= 1000.0
+                    out.append(
+                        {
+                            "ts": ts,
+                            "o": float(row.get("open", row.get("o"))),
+                            "h": float(row.get("high", row.get("h"))),
+                            "l": float(row.get("low", row.get("l"))),
+                            "c": float(row.get("close", row.get("c"))),
+                            "v": float(row.get("vol", row.get("volume", row.get("v", 0)))),
+                        }
+                    )
+                elif isinstance(row, (list, tuple)) and len(row) >= 6:
+                    ts = float(row[0])
+                    if ts > 1e12:
+                        ts /= 1000.0
+                    out.append(
+                        {
+                            "ts": ts,
+                            "o": float(row[1]),
+                            "h": float(row[2]),
+                            "l": float(row[3]),
+                            "c": float(row[4]),
+                            "v": float(row[5]),
+                        }
+                    )
+            except (TypeError, ValueError, IndexError):
+                continue
+        return out[-limit:] if limit else out
+    return []
 
 
 def _parse_futures_kline_payload(data) -> List[Tuple[float, float]]:
-    if data is None:
-        return []
-    if isinstance(data, dict):
-        # Often: {"time":[], "open":[], "close":[], ...}
-        opens = data.get("open") or data.get("o")
-        closes = data.get("close") or data.get("c")
-        if isinstance(opens, list) and isinstance(closes, list):
-            out = []
-            for o, c in zip(opens, closes):
-                try:
-                    out.append((float(o), float(c)))
-                except (TypeError, ValueError):
-                    continue
-            return out
-    if isinstance(data, list):
-        out = []
-        for row in data:
-            if isinstance(row, dict):
-                try:
-                    o = float(row.get("open", row.get("o")))
-                    c = float(row.get("close", row.get("c")))
-                    out.append((o, c))
-                except (TypeError, ValueError):
-                    continue
-            elif isinstance(row, (list, tuple)) and len(row) >= 5:
-                try:
-                    out.append((float(row[1]), float(row[4])))
-                except (TypeError, ValueError):
-                    continue
-        return out
-    return []
+    bars = _parse_futures_ohlcv(data)
+    return [(b["o"], b["c"]) for b in bars]
 
 
 def consecutive_red_count(candles: List[Tuple[float, float]]) -> int:

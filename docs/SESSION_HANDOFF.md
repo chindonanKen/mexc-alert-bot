@@ -15,18 +15,16 @@ This file is a **dated snapshot** so the next human/agent (including a **new Mac
 
 Shared SQLite is plumbing (same book/fires). Learning UX is desk-only. Future multi-device alarms come from desk (`/api/notify/stub` placeholder).
 
-### Learning (top-tier desk loop)
+### AD Super-Agent (real learning loop)
 
-- **Signal + trade + ticker:** fires, closed-position dossiers (PnL, hold, buy/sell layers, linked fires), per-ticker profiles
-- Rich **Needs you** cards (symbol, time, fire price, band, inference)
-- Auto engagement 1h grace; max 2 pending; symbol coalesce; draft dedupe
-- Coach/voice cite trades + ticker stats; soft candle reds; never invent fills
-- Watchlist delete matches compact/underscore symbol forms (desk ↔ Telegram same DB)
-- UI: Learning = Needs you · trade reviews · by ticker · teach · coach · fires
-- **No** AD Layers / Paper Arena
+- **Beliefs:** `belief_setup` (band×heat×drop edges) + `belief_ticker` (setup_edge + exec_edge) update from outcomes and trade closes — not tag theater
+- **judge_fire:** structured verdict (no_trade / take_scout / take_layers) with cites of n+edge
+- **Chart features:** OHLCV sharpness, AD depth zone, volume expand/dry, RSI + bullish div (soft-fail)
+- **Cases:** active training case on Agent tab; voice tools: judge_fire, belief_*, record_process, coach_ask
+- Auto engagement + dossiers still support the loop; process tags update **exec** edge
+- UI nav: **Agent** (not label farm)
 - Owner: `DESK_USER_ID=8630949601`
-- Guide: **[DROPLET_DESK_LEARNING.md](DROPLET_DESK_LEARNING.md)**
-- Tests: `test_desk_learning_spine.py`, `test_trade_learning.py`
+- Tests: `test_super_agent.py` + learning suite
 
 ### AD Desk (explore fully)
 

@@ -125,7 +125,7 @@
       targets: "Targets",
       movers: "Movers",
       positions: "Positions",
-      memory: "Learning",
+      memory: "AD Super-Agent",
       intel: "Intel",
       voice: "Voice log",
       roadmap: "Roadmap",
@@ -563,65 +563,97 @@
       bundle = await api("/api/learning");
     } catch (e) {
       toast(e.message);
+      return;
     }
-    const pending = bundle.pending_questions || [];
-    const drafts = bundle.drafts || [];
+    const needs = bundle.needs_you || {};
+    const pending = needs.pending_questions || bundle.pending_questions || [];
     const lessons = bundle.lessons || [];
     const stats = bundle.stats || {};
     const fires = bundle.fires || [];
-    const needsCount =
-      (bundle.needs_you && bundle.needs_you.count != null)
-        ? bundle.needs_you.count
-        : pending.length + drafts.length;
-    updateLearningNavBadge(needsCount);
+    const beliefs = bundle.beliefs || {};
+    const setups = beliefs.setups || [];
+    const tickers = beliefs.tickers || [];
+    const trades = bundle.trades || [];
+    updateLearningNavBadge(needs.count != null ? needs.count : pending.length);
 
-    const pb = $("#learnPendingBadge");
-    if (pb) pb.textContent = String(pending.length);
-    const db = $("#learnDraftBadge");
-    if (db) db.textContent = String(drafts.length);
-
-    function pendingCard(q) {
-      const sym = q.symbol || (q.event && q.event.symbol) || "—";
-      const band = q.velocity_band || (q.event && q.event.velocity_band) || "—";
-      const drop =
-        q.drop_pct != null
-          ? Number(q.drop_pct).toFixed(1) + "%"
-          : q.event && q.event.drop_pct != null
-            ? Number(q.event.drop_pct).toFixed(1) + "%"
-            : "—";
-      const px =
-        q.fire_price != null
-          ? q.fire_price
-          : q.event && q.event.price != null
-            ? q.event.price
-            : "—";
-      const when = fmtTime(q.fire_ts || (q.event && q.event.ts) || q.created_at);
-      const inf = q.inferred_action
-        ? `${q.inferred_action}${
-            q.inferred_confidence != null
-              ? " (" + Math.round(Number(q.inferred_confidence) * 100) + "%)"
-              : ""
-          }`
-        : "—";
-      return `<div class="learn-card rich">
-        <div class="learn-card-h">${sym} · ${band} · ${drop}</div>
-        <div class="learn-card-meta">Fire ${px} · ${when} · system: ${inf}</div>
-        <div class="learn-card-t">${(q.question || "").slice(0, 220)}</div>
-        <div class="learn-card-meta">${(q.inferred_reason || "").slice(0, 120)}</div>
-        <div class="row-gap mt">
-          <button type="button" class="btn sm" data-pq="${q.id}" data-act="took">Took</button>
-          <button type="button" class="btn soft sm" data-pq="${q.id}" data-act="skip">Skip</button>
-          <button type="button" class="btn soft sm" data-pq="${q.id}" data-act="late">Late/FOMO</button>
-          <button type="button" class="btn soft sm" data-pq-dismiss="${q.id}">Dismiss</button>
-        </div>
-      </div>`;
+    // Active case
+    const ac = bundle.active_case;
+    const acEl = $("#agentActiveCase");
+    if (acEl) {
+      if (!ac) {
+        acEl.innerHTML = `<div class="rank-empty">No active case — wait for a fire or press Re-judge.</div>`;
+      } else {
+        const j = ac.judgment || {};
+        const s = j.setup || {};
+        const cite = (j.cite || []).map((c) => `<li>${c}</li>`).join("");
+        const ch = j.chart || {};
+        acEl.innerHTML = `
+          <div class="agent-case-h">${ac.symbol || j.symbol || "—"} · ${
+          s.verdict || "?"
+        } · size ${j.size_hint || "—"}</div>
+          <div class="learn-card-meta">conf ${j.confidence ?? "—"} · edge ${
+          s.edge != null ? Number(s.edge).toFixed(2) : "thin"
+        } n=${s.n ?? 0} · outcome ${ac.outcome_label || "pending"}</div>
+          <div class="learn-card-meta">Chart prior ${
+            ch.setup_prior ?? "—"
+          } · AD ${ch.ad_zone || "—"} · vol ${ch.vol_flag || "—"} · RSI ${
+          ch.rsi_now_5m ?? "—"
+        } div ${ch.div_bull ? "yes" : "no"}</div>
+          <ul class="cite-list">${cite || "<li>No cites yet — agent needs more outcomes</li>"}</ul>
+          <div class="row-gap mt">
+            <button type="button" class="btn soft sm" data-judge-ev="${
+              ac.event_id || ""
+            }">Refresh judgment</button>
+          </div>`;
+        $$("[data-judge-ev]", acEl).forEach((b) =>
+          b.addEventListener("click", async () => {
+            try {
+              await api("/api/learning/judge_body", {
+                method: "POST",
+                body: JSON.stringify({ event_id: +b.dataset.judgeEv || null }),
+              });
+              loadMemory();
+            } catch (err) {
+              toast(err.message);
+            }
+          })
+        );
+      }
     }
 
+    // Needs you
+    const wrap = $("#ovNeedsYouLearn");
+    const pb = $("#learnPendingBadge");
+    if (pb) pb.textContent = String(pending.length);
+    if (wrap) wrap.hidden = pending.length === 0;
     const pendEl = $("#learnPending");
     if (pendEl) {
       pendEl.innerHTML = pending.length
-        ? pending.map(pendingCard).join("")
-        : `<div class="rank-empty">Nothing pending — you're clear</div>`;
+        ? pending
+            .map((q) => {
+              const sym = q.symbol || (q.event && q.event.symbol) || "—";
+              const band =
+                q.velocity_band || (q.event && q.event.velocity_band) || "—";
+              const drop =
+                q.drop_pct != null
+                  ? Number(q.drop_pct).toFixed(1) + "%"
+                  : "—";
+              const px = q.fire_price != null ? q.fire_price : "—";
+              return `<div class="learn-card rich">
+                <div class="learn-card-h">${sym} · ${band} · ${drop} @ ${px}</div>
+                <div class="learn-card-meta">${fmtTime(
+                  q.fire_ts || q.created_at
+                )} · system ${q.inferred_action || "—"}</div>
+                <div class="learn-card-t">${(q.question || "").slice(0, 200)}</div>
+                <div class="row-gap mt">
+                  <button type="button" class="btn sm" data-pq="${q.id}" data-act="took">Took</button>
+                  <button type="button" class="btn soft sm" data-pq="${q.id}" data-act="skip">Skip</button>
+                  <button type="button" class="btn soft sm" data-pq-dismiss="${q.id}">Dismiss</button>
+                </div>
+              </div>`;
+            })
+            .join("")
+        : "";
       $$("[data-pq]", pendEl).forEach((b) =>
         b.addEventListener("click", async () => {
           try {
@@ -630,10 +662,9 @@
               body: JSON.stringify({
                 question_id: +b.dataset.pq,
                 action: b.dataset.act,
-                answer_text: "desk answer",
+                answer_text: "desk",
               }),
             });
-            toast("Saved");
             loadMemory();
           } catch (err) {
             toast(err.message);
@@ -658,83 +689,44 @@
       );
     }
 
-    const drEl = $("#learnDrafts");
-    if (drEl) {
-      drEl.innerHTML = drafts.length
-        ? drafts
+    // Belief setups
+    const su = $("#agentSetups");
+    if (su) {
+      su.innerHTML = setups.length
+        ? setups
             .map(
-              (dr) => `<div class="learn-card">
-              <div class="learn-card-t">${(dr.text || "").slice(0, 220)}</div>
-              <div class="learn-card-meta">${dr.source || "coach"} · ${dr.kind || "draft"}</div>
-              <div class="row-gap mt">
-                <button type="button" class="btn sm" data-apr="${dr.id}">Approve</button>
-                <button type="button" class="btn soft sm" data-dr-x="${dr.id}">Dismiss</button>
-              </div>
-            </div>`
+              (s) =>
+                `<div class="learn-card-meta">${s.velocity_band}+${s.heat_bin}+${
+                  s.drop_bin
+                }: <b>edge ${Number(s.edge || 0).toFixed(2)}</b> n=${s.n} g/b=${
+                  s.n_good
+                }/${s.n_bad}</div>`
             )
             .join("")
-        : `<div class="rank-empty">No drafts awaiting approval</div>`;
-      $$("[data-apr]", drEl).forEach((b) =>
-        b.addEventListener("click", async () => {
-          try {
-            await api("/api/learning/approve", {
-              method: "POST",
-              body: JSON.stringify({ lesson_id: +b.dataset.apr }),
-            });
-            toast("Approved");
-            loadMemory();
-          } catch (err) {
-            toast(err.message);
-          }
-        })
-      );
-      $$("[data-dr-x]", drEl).forEach((b) =>
-        b.addEventListener("click", async () => {
-          try {
-            await api("/api/learning/approve", {
-              method: "POST",
-              body: JSON.stringify({
-                lesson_id: +b.getAttribute("data-dr-x"),
-                dismiss: true,
-              }),
-            });
-            loadMemory();
-          } catch (err) {
-            toast(err.message);
-          }
-        })
-      );
+        : `<div class="rank-empty">No setup edges yet — need fire outcomes (15m+)</div>`;
+    }
+    const tk = $("#agentTickers");
+    if (tk) {
+      tk.innerHTML = tickers.length
+        ? tickers
+            .map(
+              (t) =>
+                `<div class="learn-card-meta">${t.symbol}: setup <b>${Number(
+                  t.setup_edge || 0
+                ).toFixed(2)}</b> exec <b>${Number(t.exec_edge || 0).toFixed(
+                  2
+                )}</b> fires=${t.n_fires} took=${t.n_took} skip=${t.n_skip}</div>`
+            )
+            .join("")
+        : `<div class="rank-empty">No ticker edges yet</div>`;
     }
 
-    const lesEl = $("#learnLessons");
-    if (lesEl) {
-      lesEl.innerHTML = lessons.length
-        ? lessons
-            .map((l) => `· ${(l.text || "").slice(0, 140)}`)
-            .join("<br/>")
-        : "No approved lessons yet — teach above.";
-    }
-
-    const stEl = $("#learnStats");
-    const stB = $("#learnStatsBadge");
-    if (stEl) {
-      const med =
-        stats.median_bounce_pct != null
-          ? Number(stats.median_bounce_pct).toFixed(1) + "%"
-          : "n/a";
-      stEl.textContent =
-        `events=${stats.events || 0} took=${stats.took || 0} skip=${stats.skip || 0} ` +
-        `partial=${stats.partial || 0} late=${stats.late || 0} panic=${stats.panic_band || 0} ` +
-        `median_bounce=${med} lessons=${stats.approved_lessons || 0}`;
-    }
-    if (stB) stB.textContent = String(stats.events || 0);
-
-    // Trade dossiers
-    const trades = bundle.trades || bundle.closed_trades || [];
+    // Trades with process feedback (updates exec edge)
     const trEl = $("#learnTrades");
     if (trEl) {
-      trEl.innerHTML = trades.length
-        ? trades
+      const closed = trades.filter((t) => t.status === "closed" || t.status === "open");
+      trEl.innerHTML = closed.length
+        ? closed
             .map((t) => {
               const pnl = t.pnl_pct;
               const pnlS =
@@ -742,90 +734,43 @@
                   ? `<span class="${pnl >= 0 ? "up" : "dn"}">${
                       pnl >= 0 ? "+" : ""
                     }${Number(pnl).toFixed(2)}%</span>`
-                  : t.status === "open"
-                    ? "<span class='badge'>open</span>"
-                    : "—";
-              const usd =
-                t.pnl_usd != null
-                  ? ` · $${Number(t.pnl_usd).toFixed(2)}`
-                  : "";
-              const layerFmt = (side, l) => {
-                const q = l.qty != null ? "×" + l.qty : "";
-                const tm = l.ts ? " " + fmtTime(l.ts) : "";
-                return `${side} ${l.price != null ? l.price : "—"}${q}${tm}`;
-              };
-              const buys = (t.buy_layers || [])
-                .slice(0, 6)
-                .map((l) => layerFmt("B", l))
-                .join(" · ");
-              const sells = (t.sell_layers || [])
-                .slice(0, 6)
-                .map((l) => layerFmt("S", l))
-                .join(" · ");
-              const linked = (t.linked_events || [])[0];
-              const fireS = linked
-                ? `Fire #${linked.id} ${linked.velocity_band || ""} ${
-                    linked.drop_pct != null
-                      ? Number(linked.drop_pct).toFixed(1) + "%"
-                      : ""
-                  } ${linked.ts ? fmtTime(linked.ts) : ""}`
-                : "No linked fire";
-              const behs = [
-                "plan_ok",
-                "pride",
-                "greed",
-                "hesitant",
-                "fomo",
-                "rule_break",
-                "false_panic",
-                "process_skip",
-              ];
-              const tagBtns = behs
+                  : t.status;
+              const behs = ["plan_ok", "fomo", "pride", "hesitant", "rule_break"];
+              const tags = behs
                 .map(
                   (beh) =>
-                    `<button type="button" class="btn soft sm" data-tag-tr="${t.id}" data-beh="${beh}">${beh}</button>`
+                    `<button type="button" class="btn soft sm" data-rec-proc="${t.id}" data-tag="${beh}">${beh}</button>`
                 )
                 .join("");
               return `<div class="learn-card rich">
-                <div class="learn-card-h">#${t.id} ${t.symbol} [${(
-                t.market || "?"
-              )
-                .toString()
-                .slice(0, 1)
-                .toUpperCase()}] ${pnlS}${usd}</div>
-                <div class="learn-card-meta">Hold ${
-                  t.hold_hours != null ? t.hold_hours + "h" : "—"
-                } · ${fmtTime(t.opened_at)} → ${
-                t.closed_at ? fmtTime(t.closed_at) : "now"
+                <div class="learn-card-h">#${t.id} ${t.symbol} ${pnlS} · ${
+                t.hold_hours != null ? t.hold_hours + "h" : ""
               }</div>
-                <div class="learn-card-meta">Entry ${
-                  t.entry_avg != null ? t.entry_avg : "—"
-                } · Exit ${t.exit_avg != null ? t.exit_avg : "—"}</div>
-                <div class="learn-card-meta">Layers: ${buys || "—"} ${
-                sells ? " | " + sells : ""
+                <div class="learn-card-meta">layers B${t.n_buys}/S${
+                t.n_sells
+              } · fire ${
+                t.primary_event_id ? "#" + t.primary_event_id : "—"
               }</div>
-                <div class="learn-card-meta">${fireS}</div>
-                <div class="row-gap mt wrap">${tagBtns}
+                <div class="row-gap mt">${tags}
                   <button type="button" class="btn soft sm" data-coach-tr="${
                     t.symbol
-                  }">Coach</button>
+                  }">Agent</button>
                 </div>
               </div>`;
             })
             .join("")
-        : `<div class="rank-empty">No journal trades yet — closes/fills appear here</div>`;
-      $$("[data-tag-tr]", trEl).forEach((b) =>
+        : `<div class="rank-empty">Close trades / sync fills — agent trains exec edge here</div>`;
+      $$("[data-rec-proc]", trEl).forEach((b) =>
         b.addEventListener("click", async () => {
           try {
             await api("/api/learning/trades/tag", {
               method: "POST",
               body: JSON.stringify({
-                trade_id: +b.dataset.tagTr,
-                behavior: b.dataset.beh,
-                notes: "desk tag",
+                trade_id: +b.dataset.recProc,
+                behavior: b.dataset.tag,
               }),
             });
-            toast("Tagged " + b.dataset.beh);
+            toast("Process → exec edge updated");
             loadMemory();
           } catch (err) {
             toast(err.message);
@@ -838,7 +783,7 @@
             const r = await api("/api/coach", {
               method: "POST",
               body: JSON.stringify({
-                question: `Review my ${b.dataset.coachTr} trades and process`,
+                question: `Judge and review ${b.dataset.coachTr}`,
               }),
             });
             const pre = $("#coachReply");
@@ -850,53 +795,52 @@
       );
     }
 
-    // Ticker chips
-    const tickers = bundle.tickers || [];
-    const tkEl = $("#learnTickers");
-    const tdEl = $("#learnTickerDetail");
-    if (tkEl) {
-      tkEl.innerHTML = tickers.length
-        ? tickers
-            .map(
-              (t) =>
-                `<button type="button" class="chip" data-tk="${t.symbol}" data-mkt="${
-                  t.market || ""
-                }">${t.symbol} <span class="mute">f${t.fires || 0}/t${
-                  t.trades || 0
-                }</span></button>`
-            )
-            .join("")
-        : `<span class="mute">No ticker activity yet</span>`;
-      $$("[data-tk]", tkEl).forEach((b) =>
+    const lesEl = $("#learnLessons");
+    if (lesEl) {
+      lesEl.innerHTML = lessons.length
+        ? lessons.map((l) => `· ${(l.text || "").slice(0, 140)}`).join("<br/>")
+        : "Teach rules below — agent stores them.";
+    }
+    const stEl = $("#learnStats");
+    const stB = $("#learnStatsBadge");
+    if (stEl) {
+      stEl.textContent = `fires=${stats.events || 0} took=${stats.took || 0} skip=${
+        stats.skip || 0
+      } · agent edges train from outcomes + closes`;
+    }
+    if (stB) stB.textContent = String(stats.events || 0);
+
+    const rows = (fires || [])
+      .map(
+        (e) => `<tr>
+        <td>#${e.id}</td><td>${e.symbol}</td>
+        <td class="dn">${
+          e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—"
+        }</td>
+        <td>${e.velocity_band || "—"}</td>
+        <td>${e.last_action || "—"}</td>
+        <td><button type="button" class="btn soft sm" data-jfire="${
+          e.id
+        }">Judge</button></td>
+      </tr>`
+      )
+      .join("");
+    const mt = $("#memoryTable");
+    if (mt) {
+      mt.innerHTML = table(
+        ["ID", "Sym", "Drop", "Band", "Action", ""],
+        rows
+      );
+      $$("[data-jfire]", mt).forEach((b) =>
         b.addEventListener("click", async () => {
           try {
-            const m = b.dataset.mkt
-              ? `?market=${encodeURIComponent(b.dataset.mkt)}`
-              : "";
-            const r = await api(
-              `/api/learning/ticker/${encodeURIComponent(b.dataset.tk)}${m}`
-            );
-            const tk = r.ticker || {};
-            if (tdEl) {
-              tdEl.innerHTML = `<strong>${tk.symbol}</strong> fires=${tk.fires} took=${
-                tk.took
-              } skip=${tk.skip} late=${tk.late}<br/>
-                trades closed=${tk.closed_trades} win_rate=${
-                tk.win_rate != null ? (tk.win_rate * 100).toFixed(0) + "%" : "—"
-              }
-                avg_pnl=${tk.avg_pnl_pct != null ? tk.avg_pnl_pct + "%" : "—"}
-                avg_hold=${tk.avg_hold_hours != null ? tk.avg_hold_hours + "h" : "—"}<br/>
-                median bounce=${
-                  tk.median_outcome_bounce_pct != null
-                    ? tk.median_outcome_bounce_pct
-                    : "—"
-                }
-                reds=${
-                  tk.candle_features && tk.candle_features.consecutive_reds
-                    ? JSON.stringify(tk.candle_features.consecutive_reds)
-                    : "—"
-                }`;
-            }
+            const r = await api("/api/learning/judge_body", {
+              method: "POST",
+              body: JSON.stringify({ event_id: +b.dataset.jfire }),
+            });
+            const j = r.judgment || {};
+            toast(`${j.symbol}: ${(j.setup || {}).verdict}`);
+            loadMemory();
           } catch (err) {
             toast(err.message);
           }
@@ -904,45 +848,34 @@
       );
     }
 
-    const rows = (fires.length ? fires : [])
-      .map(
-        (e) => `<tr>
-        <td>#${e.id}</td><td>${e.symbol}</td>
-        <td class="dn">${e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : "—"}</td>
-        <td>${e.velocity_band || "—"}</td>
-        <td>${e.last_action || "unlabeled"}</td>
-        <td>${
-          e.outcome_bounce != null ? Number(e.outcome_bounce).toFixed(1) + "%" : "—"
-        }</td>
-        <td>${fmtTime(e.ts)}</td>
-        <td>
-          <button type="button" class="btn soft sm" data-eid="${e.id}" data-a="took">Took</button>
-          <button type="button" class="btn soft sm" data-eid="${e.id}" data-a="skip">Skip</button>
-        </td>
-      </tr>`
-      )
-      .join("");
-    $("#memoryTable").innerHTML = table(
-      ["ID", "Sym", "Drop", "Band", "Label", "Bounce", "When", ""],
-      rows
-    );
-    $$("[data-eid]").forEach((b) =>
-      b.addEventListener("click", async () => {
+    // Overview pulse from agent
+    const pulseEl = $("#ovCoachPulse");
+    if (pulseEl && bundle.coach_pulse) {
+      pulseEl.innerHTML = `<div class="panel-h"><h3>AD Super-Agent</h3><button type="button" class="btn soft sm" data-jump="memory">Open</button></div>
+        <pre class="coach-pulse-text">${bundle.coach_pulse}</pre>`;
+      $$("[data-jump]", pulseEl).forEach((b) =>
+        b.addEventListener("click", () => setView(b.dataset.jump))
+      );
+    }
+  }
+
+  function wireLearningForms() {
+    const bj = $("#btnJudgeLatest");
+    if (bj && !bj.dataset.bound) {
+      bj.dataset.bound = "1";
+      bj.addEventListener("click", async () => {
         try {
-          await api("/api/events/label", {
+          await api("/api/learning/judge_body", {
             method: "POST",
-            body: JSON.stringify({ event_id: +b.dataset.eid, action: b.dataset.a }),
+            body: JSON.stringify({}),
           });
-          toast("Labeled " + b.dataset.a);
+          toast("Judged latest fire");
           loadMemory();
         } catch (e) {
           toast(e.message);
         }
-      })
-    );
-  }
-
-  function wireLearningForms() {
+      });
+    }
     const tf = $("#teachForm");
     if (tf && !tf.dataset.bound) {
       tf.dataset.bound = "1";

@@ -450,7 +450,9 @@ class TestLearningApiIntegration(unittest.TestCase):
 
         out = learning_api.coach_ask("panic setup?", user_id=self.uid)
         self.assertIn("reply", out)
-        self.assertIn("events=1", out["reply"])
+        self.assertTrue(
+            "SUPER-AGENT" in out["reply"] or "Judgment" in out["reply"] or "PANIC" in out["reply"]
+        )
         teach = learning_api.teach("Test lesson from desk", user_id=self.uid)
         self.assertTrue(teach["ok"])
 

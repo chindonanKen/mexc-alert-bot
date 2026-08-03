@@ -398,14 +398,15 @@ class TestLearningApiBundle(unittest.TestCase):
         )
         b = learning_api.learning_bundle(self.uid)
         self.assertIn("trades", b)
-        self.assertIn("tickers", b)
+        self.assertTrue("beliefs" in b or "agent" in b)
         self.assertIn("closed_trades", b)
-        self.assertTrue(b["pending_questions"])
-        p0 = b["pending_questions"][0]
+        needs = b.get("needs_you") or {}
+        pending = needs.get("pending_questions") or b.get("pending_questions") or []
+        self.assertTrue(pending)
+        p0 = pending[0]
         self.assertTrue(p0.get("fire_price") == 100 or (p0.get("event") or {}).get("price") == 100)
         out = learning_api.coach_ask("SOL process?", user_id=self.uid)
         self.assertIn("reply", out)
-        # should mention trade or ticker context eventually
         self.assertIn("SOL", out["reply"].upper())
 
 

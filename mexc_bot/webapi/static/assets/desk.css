@@ -243,6 +243,24 @@ body::before {
 .chip .mute { opacity: 0.55; margin-left: 0.25rem; }
 .up { color: var(--mint, #34d399); }
 .dn { color: var(--rose, #fb7185); }
+.agent-hero {
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  box-shadow: 0 0 40px rgba(56, 189, 248, 0.08);
+}
+.agent-case-h {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+.cite-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--mute);
+  line-height: 1.45;
+}
+
 .ov-book-news {
   margin-bottom: 1rem;
   padding: 0.85rem 1rem;
