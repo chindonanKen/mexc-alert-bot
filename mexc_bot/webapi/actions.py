@@ -641,24 +641,26 @@ TOOL_DEFS = [
     ),
     _tool(
         "list_trade_reviews",
-        "List trade dossiers (PnL, hold, buy/sell layers, linked fires)",
+        "List trades with money_truth (exchange-verified futures PnL/entry when available). Prefer teach_ok=true for $ claims.",
         {
             "closed_only": {"type": "boolean"},
+            "open_only": {"type": "boolean"},
             "symbol": {"type": "string"},
             "limit": {"type": "integer"},
+            "teach_only": {"type": "boolean"},
         },
     ),
     _tool(
         "get_trade_review",
-        "One trade dossier by journal trade id",
-        {"trade_id": {"type": "integer"}},
+        "One trade by entity_key or id (exchange money truth when money_truth=exchange)",
+        {"trade_id": {"type": "string"}},
         ["trade_id"],
     ),
     _tool(
         "record_process",
-        "Record process tags on a trade and update agent exec edge",
+        "Record process tags on a trade (entity_key preferred) and update agent exec edge only if exchange-verified closed",
         {
-            "trade_id": {"type": "integer"},
+            "trade_id": {"type": "string"},
             "tags": {"type": "array", "items": {"type": "string"}},
             "note": {"type": "string"},
         },
@@ -866,24 +868,26 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
 
             return trades_api(
                 closed_only=bool(args.get("closed_only")),
+                open_only=bool(args.get("open_only")),
                 symbol=args.get("symbol"),
                 limit=int(args.get("limit") or 20),
+                teach_only=bool(args.get("teach_only")),
             )
         if name == "get_trade_review":
             from .learning_api import trade_api
 
-            return trade_api(int(args["trade_id"]))
+            return trade_api(args["trade_id"])
         if name == "record_process" or name == "tag_trade":
             from .learning_api import record_process, tag_trade
 
             if name == "tag_trade":
                 return tag_trade(
-                    int(args["trade_id"]),
+                    args["trade_id"],
                     behavior=args.get("behavior"),
                     notes=args.get("notes"),
                 )
             return record_process(
-                int(args["trade_id"]),
+                args["trade_id"],
                 tags=args.get("tags") or [],
                 note=args.get("note"),
             )

@@ -278,7 +278,10 @@ def agent_bundle(user_id: Optional[int] = None) -> Dict[str, Any]:
     ]
     setups = eng.list_setup_beliefs(uid, limit=12)
     tickers = eng.list_ticker_beliefs(uid, limit=15)
-    trades = list_trade_dossiers(store, uid, limit=12)
+    from ..learning.money_truth import coach_last_closed_line, list_money_reviews
+
+    # Money facts for teaching = exchange-backed entities (not journal dossiers)
+    trades = list_money_reviews(uid, limit=12, store=store)
     closed = [t for t in trades if t.get("status") == "closed"]
     stats = store.learning_stats(uid)
     lessons = store.list_lessons(uid, approved_only=True, limit=8)
@@ -300,15 +303,7 @@ def agent_bundle(user_id: Optional[int] = None) -> Dict[str, Any]:
             f"Best setup cell {best.get('velocity_band')}+{best.get('heat_bin')}+"
             f"{best.get('drop_bin')}: edge={float(best.get('edge') or 0):+.2f} n={best.get('n')}"
         )
-    if closed:
-        t = closed[0]
-        pnl = t.get("pnl_pct")
-        pulse_lines.append(
-            f"Last trade {t.get('symbol')}: "
-            f"{('+' if pnl and pnl>=0 else '')}{pnl}% hold={t.get('hold_hours')}h"
-            if pnl is not None
-            else f"Last trade {t.get('symbol')} open/closed"
-        )
+    pulse_lines.append(coach_last_closed_line(uid, store=store))
     if not pulse_lines:
         pulse_lines.append(
             "AD Super-Agent online. Fires train setup edges; closes train exec edges."
@@ -539,16 +534,25 @@ def coach_ask(question: str, user_id: Optional[int] = None) -> Dict[str, Any]:
                 f"exec={float(t.get('exec_edge') or 0):+.2f} n={t.get('n_fires')}"
             )
 
-    trades = list_trade_dossiers(store, uid, closed_only=True, limit=4)
+    from ..learning.money_truth import list_money_reviews
+
+    trades = list_money_reviews(
+        uid, closed_only=True, limit=4, teach_only=True, store=store
+    )
     if trades:
-        lines.append("Recent closed trades:")
+        lines.append("Recent closed trades (exchange-verified):")
         for d in trades:
             pnl = d.get("pnl_pct")
+            usd = d.get("pnl_usd")
             lines.append(
-                f"  #{d.get('id')} {d.get('symbol')} "
-                f"pnl={pnl}% hold={d.get('hold_hours')}h "
+                f"  {d.get('symbol')} [{d.get('money_truth')}] "
+                f"pnl={pnl}% usd={usd} hold={d.get('hold_hours')}h "
                 f"layers={d.get('n_buys')}/{d.get('n_sells')}"
             )
+    else:
+        lines.append(
+            "Recent closed: none exchange-verified yet — do not invent $ PnL."
+        )
 
     ql = q.lower()
     if "grind" in ql:
@@ -575,41 +579,106 @@ def coach_ask(question: str, user_id: Optional[int] = None) -> Dict[str, Any]:
 
 
 def record_process(
-    trade_id: int,
+    trade_id: Any,
     *,
     tags: Optional[List[str]] = None,
     note: Optional[str] = None,
     user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
+    """Train exec edge from process tags on an exchange-backed review or journal id."""
     uid = int(user_id or uid_or_raise())
     store = event_store()
-    d = get_trade_dossier(store, uid, int(trade_id))
-    if not d:
-        raise ValueError("Trade not found")
     tags = tags or []
-    # persist tags on journal
-    for t in tags:
-        note_part = f"[{t}]"
-        with store._lock:
-            conn = store._get_conn()
-            row = conn.execute(
-                "SELECT notes FROM journal_trades WHERE id=? AND user_id=?",
-                (int(trade_id), uid),
-            ).fetchone()
-            old = (row["notes"] if row else "") or ""
-            if note_part not in old:
-                merged = (old + " | " + note_part).strip(" |")
-                if note:
-                    merged = (merged + " | " + note).strip(" |")
-                conn.execute(
-                    "UPDATE journal_trades SET notes=? WHERE id=?",
-                    (merged, int(trade_id)),
+    from ..learning.money_truth import get_money_review
+
+    # Prefer money-truth entity (entity_key / synthetic id)
+    d = get_money_review(uid, trade_id, store=store)
+    if d is None:
+        # legacy journal id
+        try:
+            d = get_trade_dossier(store, uid, int(trade_id))
+        except (TypeError, ValueError):
+            d = None
+    if not d:
+        raise ValueError("Trade/review not found")
+    if d.get("money_truth") == "fill_recon_unverified":
+        # still allow process tags but mark belief path careful
+        pass
+    # Persist process tags: journal notes when numeric id; else durable lesson
+    if tags or note:
+        journal_updated = False
+        try:
+            tid = int(trade_id)
+            for t in tags:
+                note_part = f"[{t}]"
+                with store._lock:
+                    conn = store._get_conn()
+                    row = conn.execute(
+                        "SELECT notes FROM journal_trades WHERE id=? AND user_id=?",
+                        (tid, uid),
+                    ).fetchone()
+                    if row is not None:
+                        old = (row["notes"] if row else "") or ""
+                        if note_part not in old:
+                            merged = (old + " | " + note_part).strip(" |")
+                            if note:
+                                merged = (merged + " | " + note).strip(" |")
+                            conn.execute(
+                                "UPDATE journal_trades SET notes=? WHERE id=?",
+                                (merged, tid),
+                            )
+                        journal_updated = True
+        except (TypeError, ValueError):
+            pass
+        if not journal_updated:
+            try:
+                store.teach_lesson(
+                    uid,
+                    text=(
+                        f"process {d.get('symbol')} tags={tags} {note or ''} "
+                        f"money_truth={d.get('money_truth')}"
+                    ).strip(),
+                    tags=tags or ["process"],
+                    needs_approval=False,
+                    source="process",
+                    kind="process",
                 )
-    d2 = get_trade_dossier(store, uid, int(trade_id))
+            except Exception as e:
+                logger = __import__("logging").getLogger(__name__)
+                logger.debug("teach_lesson process: %s", e)
+
+    # Train exec edge: exchange-verified closed, OR journal with process tags
+    mt = d.get("money_truth")
+    if d.get("status") == "closed" and mt == "fill_recon_unverified" and not tags:
+        return {
+            "ok": True,
+            "trade_id": trade_id,
+            "belief_update": {"updated": False, "reason": "not_exchange_verified"},
+            "money_truth": mt,
+        }
+    tid_key = d.get("entity_key") or trade_id
+    try:
+        tid_int = int(trade_id)
+    except (TypeError, ValueError):
+        tid_int = abs(hash(str(tid_key))) % (10**9)
+    # journal open tags still train process (teach_ok may be absent)
+    if d.get("teach_ok") is False and d.get("status") == "closed" and not tags:
+        return {
+            "ok": True,
+            "trade_id": trade_id,
+            "belief_update": {"updated": False, "reason": "not_exchange_verified"},
+            "money_truth": mt,
+        }
     upd = beliefs().update_from_trade_close(
-        uid, int(trade_id), dossier=d2 or d, process_tags=tags
+        uid, tid_int, dossier=d, process_tags=tags
     )
-    return {"ok": True, "trade_id": trade_id, "belief_update": upd}
+    return {
+        "ok": True,
+        "trade_id": trade_id,
+        "entity_key": d.get("entity_key"),
+        "money_truth": mt or d.get("source"),
+        "belief_update": upd,
+    }
 
 
 def teach(
@@ -668,27 +737,41 @@ def learning_bundle(user_id: Optional[int] = None) -> Dict[str, Any]:
 
 
 def trades_api(**kwargs):
+    """Trade reviews for teaching — exchange money truth (same as Positions)."""
     uid = int(kwargs.get("user_id") or uid_or_raise())
+    from ..learning.money_truth import list_money_reviews
+
     return {
-        "trades": list_trade_dossiers(
-            event_store(),
+        "trades": list_money_reviews(
             uid,
             closed_only=bool(kwargs.get("closed_only")),
+            open_only=bool(kwargs.get("open_only")),
             symbol=kwargs.get("symbol"),
             limit=int(kwargs.get("limit") or 30),
-        )
+            teach_only=bool(kwargs.get("teach_only")),
+            store=event_store(),
+        ),
+        "money_truth": "exchange_when_available",
     }
 
 
-def trade_api(trade_id: int, user_id: Optional[int] = None):
+def trade_api(trade_id: Any, user_id: Optional[int] = None):
     uid = int(user_id or uid_or_raise())
-    d = get_trade_dossier(event_store(), uid, int(trade_id))
+    from ..learning.money_truth import get_money_review
+
+    d = get_money_review(uid, trade_id, store=event_store())
+    if not d:
+        # legacy journal
+        try:
+            d = get_trade_dossier(event_store(), uid, int(trade_id))
+        except (TypeError, ValueError):
+            d = None
     if not d:
         raise ValueError("Trade not found")
     return {"trade": d}
 
 
-def tag_trade(trade_id: int, **kwargs):
+def tag_trade(trade_id: Any, **kwargs):
     tags = []
     beh = kwargs.get("behavior")
     notes = kwargs.get("notes")

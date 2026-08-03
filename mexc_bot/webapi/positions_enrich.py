@@ -56,8 +56,8 @@ def list_position_entities(
         pass
 
     entities: List[dict] = []
-    # Spot only from fill walk. Futures closed fill-walk is untrustworthy
-    # (truncated deals + side model) — use history_positions instead.
+    # Spot only from fill walk (no balance API permission on keys today).
+    # Tag money_truth so coach/teaching never treat spot residual as exchange truth.
     for sym, mkt in pairs:
         if mkt == "futures":
             continue
@@ -65,6 +65,15 @@ def list_position_entities(
         for s in segs:
             if not include_closed and s.get("status") != "open":
                 continue
+            s["money_truth"] = "fill_recon_unverified"
+            s["verified"] = False
+            s["teach_ok"] = False
+            s["source"] = "fill_recon"
+            if s.get("status") == "open":
+                s["notes"] = (
+                    (s.get("notes") or "")
+                    + " · spot residual from fills (not balance-verified)"
+                ).strip(" ·")
             entities.append(s)
 
     # Futures OPEN: exchange open_positions + deal layers from fills
@@ -96,10 +105,20 @@ def list_position_entities(
     except Exception:
         jrows = []
     for j in jrows:
+        jm = (j.get("market") or "spot").lower()
         key = (
             str(j.get("symbol") or "").upper().replace("_", ""),
-            (j.get("market") or "spot").lower(),
+            jm,
         )
+        # Skip journal open if exchange already shows this futures symbol open
+        if jm == "futures" and any(
+            (e.get("market") or "").lower() == "futures"
+            and (e.get("status") == "open" or e.get("is_open"))
+            and e.get("exchange_hold")
+            and str(e.get("symbol") or "").upper().replace("_", "") == key[0]
+            for e in entities
+        ):
+            continue
         if key in open_keys:
             # attach journal id onto matching fill open if same symbol
             for e in entities:
@@ -117,16 +136,18 @@ def list_position_entities(
         d = _fallback_from_rows([j])[0]
         d["journal_id"] = j.get("id")
         d["id"] = j.get("id")
+        d["money_truth"] = "journal_manual"
+        d["verified"] = False
+        d["teach_ok"] = False
         entities.append(d)
         open_keys.add(key)
 
     if include_closed:
-        # journal closed without fills (manual only). Never mix auto journal rows
-        # with fill-recon for the same symbol — those are often wrong timestamps/PnL.
+        # Manual journal closed only (spot). Futures closed = history_positions only.
         fill_recon_syms = {
             str(e.get("symbol") or "").upper().replace("_", "")
             for e in entities
-            if e.get("recon_from_fills")
+            if e.get("recon_from_fills") or e.get("exchange_history")
         }
         try:
             jc = db.fetch_all(
@@ -137,12 +158,17 @@ def list_position_entities(
         except Exception:
             jc = []
         for j in jc:
+            if (j.get("market") or "spot").lower() == "futures":
+                continue  # never journal futures closed money facts
             sk = str(j.get("symbol") or "").upper().replace("_", "")
             if sk in fill_recon_syms:
                 continue
             d = _fallback_from_rows([j])[0]
             d["journal_id"] = j.get("id")
             d["id"] = j.get("id")
+            d["money_truth"] = "journal_manual"
+            d["verified"] = False
+            d["teach_ok"] = False
             entities.append(d)
 
     now = time.time()
@@ -303,6 +329,10 @@ def _reconcile_futures_with_exchange(
             "n_sells": 0,
             "recon_from_fills": False,
             "exchange_hold": True,
+            "money_truth": "exchange",
+            "verified": True,
+            "teach_ok": True,
+            "source": "mexc_open_positions",
             "leverage": fo.get("leverage"),
             "realized_on_pos": fo.get("realized"),
             "hold_fee": hold_fee,
@@ -428,6 +458,10 @@ def _merge_futures_closed_history(
         e = dict(ent)
         e.setdefault("buy_orders", [])
         e.setdefault("sell_orders", [])
+        e["money_truth"] = "exchange"
+        e["verified"] = True
+        e["teach_ok"] = True
+        e["source"] = "mexc_history_positions"
         _attach_fills_to_closed(e, fills_all)
         kept.append(e)
     return kept

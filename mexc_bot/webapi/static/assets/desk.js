@@ -399,10 +399,20 @@
                     up >= 0 ? "+" : ""
                   }${Number(up).toFixed(1)}%</span>`
                 : "—";
+            const truth =
+              p.exchange_hold || p.verified || p.money_truth === "exchange"
+                ? "LIVE"
+                : p.money_truth === "fill_recon_unverified"
+                  ? "FILL?"
+                  : "";
             return `<div class="cmd-row pos">
             <div class="cmd-row-main">
               <div>
-                <div class="cmd-sym">${p.symbol}</div>
+                <div class="cmd-sym">${p.symbol}${
+              truth
+                ? ` <span class="pos-src">${truth}</span>`
+                : ""
+            }</div>
                 <div class="cmd-meta">avg ${
                   entry != null ? fmtPx(entry) : "—"
                 } · mark ${
@@ -591,11 +601,13 @@
       p.exchange_position_id ||
       `${p.market || "?"}:${p.symbol}:${p.status}:${p.opened_at || ""}:${p.closed_at || ""}`;
     const exchBadge =
-      p.exchange_history
+      p.exchange_history || p.money_truth === "exchange"
         ? `<span class="pos-src" title="MEXC history_positions">EXCH</span>`
         : p.exchange_hold
           ? `<span class="pos-src" title="MEXC open_positions">LIVE</span>`
-          : "";
+          : p.money_truth === "fill_recon_unverified" || p.verified === false
+            ? `<span class="pos-src" title="Fill residual — not balance-verified">FILL?</span>`
+            : "";
     const sideBit =
       p.position_side === "short"
         ? " · short"

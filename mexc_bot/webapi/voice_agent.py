@@ -47,7 +47,7 @@ Agent brain (required for learning claims):
   refresh_book_charts — re-read every chart in targets+watchlist+positions
   belief_setup_top — trained setup cells
   belief_ticker / ticker_stats — per-chart setup_edge + exec_edge
-  list_trade_reviews / get_trade_review — dossiers with layers/PnL/hold
+  list_trade_reviews / get_trade_review — exchange money_truth when available; only cite $ if teach_ok/verified
   record_process / tag_trade — process tags that UPDATE exec beliefs
   list_agent_cases — open training cases
   coach_ask — full agent brief with citations

@@ -442,6 +442,49 @@ class TestFuturesOpenAuthority(unittest.TestCase):
         )
 
 
+class TestMoneyTruthReviews(unittest.TestCase):
+    def test_entity_to_review_exchange_closed(self):
+        from mexc_bot.learning.money_truth import entity_to_review
+
+        r = entity_to_review(
+            {
+                "symbol": "KORU_USDT",
+                "market": "futures",
+                "status": "closed",
+                "entry_avg": 14.19,
+                "exit_avg": 14.29,
+                "realized_pnl_pct": 1.87,
+                "realized_pnl_usd": 11.81,
+                "exchange_history": True,
+                "entity_key": "fhist:1:1",
+                "n_buys": 1,
+                "n_sells": 1,
+                "buy_orders": [],
+                "sell_orders": [],
+            }
+        )
+        self.assertEqual(r["money_truth"], "exchange")
+        self.assertTrue(r["teach_ok"])
+        self.assertAlmostEqual(r["pnl_usd"], 11.81)
+
+    def test_spot_fill_recon_not_teach_ok(self):
+        from mexc_bot.learning.money_truth import entity_to_review
+
+        r = entity_to_review(
+            {
+                "symbol": "SYNUSDT",
+                "market": "spot",
+                "status": "open",
+                "is_open": True,
+                "entry_avg": 0.09,
+                "recon_from_fills": True,
+                "size_remaining": 100,
+            }
+        )
+        self.assertEqual(r["money_truth"], "fill_recon_unverified")
+        self.assertFalse(r["teach_ok"])
+
+
 class TestAttachFillsOpen(unittest.TestCase):
     def test_open_futures_gets_buy_and_sell_layers(self):
         from mexc_bot.webapi.positions_enrich import _attach_fills_window
