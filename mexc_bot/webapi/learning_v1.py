@@ -71,9 +71,9 @@ def learning_home_v1(user_id: Optional[int] = None) -> Dict[str, Any]:
     uid = int(user_id or uid_or_raise())
     store = event_store()
 
-    pending_raw = store.list_pending_questions(uid, status="open", limit=5)
-    pending: List[dict] = []
-    for p in pending_raw[:2]:  # hard cap display 2
+    pending_raw = store.list_pending_questions(uid, status="open", limit=10)
+    pending_all: List[dict] = []
+    for p in pending_raw:
         row = dict(p)
         try:
             from ..learning.trades import enrich_pending_row
@@ -81,7 +81,8 @@ def learning_home_v1(user_id: Optional[int] = None) -> Dict[str, Any]:
             row = enrich_pending_row(store, p)
         except Exception:
             pass
-        pending.append(row)
+        pending_all.append(row)
+    pending = pending_all[:2]  # hard cap display 2
 
     learned = what_have_you_learned(uid)
     trades = list_money_reviews(uid, limit=15, teach_only=True, store=store)
@@ -109,7 +110,8 @@ def learning_home_v1(user_id: Optional[int] = None) -> Dict[str, Any]:
         "product": "learning_v1",
         "needs_you": {
             "pending_questions": pending,
-            "count": len(pending),
+            "count": len(pending_all),
+            "has_lessons": bool(learned.get("lessons")),
         },
         "pending_questions": pending,
         "lessons": learned.get("lessons") or [],

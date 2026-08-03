@@ -147,6 +147,14 @@
     return `<div class="rank-empty">${msg}</div>`;
   }
 
+  function escHtml(s) {
+    return String(s ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
   function updateLearningNavBadge(count) {
     const badge = $("#navLearnBadge");
     const btn = $("#navLearning");
@@ -429,15 +437,17 @@
       }
     }
 
-    // Agent recall strip (what it has learned — not a coach)
+    // Agent memory strip only when there are real lessons (sparse Overview)
     const learnedEl = $("#ovAgentLearned");
     if (learnedEl) {
+      const ny = h.needs_you || d.needs_you || {};
+      const hasLessons = ny.has_lessons || (d.hierarchy && d.hierarchy.needs_you && d.hierarchy.needs_you.has_lessons);
       const summary =
         h.agent_summary || d.agent_summary || d.what_learned_reply || "";
-      if (summary && String(summary).trim()) {
+      if (hasLessons && summary && String(summary).trim()) {
         learnedEl.hidden = false;
         learnedEl.innerHTML = `<div class="panel-h"><h3>Agent memory</h3><button type="button" class="btn soft sm" data-jump="memory">Learning</button></div>
-          <pre class="learn-recall-sm">${String(summary).slice(0, 420)}</pre>`;
+          <pre class="learn-recall-sm">${escHtml(String(summary).slice(0, 420))}</pre>`;
         $$("[data-jump]", learnedEl).forEach((b) =>
           b.addEventListener("click", () => {
             setView(b.dataset.jump);
@@ -895,13 +905,12 @@
                 <div class="learn-card-meta">${fmtTime(
                   q.fire_ts || q.created_at
                 )}</div>
-                <div class="learn-card-t">${(q.question || "Took or skip?").slice(
-                  0,
-                  200
-                )}</div>
+                <div class="learn-card-t">${escHtml((q.question || "Took or skip?").slice(0, 200))}</div>
                 <div class="row-gap mt">
                   <button type="button" class="btn sm" data-pq="${q.id}" data-act="took">Took</button>
                   <button type="button" class="btn soft sm" data-pq="${q.id}" data-act="skip">Skip</button>
+                  <button type="button" class="btn soft sm" data-pq="${q.id}" data-act="partial">Partial</button>
+                  <button type="button" class="btn soft sm" data-pq="${q.id}" data-act="late">Late</button>
                   <button type="button" class="btn soft sm" data-pq-dismiss="${q.id}">Dismiss</button>
                 </div>
               </div>`;
@@ -946,7 +955,16 @@
 
     // What I've learned
     const wl = $("#whatLearnedReply");
-    if (wl) wl.textContent = learned || "No lessons yet — teach me a rule.";
+    if (wl) {
+      // Single recall surface: mono block only when we have text and lessons
+      if (lessons.length) {
+        wl.textContent = learned || "";
+        wl.hidden = !learned;
+      } else {
+        wl.textContent = "";
+        wl.hidden = true;
+      }
+    }
     const lesEl = $("#learnLessons");
     if (lesEl) {
       lesEl.innerHTML = lessons.length
@@ -1003,12 +1021,12 @@
         </div>`;
       });
       recent.innerHTML =
-        tradeCards.join("") +
-          (tradeCards.length && fireCards.length
-            ? `<div class="learn-sep">Fires</div>`
-            : "") +
-          fireCards.join("") ||
-        rankEmpty("No recent teachable trades or fires yet");
+        (tradeCards.length
+          ? tradeCards.join("")
+          : rankEmpty("No teach_ok trades yet")) +
+        (fireCards.length
+          ? `<div class="learn-sep">Recent fires</div>` + fireCards.slice(0, 6).join("")
+          : "");
     }
   }
 
