@@ -671,11 +671,24 @@ class BeliefEngine:
         chart = chart_features or {}
         setup_prior = chart.get("setup_prior")
 
+        # Fatal news: only ticker-specific delist/hack/scam/closure
+        fatal_info: Dict[str, Any] = {"fatal": False, "hard_fatal": False, "hits": []}
+        try:
+            from .fatal_news import apply_fatal_to_verdict, lookup_fatal_for_ticker
+
+            fatal_info = lookup_fatal_for_ticker(
+                self.store, str(event.get("symbol") or "")
+            )
+        except Exception as e:
+            logger.debug("fatal news lookup: %s", e)
+            apply_fatal_to_verdict = None  # type: ignore
+
         # Hard rules
         rules = {
             "rule2_velocity": "caution" if band == "GRIND" else "ok",
             "rule2_heat": "caution" if hbin == "isolated" else "ok",
-            "fatal_news": False,
+            "fatal_news": bool(fatal_info.get("hard_fatal")),
+            "fatal_news_soft": bool(fatal_info.get("fatal") and not fatal_info.get("hard_fatal")),
         }
 
         edge = setup.get("edge")
@@ -703,7 +716,27 @@ class BeliefEngine:
             else:
                 verdict, size_hint = "wait_deeper", "none"
 
+        # Apply fatal ticker news last (overrides take)
+        fatal_note = None
+        try:
+            from .fatal_news import apply_fatal_to_verdict
+
+            applied = apply_fatal_to_verdict(verdict, size_hint, fatal_info)
+            verdict = applied["verdict"]
+            size_hint = applied["size_hint"]
+            fatal_note = applied.get("note")
+            if applied.get("overridden"):
+                rules["fatal_news"] = True
+        except Exception:
+            pass
+
         cite = []
+        if fatal_info.get("fatal"):
+            prim = fatal_info.get("primary") or {}
+            cite.append(
+                f"FATAL NEWS [{prim.get('severity')}] {prim.get('class')}: "
+                f"{(prim.get('title') or '')[:120]}"
+            )
         if n > 0 and edge is not None:
             cite.append(
                 f"{band}+{hbin}+{dbin}: n={n} edge={float(edge):+.2f} "
@@ -791,6 +824,16 @@ class BeliefEngine:
             critique.append(
                 "Your exec_edge on this ticker is weak — even good setups may be mis-traded by you here."
             )
+        if fatal_info.get("hard_fatal"):
+            critique.append(
+                "HARD fatal news on this ticker — mean-reversion AD is wrong tool; capital preservation first."
+            )
+        elif fatal_info.get("fatal"):
+            critique.append(
+                "Unconfirmed fatal-class headline matched this ticker — treat dump as possibly structural, not panic liquidity."
+            )
+        if fatal_note:
+            critique.append(fatal_note)
         if not critique:
             critique.append(
                 "No major self-conflict detected; still verify invalidation and powder plan."
@@ -844,8 +887,9 @@ class BeliefEngine:
             "size_hint": size_hint,
             "cite": cite,
             "self_critique": critique,
+            "fatal_news": fatal_info,
             "confidence": round(conf, 3),
-            "needs_human": needs_human or len(critique) >= 2,
+            "needs_human": needs_human or len(critique) >= 2 or bool(fatal_info.get("fatal")),
             "human_override": None,
             "agent": "AD-SuperAgent-v1",
         }

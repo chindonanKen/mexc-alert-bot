@@ -282,16 +282,132 @@ def set_movers(
 # ---- Journal / positions ----
 
 def list_positions(user_id: Optional[int] = None, include_closed: bool = False) -> List[dict]:
+    """Positions with fill ladder, size, mark, uPnL for desk detail rows."""
     uid = _uid(user_id)
     if include_closed:
-        return db.fetch_all(
+        rows = db.fetch_all(
             "SELECT * FROM journal_trades WHERE user_id = ? ORDER BY opened_at DESC LIMIT 50",
             (uid,),
         )
-    return db.fetch_all(
-        "SELECT * FROM journal_trades WHERE user_id = ? AND status = 'open' ORDER BY opened_at DESC",
-        (uid,),
-    )
+    else:
+        rows = db.fetch_all(
+            "SELECT * FROM journal_trades WHERE user_id = ? AND status = 'open' ORDER BY opened_at DESC",
+            (uid,),
+        )
+    return enrich_positions(rows, uid)
+
+
+def enrich_positions(rows: List[dict], user_id: int) -> List[dict]:
+    """Attach orders/fills, qty, avg entry, mark, uPnL, hold time."""
+    if not rows:
+        return []
+    fills_all: List[dict] = []
+    fills_for_trade = None
+    try:
+        from ..learning.store import EventStore
+        from ..learning.trades import fills_for_trade as _fft
+
+        fills_for_trade = _fft
+        store = EventStore(db.db_path())
+        fills_all = store.recent_fills(user_id, limit=200)
+    except Exception:
+        fills_all = []
+        fills_for_trade = None
+
+    from .prices import ticker_24h
+
+    now = time.time()
+    out: List[dict] = []
+    for p in rows:
+        d = dict(p)
+        opened = float(d.get("opened_at") or 0) or None
+        closed = float(d.get("closed_at") or 0) or None
+        if opened:
+            end = closed or now
+            d["hold_seconds"] = max(0.0, end - opened)
+            d["hold_hours"] = round(d["hold_seconds"] / 3600.0, 2)
+        else:
+            d["hold_hours"] = None
+
+        layers = {"buys": [], "sells": []}
+        if fills_for_trade is not None:
+            try:
+                layers = fills_for_trade(
+                    fills_all,
+                    symbol=str(d.get("symbol") or ""),
+                    market=str(d.get("market") or ""),
+                    opened_at=opened,
+                    closed_at=closed
+                    if closed
+                    else (now + 60 if d.get("status") == "open" else None),
+                )
+            except Exception:
+                layers = {"buys": [], "sells": []}
+        d["buy_orders"] = layers.get("buys") or []
+        d["sell_orders"] = layers.get("sells") or []
+        d["n_buys"] = len(d["buy_orders"])
+        d["n_sells"] = len(d["sell_orders"])
+
+        buy_qty = 0.0
+        buy_notional = 0.0
+        for b in d["buy_orders"]:
+            q, pr = b.get("qty"), b.get("price")
+            if q is not None and pr is not None:
+                buy_qty += float(q)
+                buy_notional += float(q) * float(pr)
+        sell_qty = 0.0
+        for s in d["sell_orders"]:
+            if s.get("qty") is not None:
+                sell_qty += float(s["qty"])
+        d["size_qty"] = buy_qty or None
+        d["size_sold"] = sell_qty or None
+        d["size_remaining"] = (buy_qty - sell_qty) if buy_qty else None
+        if buy_qty > 0:
+            d["entry_avg_fills"] = buy_notional / buy_qty
+        else:
+            d["entry_avg_fills"] = d.get("entry_avg")
+        entry = (
+            d.get("entry_avg_fills")
+            if d.get("entry_avg_fills") is not None
+            else d.get("entry_avg")
+        )
+        d["entry_display"] = entry
+
+        mark = None
+        chg = None
+        try:
+            t = ticker_24h(str(d.get("symbol") or ""))
+            if t:
+                mark = t.get("price")
+                chg = t.get("changePercent")
+                d["mark_source"] = t.get("source")
+        except Exception:
+            pass
+        d["mark_price"] = mark
+        d["change_24h_pct"] = chg
+        if mark is not None and entry is not None and float(entry) > 0:
+            d["upnl_pct"] = round(
+                (float(mark) - float(entry)) / float(entry) * 100.0, 3
+            )
+            if d.get("size_remaining"):
+                d["upnl_usd_est"] = round(
+                    (float(mark) - float(entry)) * float(d["size_remaining"]), 4
+                )
+            else:
+                d["upnl_usd_est"] = None
+        else:
+            d["upnl_pct"] = None
+            d["upnl_usd_est"] = None
+
+        if d.get("status") == "closed" and d.get("exit_avg") and entry:
+            try:
+                d["realized_pnl_pct"] = round(
+                    (float(d["exit_avg"]) - float(entry)) / float(entry) * 100.0, 3
+                )
+            except Exception:
+                d["realized_pnl_pct"] = None
+        out.append(d)
+    return out
 
 
 def open_position(

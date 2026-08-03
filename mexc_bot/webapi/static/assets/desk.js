@@ -426,25 +426,83 @@
 
   async function loadPositions() {
     const d = await api("/api/positions");
-    const rows = (d.positions || [])
-      .map(
-        (p) => `<tr>
-        <td>#${p.id}</td>
-        <td>${p.market?.[0]?.toUpperCase() || "?"}</td>
-        <td>${p.symbol}</td>
-        <td>${p.entry_avg != null ? fmtPx(p.entry_avg) : "—"}</td>
-        <td>${(p.notes || "").slice(0, 40)}</td>
-        <td>${fmtTime(p.opened_at)}</td>
-        <td><button type="button" class="btn soft sm" data-close="${p.id}">Close</button></td>
-      </tr>`
-      )
+    const positions = d.positions || [];
+    const host = $("#posTable");
+    if (!host) return;
+    if (!positions.length) {
+      host.innerHTML = rankEmpty("No open positions");
+      return;
+    }
+    host.innerHTML = positions
+      .map((p) => {
+        const entry = p.entry_display != null ? p.entry_display : p.entry_avg;
+        const mark = p.mark_price;
+        const upnl = p.upnl_pct;
+        const upnlS =
+          upnl != null
+            ? `<span class="${upnl >= 0 ? "up" : "dn"}">${
+                upnl >= 0 ? "+" : ""
+              }${Number(upnl).toFixed(2)}%</span>`
+            : "—";
+        const chg =
+          p.change_24h_pct != null
+            ? `${Number(p.change_24h_pct).toFixed(2)}% 24h`
+            : "";
+        const buys = (p.buy_orders || [])
+          .map(
+            (o) =>
+              `<div class="pos-fill">BUY ${
+                o.price != null ? fmtPx(o.price) : "—"
+              } × ${o.qty != null ? o.qty : "—"} · ${fmtTime(o.ts)}</div>`
+          )
+          .join("");
+        const sells = (p.sell_orders || [])
+          .map(
+            (o) =>
+              `<div class="pos-fill">SELL ${
+                o.price != null ? fmtPx(o.price) : "—"
+              } × ${o.qty != null ? o.qty : "—"} · ${fmtTime(o.ts)}</div>`
+          )
+          .join("");
+        return `<details class="pos-card">
+          <summary class="pos-sum">
+            <span class="pos-sym">${p.symbol}</span>
+            <span class="pos-meta">${(p.market || "?").toString().slice(0, 1).toUpperCase()}</span>
+            <span class="pos-meta">avg ${entry != null ? fmtPx(entry) : "—"}</span>
+            <span class="pos-meta">mark ${mark != null ? fmtPx(mark) : "—"}</span>
+            <span class="pos-meta">${upnlS}</span>
+            <span class="pos-meta">${
+              p.hold_hours != null ? p.hold_hours + "h" : ""
+            }</span>
+          </summary>
+          <div class="pos-detail">
+            <div class="learn-card-meta">Opened ${fmtTime(p.opened_at)} · size ${
+          p.size_remaining != null
+            ? p.size_remaining
+            : p.size_qty != null
+              ? p.size_qty
+              : "—"
+        } (bought ${p.size_qty ?? "—"} / sold ${p.size_sold ?? "—"})</div>
+            <div class="learn-card-meta">uPnL ${upnlS}${
+          p.upnl_usd_est != null ? " · ~$" + Number(p.upnl_usd_est).toFixed(2) : ""
+        } · ${chg} · src ${p.mark_source || "—"}</div>
+            <div class="learn-card-meta">Notes: ${(p.notes || "—").slice(0, 120)}</div>
+            <div class="pos-fills-h">Buy orders / layers</div>
+            ${buys || "<div class='mute'>No fill rows — journal entry only</div>"}
+            <div class="pos-fills-h">Sell orders / layers</div>
+            ${sells || "<div class='mute'>No sells yet</div>"}
+            <div class="row-gap mt">
+              <button type="button" class="btn soft sm" data-close="${
+                p.id
+              }">Close journal</button>
+            </div>
+          </div>
+        </details>`;
+      })
       .join("");
-    $("#posTable").innerHTML = table(
-      ["ID", "M", "Symbol", "Entry", "Notes", "Opened", ""],
-      rows
-    );
-    $$("[data-close]").forEach((b) =>
-      b.addEventListener("click", async () => {
+    $$("[data-close]", host).forEach((b) =>
+      b.addEventListener("click", async (ev) => {
+        ev.preventDefault();
         try {
           await api("/api/positions/close", {
             method: "POST",

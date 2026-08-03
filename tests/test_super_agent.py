@@ -202,6 +202,27 @@ class TestBeliefEngine(unittest.TestCase):
         self.assertFalse(f.get("ok"))
 
 
+class TestFatalNewsJudge(unittest.TestCase):
+    def test_hard_fatal_forces_no_trade(self):
+        from mexc_bot.learning.fatal_news import apply_fatal_to_verdict
+
+        hard = {
+            "fatal": True,
+            "hard_fatal": True,
+            "primary": {"class": "HACK", "severity": "fatal", "title": "Protocol exploited"},
+        }
+        out = apply_fatal_to_verdict("take_layers", "full_layers", hard)
+        self.assertEqual(out["verdict"], "no_trade")
+        self.assertTrue(out["overridden"])
+
+    def test_symbol_match_exact(self):
+        from mexc_bot.learning.fatal_news import _symbol_matches_news
+
+        self.assertTrue(_symbol_matches_news("BTC_USDT", "BTC", "BTC delisting"))
+        self.assertFalse(_symbol_matches_news("ETH", "ETHFI", "ETHFI hack"))
+        self.assertFalse(_symbol_matches_news("ETH_USDT", "ETHFI_USDT", "ETHFI delist"))
+
+
 class TestChartReader(unittest.TestCase):
     def test_read_chart_with_synthetic_bars(self):
         from mexc_bot.learning.chart_reader import read_chart
