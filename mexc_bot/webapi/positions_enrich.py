@@ -106,7 +106,13 @@ def list_position_entities(
         open_keys.add(key)
 
     if include_closed:
-        # journal closed without fills (rare) — only if no fill entities for symbol
+        # journal closed without fills (manual only). Never mix auto journal rows
+        # with fill-recon for the same symbol — those are often wrong timestamps/PnL.
+        fill_recon_syms = {
+            str(e.get("symbol") or "").upper().replace("_", "")
+            for e in entities
+            if e.get("recon_from_fills")
+        }
         try:
             jc = db.fetch_all(
                 "SELECT * FROM journal_trades WHERE user_id=? AND status='closed' "
@@ -116,14 +122,8 @@ def list_position_entities(
         except Exception:
             jc = []
         for j in jc:
-            # skip if we already have fill-based closed cycles for this symbol
             sk = str(j.get("symbol") or "").upper().replace("_", "")
-            if any(
-                str(e.get("symbol") or "").upper().replace("_", "") == sk
-                and e.get("status") == "closed"
-                and e.get("recon_from_fills")
-                for e in entities
-            ):
+            if sk in fill_recon_syms:
                 continue
             d = _fallback_from_rows([j])[0]
             d["journal_id"] = j.get("id")

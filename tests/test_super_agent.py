@@ -301,6 +301,26 @@ class TestSegmentPositionEntities(unittest.TestCase):
         self.assertEqual(segs[0]["outcome"], "miss")
         self.assertEqual(segs[1]["outcome"], "success")
 
+    def test_float_dust_still_closes_cycle(self):
+        """Prod bug: residual ~1e-12 after full exit never closed SYN mega-cycle."""
+        from mexc_bot.learning.trades import segment_positions_from_fills
+
+        # Simulate avg-cost dust: buy 3 lots, sell almost all leaving 1e-11
+        fills = [
+            {"symbol": "SYNUSDT", "side": "buy", "price": 0.3, "qty": 10000, "ts": 1000},
+            {"symbol": "SYNUSDT", "side": "buy", "price": 0.35, "qty": 5000, "ts": 1100},
+            {"symbol": "SYNUSDT", "side": "sell", "price": 0.38, "qty": 14999.99999999, "ts": 2000},
+            # new real cycle after dust close
+            {"symbol": "SYNUSDT", "side": "buy", "price": 0.09, "qty": 40000, "ts": 3000},
+        ]
+        segs = segment_positions_from_fills(fills, symbol="SYNUSDT", market="spot")
+        self.assertEqual(len(segs), 2)
+        closed = next(s for s in segs if s["status"] == "closed")
+        open_ = next(s for s in segs if s["status"] == "open")
+        self.assertEqual(closed["outcome"], "success")
+        self.assertAlmostEqual(open_["size_remaining"], 40000.0, places=3)
+        self.assertEqual(open_["n_buys"], 1)
+
 
 class TestFatalNewsJudge(unittest.TestCase):
     def test_hard_fatal_forces_no_trade(self):

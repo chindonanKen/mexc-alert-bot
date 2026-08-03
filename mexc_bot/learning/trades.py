@@ -111,6 +111,23 @@ def _all_fills_chronological(
     return all_fills
 
 
+def _inventory_is_flat(qty: float, bought_qty_cycle: float = 0.0) -> bool:
+    """True when remaining qty is economically zero (float dust after sells).
+
+    Prod fills often leave ~1e-12..1e-10 after a full exit; a tight absolute
+    threshold (1e-12) failed to close real SYN/ASTEROID cycles.
+    """
+    if qty <= 0:
+        return True
+    # absolute dust — tiny for any reasonable spot size
+    if qty <= 1e-8:
+        return True
+    # relative dust vs this cycle's bought size
+    if bought_qty_cycle > 0 and (qty / bought_qty_cycle) <= 1e-9:
+        return True
+    return False
+
+
 def segment_positions_from_fills(
     fills: Sequence[dict],
     *,
@@ -208,8 +225,10 @@ def segment_positions_from_fills(
             continue
         side = (f.get("side") or "").lower()
         if side == "buy":
-            if qty <= 1e-12:
-                # new cycle
+            if _inventory_is_flat(qty, bought_qty_cycle):
+                # new cycle (also snaps residual dust to zero)
+                qty = 0.0
+                cost = 0.0
                 opened_at = ts
                 cycle_buys = []
                 cycle_sells = []
@@ -223,8 +242,8 @@ def segment_positions_from_fills(
             bought_cost_cycle += p * q
             cycle_buys.append(f)
         elif side == "sell":
-            if qty <= 1e-12:
-                # sell with no inventory — skip orphan
+            if _inventory_is_flat(qty, bought_qty_cycle):
+                # sell with no inventory — orphan (incomplete history)
                 continue
             sell_q = min(qty, q)
             avg = cost / qty if qty > 0 else p
@@ -234,11 +253,11 @@ def segment_positions_from_fills(
             cycle_sells.append(f)
             realized_quote += p * sell_q
             sold_qty_cycle += sell_q
-            if qty <= 1e-12:
+            if _inventory_is_flat(qty, bought_qty_cycle):
                 _close_cycle(ts)
 
-    # open remainder
-    if qty > 1e-12 and cycle_buys:
+    # open remainder (ignore dust)
+    if not _inventory_is_flat(qty, bought_qty_cycle) and cycle_buys:
         entry_avg = cost / qty if qty > 0 else None
         positions.append(
             {
@@ -269,6 +288,13 @@ def segment_positions_from_fills(
                 "entity_key": f"{symbol}:open:{int(opened_at or 0)}",
             }
         )
+    elif cycle_buys and _inventory_is_flat(qty, bought_qty_cycle):
+        # dust left after last sell — treat as closed at last sell time
+        last_ts = 0.0
+        for s in cycle_sells:
+            last_ts = max(last_ts, _f(s.get("ts")) or 0.0)
+        if last_ts > 0:
+            _close_cycle(last_ts)
 
     # newest first
     positions.sort(
