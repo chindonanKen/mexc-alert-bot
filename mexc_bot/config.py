@@ -92,6 +92,8 @@ class Settings:
     learning_grace_seconds: float
     learning_max_pending_questions: int
     learning_engagement_poll_seconds: float
+    # Only teach trades on/after this date (YYYY-MM-DD). Desk-era history.
+    learning_teach_since: Optional[str]
     feature_news_monitor: bool
     news_poll_seconds: float
     news_push_unconfirmed: bool
@@ -211,6 +213,9 @@ def load_settings() -> Settings:
         ),
         learning_engagement_poll_seconds=float(
             os.getenv("LEARNING_ENGAGEMENT_POLL_SECONDS", "60")
+        ),
+        learning_teach_since=(
+            (os.getenv("LEARNING_TEACH_SINCE") or "2026-07-01").strip() or None
         ),
         feature_news_monitor=_env_bool("FEATURE_NEWS_MONITOR", False),
         news_poll_seconds=float(os.getenv("NEWS_POLL_SECONDS", "90")),

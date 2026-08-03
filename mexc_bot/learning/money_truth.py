@@ -2,18 +2,83 @@
 
 Positions desk UI already uses ``list_position_entities``. Coach, voice tools,
 and belief training must use the same shape — not journal dossiers alone.
+
+**Teaching window:** only trades in the AD Desk era (registered fills / since
+``LEARNING_TEACH_SINCE``) are ``teach_ok``. Older exchange history can still
+be listed for display but is not used to train the agent.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from .engagement import symbols_match
 from .store import EventStore
 
 logger = logging.getLogger(__name__)
+
+# Default: desk / private-read era (owner's registered history). Override via env.
+_DEFAULT_TEACH_SINCE = "2026-07-01"
+
+
+def teach_since_ts(store: Optional[EventStore] = None, user_id: int = 0) -> float:
+    """Unix ts: only trades at/after this are allowed for agent training.
+
+    1) LEARNING_TEACH_SINCE=YYYY-MM-DD (or unix seconds)
+    2) Else earliest journal_fill for user (what we have registered)
+    3) Else default 2026-07-01
+    """
+    raw = (os.getenv("LEARNING_TEACH_SINCE") or "").strip()
+    if raw:
+        try:
+            if raw.isdigit() or (raw.replace(".", "", 1).isdigit() and raw.count(".") < 2):
+                return float(raw)
+            # YYYY-MM-DD
+            dt = datetime.strptime(raw[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except Exception:
+            logger.warning("Invalid LEARNING_TEACH_SINCE=%r — using default", raw)
+    if store is not None and user_id:
+        try:
+            with store._lock:
+                row = store._get_conn().execute(
+                    "SELECT MIN(ts) AS m FROM journal_fills WHERE user_id=?",
+                    (int(user_id),),
+                ).fetchone()
+            if row and row["m"]:
+                return float(row["m"])
+        except Exception:
+            pass
+    try:
+        dt = datetime.strptime(_DEFAULT_TEACH_SINCE, "%Y-%m-%d").replace(
+            tzinfo=timezone.utc
+        )
+        return dt.timestamp()
+    except Exception:
+        return 0.0
+
+
+def in_teach_window(
+    entity: dict, *, since: float
+) -> bool:
+    """Closed: closed_at (or opened_at) >= since. Open: always if since in past."""
+    if since <= 0:
+        return True
+    is_open = entity.get("status") == "open" or entity.get("is_open")
+    if is_open:
+        # Open bags we hold now are teachable (layers from registered fills)
+        o = float(entity.get("opened_at") or 0)
+        if o <= 0:
+            return True
+        return o >= since - 86400  # 1d pad
+    c = float(entity.get("closed_at") or entity.get("opened_at") or 0)
+    if c <= 0:
+        return False
+    return c >= since
 
 
 def money_truth_label(entity: dict) -> str:
@@ -37,6 +102,7 @@ def entity_to_review(
     entity: dict,
     *,
     events: Optional[List[dict]] = None,
+    teach_since: float = 0.0,
 ) -> dict:
     """Map a position entity → dossier-like review for coach/tools."""
     is_open = entity.get("status") == "open" or entity.get("is_open")
@@ -51,6 +117,9 @@ def entity_to_review(
         entity.get("upnl_usd_est") if is_open else entity.get("realized_pnl_usd")
     )
     eid = entity.get("entity_key") or entity.get("id")
+    in_window = in_teach_window(entity, since=teach_since)
+    # Teach only exchange-quality data inside the AD Desk registration window
+    teach_ok = mt == "exchange" and in_window
     review = {
         "id": eid,
         "entity_key": entity.get("entity_key") or str(eid),
@@ -85,7 +154,9 @@ def entity_to_review(
         "exchange_history": bool(entity.get("exchange_history")),
         "exchange_hold": bool(entity.get("exchange_hold")),
         "verified": mt == "exchange",
-        "teach_ok": mt == "exchange",  # coach may only claim $ facts when True
+        "in_teach_window": in_window,
+        "teach_since": teach_since if teach_since > 0 else None,
+        "teach_ok": teach_ok,
         "source": (
             "mexc_history_positions"
             if entity.get("exchange_history")
@@ -174,6 +245,7 @@ def list_money_reviews(
         except Exception:
             events = []
 
+    since = teach_since_ts(store, user_id)
     reviews = []
     for e in entities:
         st = e.get("status")
@@ -183,7 +255,7 @@ def list_money_reviews(
             continue
         if symbol and not symbols_match(symbol, e.get("symbol") or ""):
             continue
-        r = entity_to_review(e, events=events)
+        r = entity_to_review(e, events=events, teach_since=since)
         if teach_only and not r.get("teach_ok"):
             continue
         reviews.append(r)

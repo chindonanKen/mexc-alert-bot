@@ -533,11 +533,31 @@ class TestMoneyTruthReviews(unittest.TestCase):
                 "n_sells": 1,
                 "buy_orders": [],
                 "sell_orders": [],
-            }
+                "closed_at": 1785217200.0,  # after 2026-07-01
+            },
+            teach_since=1751328000.0,  # 2026-07-01-ish
         )
         self.assertEqual(r["money_truth"], "exchange")
         self.assertTrue(r["teach_ok"])
         self.assertAlmostEqual(r["pnl_usd"], 11.81)
+
+    def test_old_closed_not_teach_ok(self):
+        from mexc_bot.learning.money_truth import entity_to_review
+
+        r = entity_to_review(
+            {
+                "symbol": "OLD_USDT",
+                "market": "futures",
+                "status": "closed",
+                "exchange_history": True,
+                "closed_at": 1600000000.0,  # 2020
+                "realized_pnl_usd": 99,
+            },
+            teach_since=1751328000.0,
+        )
+        self.assertTrue(r["verified"])
+        self.assertFalse(r["in_teach_window"])
+        self.assertFalse(r["teach_ok"])
 
     def test_spot_fill_recon_not_teach_ok(self):
         from mexc_bot.learning.money_truth import entity_to_review
