@@ -542,12 +542,16 @@
         : p.hold_hours != null
           ? "held " + p.hold_hours + "h"
           : "";
+    const layersBit =
+      (p.n_buys || p.n_sells)
+        ? ` · B${p.n_buys || 0}/S${p.n_sells || 0}`
+        : "";
     const sizeBit = isOpen
       ? p.size_remaining != null
-        ? "qty " + Number(p.size_remaining).toFixed(2)
+        ? "qty " + Number(p.size_remaining).toFixed(2) + layersBit
         : "qty —"
       : p.size_qty != null
-        ? "sz " + Number(p.size_qty).toFixed(2)
+        ? "sz " + Number(p.size_qty).toFixed(2) + layersBit
         : "sz —";
     const buys = (p.buy_orders || [])
       .map(
@@ -629,14 +633,17 @@
               } buys · ${p.n_sells || 0} sells`
         }</div>
         <div class="learn-card-meta">Notes: ${(p.notes || "—").slice(0, 120)}</div>
-        <div class="pos-fills-h">Buy layers</div>
-        ${buys || "<div class='mute'>No fill rows</div>"}
-        <div class="pos-fills-h">Sell layers</div>
+        <div class="pos-fills-h">Buy layers (${p.n_buys || 0})</div>
+        ${
+          buys ||
+          "<div class='mute'>No buy deals in window — wait for fill sync</div>"
+        }
+        <div class="pos-fills-h">Sell layers (${p.n_sells || 0})</div>
         ${
           sells ||
           (isOpen
-            ? "<div class='mute'>No sells yet</div>"
-            : "<div class='mute'>No sells recorded</div>")
+            ? "<div class='mute'>No sell deals yet (or not synced)</div>"
+            : "<div class='mute'>No sell deals recorded</div>")
         }
         ${
           canCloseJournal

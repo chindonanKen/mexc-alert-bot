@@ -436,7 +436,9 @@ def futures_position_snapshot(pos: dict) -> Optional[dict]:
             "close_vol": close_vol,
             "unrealized_pnl": upnl_f,
             "leverage": pos.get("leverage"),
+            "create_time": pos.get("createTime"),
             "update_time": pos.get("updateTime") or pos.get("createTime"),
+            "opened_at": _ms_to_s(pos.get("createTime")),
             "raw": pos,
         }
     except Exception:

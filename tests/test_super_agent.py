@@ -442,6 +442,58 @@ class TestFuturesOpenAuthority(unittest.TestCase):
         )
 
 
+class TestAttachFillsOpen(unittest.TestCase):
+    def test_open_futures_gets_buy_and_sell_layers(self):
+        from mexc_bot.webapi.positions_enrich import _attach_fills_window
+
+        ent = {
+            "symbol": "SYN_USDT",
+            "market": "futures",
+            "opened_at": 1000.0,
+            "closed_at": None,
+        }
+        fills = [
+            {
+                "symbol": "SYN_USDT",
+                "market": "futures",
+                "side": "buy",
+                "price": 0.1,
+                "qty": 100,
+                "ts": 1100,
+            },
+            {
+                "symbol": "SYN_USDT",
+                "market": "futures",
+                "side": "sell",
+                "price": 0.12,
+                "qty": 30,
+                "ts": 1200,
+            },
+            {
+                "symbol": "SYN_USDT",
+                "market": "futures",
+                "side": "buy",
+                "price": 0.09,
+                "qty": 50,
+                "ts": 1300,
+            },
+            # outside window
+            {
+                "symbol": "SYN_USDT",
+                "market": "futures",
+                "side": "buy",
+                "price": 0.2,
+                "qty": 1,
+                "ts": 100,
+            },
+        ]
+        _attach_fills_window(ent, fills, market="futures", open_position=True)
+        self.assertEqual(ent["n_buys"], 2)
+        self.assertEqual(ent["n_sells"], 1)
+        self.assertEqual(len(ent["buy_orders"]), 2)
+        self.assertAlmostEqual(ent["sell_orders"][0]["qty"], 30)
+
+
 class TestFuturesLiveEntry(unittest.TestCase):
     def test_hold_avg_fully_scale_and_funding_adj(self):
         from mexc_bot.exchange_private import futures_position_snapshot

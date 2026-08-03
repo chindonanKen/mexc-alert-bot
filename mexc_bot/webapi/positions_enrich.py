@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from . import db
 from .prices import ticker_24h
@@ -67,8 +67,10 @@ def list_position_entities(
                 continue
             entities.append(s)
 
-    # Futures OPEN: exchange open_positions only
-    entities = _reconcile_futures_with_exchange(entities, store, user_id)
+    # Futures OPEN: exchange open_positions + deal layers from fills
+    entities = _reconcile_futures_with_exchange(
+        entities, store, user_id, fills_all=fills_all
+    )
 
     # Futures CLOSED: exchange history_positions (openAvg/closeAvg/realised)
     if include_closed:
@@ -217,20 +219,24 @@ def _norm_fut_key(symbol: str) -> str:
 
 
 def _reconcile_futures_with_exchange(
-    entities: List[dict], store: Any, user_id: int
+    entities: List[dict],
+    store: Any,
+    user_id: int,
+    *,
+    fills_all: Optional[List[dict]] = None,
 ) -> List[dict]:
-    """Futures OPEN only from exchange open_positions (drop fill ghosts)."""
+    """Futures OPEN from exchange open_positions + deal layers from fills."""
     from ..learning.fills import (
         fetch_live_futures_opens,
         read_futures_open_authority,
     )
 
+    fills_all = fills_all or []
     fut_opens = fetch_live_futures_opens(user_id, event_store=store)
     if fut_opens is None:
         fut_opens = read_futures_open_authority(store, user_id, max_age_s=900.0)
     if fut_opens is None:
         logger.debug("futures open authority unavailable")
-        # Strip any residual futures opens from fills (we no longer emit them)
         return [
             e
             for e in entities
@@ -247,7 +253,6 @@ def _reconcile_futures_with_exchange(
         if k and hold > 0:
             by_exch[k] = fo
 
-    # Drop all fill-based futures opens; rebuild from exchange only
     kept = [
         e
         for e in entities
@@ -259,7 +264,6 @@ def _reconcile_futures_with_exchange(
     for k, fo in by_exch.items():
         fsym = str(fo.get("symbol") or "").upper()
         hold = float(fo.get("hold_vol") or 0)
-        # Live residual entry (funding-adjusted when hold_fee present)
         entry = fo.get("entry_live")
         if entry is None:
             entry = fo.get("entry_avg")
@@ -270,60 +274,89 @@ def _reconcile_futures_with_exchange(
             notes_bits.append(f"partial sold {fo.get('close_vol')}")
         if hold_fee:
             notes_bits.append(f"funding {hold_fee}")
-        kept.append(
-            {
-                "symbol": fsym,
-                "market": "futures",
-                "status": "open",
-                "outcome": "open",
-                "is_open": True,
-                "opened_at": None,
-                "closed_at": None,
-                "entry_avg": entry,
-                "entry_display": entry,
-                "hold_avg": hold_avg,
-                "entry_live": entry,
-                "exit_avg": None,
-                "size_remaining": hold,
-                "size_qty": hold,
-                "size_sold": fo.get("close_vol") or 0,
-                "buy_orders": [],
-                "sell_orders": [],
-                "n_buys": 0,
-                "n_sells": 0,
-                "recon_from_fills": False,
-                "exchange_hold": True,
-                "leverage": fo.get("leverage"),
-                "realized_on_pos": fo.get("realized"),
-                "hold_fee": hold_fee,
-                "close_profit_loss": fo.get("close_profit_loss"),
-                "unrealized_pnl": fo.get("unrealized_pnl"),
-                "position_type": fo.get("position_type"),
-                "position_side": (
-                    "long"
-                    if fo.get("position_type") == 1
-                    else ("short" if fo.get("position_type") == 2 else None)
-                ),
-                "entity_key": f"fopen:{fsym}",
-                "notes": " · ".join(notes_bits),
-            }
+        opened_at = fo.get("opened_at")
+        if opened_at is None and fo.get("create_time"):
+            try:
+                ct = float(fo["create_time"])
+                opened_at = ct / 1000.0 if ct > 1e12 else ct
+            except (TypeError, ValueError):
+                opened_at = None
+        ent = {
+            "symbol": fsym,
+            "market": "futures",
+            "status": "open",
+            "outcome": "open",
+            "is_open": True,
+            "opened_at": opened_at,
+            "closed_at": None,
+            "entry_avg": entry,
+            "entry_display": entry,
+            "hold_avg": hold_avg,
+            "entry_live": entry,
+            "exit_avg": None,
+            "size_remaining": hold,
+            "size_qty": hold,
+            "size_sold": fo.get("close_vol") or 0,
+            "buy_orders": [],
+            "sell_orders": [],
+            "n_buys": 0,
+            "n_sells": 0,
+            "recon_from_fills": False,
+            "exchange_hold": True,
+            "leverage": fo.get("leverage"),
+            "realized_on_pos": fo.get("realized"),
+            "hold_fee": hold_fee,
+            "close_profit_loss": fo.get("close_profit_loss"),
+            "unrealized_pnl": fo.get("unrealized_pnl"),
+            "position_type": fo.get("position_type"),
+            "position_side": (
+                "long"
+                if fo.get("position_type") == 1
+                else ("short" if fo.get("position_type") == 2 else None)
+            ),
+            "entity_key": f"fopen:{fsym}",
+            "notes": " · ".join(notes_bits),
+        }
+        # Deal layers for expand (entries + bounce partials)
+        _attach_fills_window(
+            ent, fills_all, market="futures", open_position=True
         )
+        kept.append(ent)
     return kept
 
 
-def _attach_fills_to_closed(
-    ent: dict, fills_all: List[dict], *, pad_s: float = 120.0
+def _attach_fills_window(
+    ent: dict,
+    fills_all: List[dict],
+    *,
+    market: str = "futures",
+    pad_s: float = 120.0,
+    open_position: bool = False,
 ) -> None:
-    """Optional expand layers: deals in [opened_at, closed_at] for same symbol."""
+    """Attach buy/sell layers from journal_fills for expand UI.
+
+    Closed: [opened_at, closed_at]. Open: [opened_at or lookback, now].
+    Layers sorted oldest→newest (AD scale-in story).
+    """
     from ..learning.engagement import symbols_match
 
+    now = time.time()
     o = float(ent.get("opened_at") or 0)
     c = float(ent.get("closed_at") or 0)
-    if o <= 0 or c <= 0:
-        return
-    buys, sells = [], []
+    if open_position:
+        if o <= 0:
+            # Fall back: last 90d of deals for this symbol (createTime missing)
+            o = now - 90 * 86400
+        c = now + pad_s
+    else:
+        if o <= 0 or c <= 0:
+            return
+    mwant = (market or "futures").lower()
+    buys: List[dict] = []
+    sells: List[dict] = []
     for f in fills_all:
-        if (f.get("market") or "").lower() != "futures":
+        fm = (f.get("market") or "").lower()
+        if fm and fm != mwant:
             continue
         if not symbols_match(ent.get("symbol") or "", f.get("symbol") or ""):
             continue
@@ -346,6 +379,15 @@ def _attach_fills_to_closed(
     ent["sell_orders"] = sells
     ent["n_buys"] = len(buys)
     ent["n_sells"] = len(sells)
+
+
+def _attach_fills_to_closed(
+    ent: dict, fills_all: List[dict], *, pad_s: float = 120.0
+) -> None:
+    """Optional expand layers for closed history_positions rows."""
+    _attach_fills_window(
+        ent, fills_all, market="futures", pad_s=pad_s, open_position=False
+    )
 
 
 def _merge_futures_closed_history(
