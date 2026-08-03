@@ -150,6 +150,31 @@ def list_position_entities(
                 d["hold_seconds"] = max(0.0, now - float(d["opened_at"]))
                 d["hold_hours"] = round(d["hold_seconds"] / 3600.0, 2)
             _attach_mark(d)
+            # Futures: exchange uPnL is vs residual holdAvg (not funding-adjusted)
+            if (
+                (d.get("market") or "").lower() == "futures"
+                and d.get("unrealized_pnl") is not None
+                and d.get("size_remaining")
+            ):
+                try:
+                    inv = float(d.get("hold_avg") or d.get("entry_display") or 0)
+                    live = float(d.get("entry_display") or inv)
+                    rem = float(d["size_remaining"])
+                    upnl = float(d["unrealized_pnl"])
+                    d["upnl_usd_est"] = round(upnl, 4)
+                    if rem > 0 and inv > 0:
+                        if d.get("position_type") == 2:
+                            d["mark_price"] = inv - upnl / rem
+                        else:
+                            d["mark_price"] = inv + upnl / rem
+                        # % vs live avg (funding-adjusted) when we show that as entry
+                        if live > 0:
+                            d["upnl_pct"] = round(
+                                (float(d["mark_price"]) - live) / live * 100.0, 3
+                            )
+                        d["mark_source"] = "mexc_position"
+                except Exception:
+                    pass
             d["outcome"] = d.get("outcome") or "open"
         else:
             d["mark_price"] = d.get("mark_price")
@@ -234,6 +259,17 @@ def _reconcile_futures_with_exchange(
     for k, fo in by_exch.items():
         fsym = str(fo.get("symbol") or "").upper()
         hold = float(fo.get("hold_vol") or 0)
+        # Live residual entry (funding-adjusted when hold_fee present)
+        entry = fo.get("entry_live")
+        if entry is None:
+            entry = fo.get("entry_avg")
+        hold_avg = fo.get("hold_avg") or fo.get("entry_avg")
+        hold_fee = fo.get("hold_fee")
+        notes_bits = ["open on MEXC futures · residual hold avg"]
+        if fo.get("close_vol"):
+            notes_bits.append(f"partial sold {fo.get('close_vol')}")
+        if hold_fee:
+            notes_bits.append(f"funding {hold_fee}")
         kept.append(
             {
                 "symbol": fsym,
@@ -243,12 +279,14 @@ def _reconcile_futures_with_exchange(
                 "is_open": True,
                 "opened_at": None,
                 "closed_at": None,
-                "entry_avg": fo.get("entry_avg"),
-                "entry_display": fo.get("entry_avg"),
+                "entry_avg": entry,
+                "entry_display": entry,
+                "hold_avg": hold_avg,
+                "entry_live": entry,
                 "exit_avg": None,
                 "size_remaining": hold,
                 "size_qty": hold,
-                "size_sold": 0,
+                "size_sold": fo.get("close_vol") or 0,
                 "buy_orders": [],
                 "sell_orders": [],
                 "n_buys": 0,
@@ -257,8 +295,17 @@ def _reconcile_futures_with_exchange(
                 "exchange_hold": True,
                 "leverage": fo.get("leverage"),
                 "realized_on_pos": fo.get("realized"),
+                "hold_fee": hold_fee,
+                "close_profit_loss": fo.get("close_profit_loss"),
+                "unrealized_pnl": fo.get("unrealized_pnl"),
+                "position_type": fo.get("position_type"),
+                "position_side": (
+                    "long"
+                    if fo.get("position_type") == 1
+                    else ("short" if fo.get("position_type") == 2 else None)
+                ),
                 "entity_key": f"fopen:{fsym}",
-                "notes": "open on MEXC futures",
+                "notes": " · ".join(notes_bits),
             }
         )
     return kept

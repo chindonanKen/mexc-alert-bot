@@ -354,24 +354,87 @@ def futures_deal_to_fill_row(deal: dict, user_id: int) -> Optional[dict]:
         return None
 
 
+def _prefer_price(*vals: Any) -> Optional[float]:
+    """First parseable float; prefer FullyScale strings for residual precision."""
+    for v in vals:
+        if v is None or v == "":
+            continue
+        try:
+            f = float(v)
+            if f > 0:
+                return f
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def futures_position_snapshot(pos: dict) -> Optional[dict]:
-    """Normalize open_positions row for desk override."""
+    """Normalize open_positions row for desk (live residual entry).
+
+    MEXC residual inventory avg after partial closes is ``holdAvgPrice`` /
+    ``holdAvgPriceFullyScale`` (not newOpenAvgPrice). Funding is tracked in
+    ``holdFee`` / ``realised`` and is *not* already in holdAvg — we surface a
+    funding-adjusted live entry for break-even style display.
+    """
     try:
         symbol = normalize_futures_symbol(str(pos.get("symbol") or ""))
         if not symbol:
             return None
         hold = float(pos.get("holdVol") or pos.get("vol") or 0)
-        avg = pos.get("holdAvgPrice") or pos.get("openAvgPrice")
-        avg_f = float(avg) if avg is not None else None
-        # positionType 1 long 2 short
-        ptype = int(pos.get("positionType") or 1)
+        if hold <= 0:
+            return None
+        # Residual lot avg (precise FullyScale first)
+        hold_avg = _prefer_price(
+            pos.get("holdAvgPriceFullyScale"),
+            pos.get("holdAvgPrice"),
+            pos.get("openAvgPriceFullyScale"),
+            pos.get("openAvgPrice"),
+        )
+        open_avg = _prefer_price(
+            pos.get("openAvgPriceFullyScale"),
+            pos.get("openAvgPrice"),
+            pos.get("newOpenAvgPrice"),
+        )
+        close_avg = _prefer_price(
+            pos.get("newCloseAvgPrice"),
+            pos.get("closeAvgPrice"),
+        )
+        hold_fee = float(pos.get("holdFee") or 0)  # funding accruals
+        realised = float(pos.get("realised") or pos.get("realized") or 0)
+        close_pnl = float(pos.get("closeProfitLoss") or 0)
+        close_vol = float(pos.get("closeVol") or 0)
+        upnl = pos.get("unRealizedPnl")
+        try:
+            upnl_f = float(upnl) if upnl is not None else None
+        except (TypeError, ValueError):
+            upnl_f = None
+        ptype = int(pos.get("positionType") or 1)  # 1 long 2 short
+
+        # Live entry for remaining size = residual hold avg
+        entry = hold_avg
+        # Funding adjusts effective cost of remaining inventory:
+        # holdFee>0 ≈ funding earned (see realised ≈ closeProfitLoss + holdFee).
+        # Long: income lowers effective entry; short: income raises it.
+        entry_live = entry
+        if entry is not None and hold > 0 and hold_fee != 0:
+            adj = hold_fee / hold
+            entry_live = entry - adj if ptype == 1 else entry + adj
+
         return {
             "symbol": symbol,
             "market": "futures",
             "hold_vol": hold,
-            "entry_avg": avg_f,
+            "entry_avg": entry_live if entry_live is not None else entry,
+            "hold_avg": hold_avg,
+            "open_avg": open_avg,
+            "close_avg_partial": close_avg,
+            "entry_live": entry_live,
             "position_type": ptype,
-            "realized": float(pos.get("realised") or pos.get("realized") or 0),
+            "realized": realised,
+            "close_profit_loss": close_pnl,
+            "hold_fee": hold_fee,
+            "close_vol": close_vol,
+            "unrealized_pnl": upnl_f,
             "leverage": pos.get("leverage"),
             "update_time": pos.get("updateTime") or pos.get("createTime"),
             "raw": pos,

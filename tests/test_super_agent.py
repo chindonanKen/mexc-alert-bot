@@ -442,6 +442,41 @@ class TestFuturesOpenAuthority(unittest.TestCase):
         )
 
 
+class TestFuturesLiveEntry(unittest.TestCase):
+    def test_hold_avg_fully_scale_and_funding_adj(self):
+        from mexc_bot.exchange_private import futures_position_snapshot
+
+        # Mirrors prod SYN: partial sell + positive holdFee (funding earned)
+        snap = futures_position_snapshot(
+            {
+                "symbol": "SYN_USDT",
+                "positionType": 1,
+                "holdVol": 4352,
+                "closeVol": 2004,
+                "holdAvgPrice": 0.0998,
+                "holdAvgPriceFullyScale": "0.09989172794117647",
+                "openAvgPrice": 0.0998,
+                "openAvgPriceFullyScale": "0.09989172794117647",
+                "newOpenAvgPrice": 0.1005,
+                "closeAvgPrice": 0.1112,
+                "holdFee": 11.3612,
+                "realised": 29.9007,
+                "closeProfitLoss": 18.6372,
+                "leverage": 1,
+                "unRealizedPnl": -67.42,
+            }
+        )
+        self.assertIsNotNone(snap)
+        # Residual inventory avg uses FullyScale, not newOpenAvgPrice
+        self.assertAlmostEqual(snap["hold_avg"], 0.09989172794117647, places=10)
+        # Funding income lowers effective live entry for longs
+        self.assertLess(snap["entry_avg"], snap["hold_avg"])
+        expected = 0.09989172794117647 - (11.3612 / 4352)
+        self.assertAlmostEqual(snap["entry_avg"], expected, places=8)
+        self.assertAlmostEqual(snap["hold_vol"], 4352)
+        self.assertAlmostEqual(snap["close_vol"], 2004)
+
+
 class TestHistoryPositionEntity(unittest.TestCase):
     def test_maps_exchange_realised_and_profit_ratio(self):
         from mexc_bot.exchange_private import history_position_to_closed_entity

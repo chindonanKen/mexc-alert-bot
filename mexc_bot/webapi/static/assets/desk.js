@@ -567,10 +567,18 @@
       .join("");
     const canCloseJournal =
       isOpen && p.journal_id != null && Number(p.journal_id) > 0;
+    const holdAvg =
+      p.hold_avg != null && p.hold_avg !== entry
+        ? ` · inv ${fmtPx(p.hold_avg)}`
+        : "";
+    const fundBit =
+      isOpen && p.hold_fee != null && Number(p.hold_fee) !== 0
+        ? ` · fund ${Number(p.hold_fee) >= 0 ? "+" : ""}${Number(p.hold_fee).toFixed(2)}`
+        : "";
     const priceDetail = isOpen
-      ? `avg ${entry != null ? fmtPx(entry) : "—"} · mark ${
+      ? `live avg ${entry != null ? fmtPx(entry) : "—"}${holdAvg} · mark ${
           mark != null ? fmtPx(mark) : "—"
-        }`
+        }${fundBit}`
       : `in ${entry != null ? fmtPx(entry) : "—"} → out ${
           exit_ != null ? fmtPx(exit_) : "—"
         }`;
