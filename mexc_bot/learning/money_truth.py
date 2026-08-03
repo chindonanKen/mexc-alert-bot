@@ -18,10 +18,15 @@ logger = logging.getLogger(__name__)
 
 def money_truth_label(entity: dict) -> str:
     """exchange | fill_recon_unverified | journal_manual."""
+    if entity.get("money_truth") in (
+        "exchange",
+        "fill_recon_unverified",
+        "journal_manual",
+    ):
+        return str(entity["money_truth"])
     if entity.get("exchange_history") or entity.get("exchange_hold"):
         return "exchange"
     if entity.get("recon_from_fills"):
-        # Spot (and any residual without exchange open/history authority)
         return "fill_recon_unverified"
     if entity.get("journal_id") or entity.get("notes"):
         return "journal_manual"

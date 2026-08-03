@@ -96,6 +96,51 @@ class MexcPrivateSpotClient:
             logger.warning("myTrades failed %s: %s", symbol, e)
             return []
 
+    def get_account_balances(self, *, min_total: float = 1e-8) -> List[dict]:
+        """GET /api/v3/account — non-zero balances (read-only).
+
+        Returns rows: asset, free, locked, total, symbol (ASSETUSDT for alts).
+        """
+        if not self.configured:
+            return []
+        try:
+            signed = self._sign({})
+            url = f"{self.base_url}/api/v3/account"
+            resp = self.session.get(url, params=signed, timeout=self.timeout)
+            if resp.status_code != 200:
+                logger.warning(
+                    "account balances status=%s body=%s",
+                    resp.status_code,
+                    (resp.text or "")[:200],
+                )
+                return []
+            data = resp.json()
+            out: List[dict] = []
+            for b in data.get("balances") or []:
+                try:
+                    free = float(b.get("free") or 0)
+                    locked = float(b.get("locked") or 0)
+                except (TypeError, ValueError):
+                    continue
+                total = free + locked
+                if total <= min_total:
+                    continue
+                asset = str(b.get("asset") or "").upper()
+                if not asset:
+                    continue
+                row = {
+                    "asset": asset,
+                    "free": free,
+                    "locked": locked,
+                    "total": total,
+                    "symbol": f"{asset}USDT" if asset not in ("USDT", "USDC", "BUSD", "USD") else asset,
+                }
+                out.append(row)
+            return out
+        except Exception as e:
+            logger.warning("account balances failed: %s", e)
+            return []
+
     def close(self) -> None:
         try:
             self.session.close()

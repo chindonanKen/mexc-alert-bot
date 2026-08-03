@@ -59,6 +59,7 @@ class FillSyncPoller:
         self._futures_fills_new = 0
         self._last_cycle_ms = 0
         self._last_open_futures: List[dict] = []
+        self._last_spot_balances: List[dict] = []
 
     def get_health(self) -> dict:
         return {
@@ -71,6 +72,7 @@ class FillSyncPoller:
                 self.futures_client and self.futures_client.configured
             ),
             "open_futures_n": len(self._last_open_futures),
+            "spot_balance_n": len(self._last_spot_balances),
             "write_auto_journal": self.write_auto_journal,
         }
 
@@ -155,11 +157,32 @@ class FillSyncPoller:
             symbols = set(self.get_symbols() or set())
         except Exception:
             symbols = set()
+        # Live balances = spot open authority + symbol seed
+        try:
+            bals = self.client.get_account_balances()
+            # exclude pure stables from trading open list (still cached)
+            alt = [
+                b
+                for b in bals
+                if b.get("asset") not in ("USDT", "USDC", "BUSD", "USD")
+            ]
+            self._last_spot_balances = alt
+            _write_spot_balances_cache(self.event_store, self.user_id, alt)
+            for b in alt:
+                if b.get("symbol"):
+                    symbols.add(str(b["symbol"]).upper().replace("_", ""))
+            logger.info(
+                "Spot balances cached n=%s assets=%s",
+                len(alt),
+                [b.get("asset") for b in alt[:12]],
+            )
+        except Exception as e:
+            logger.debug("spot balances: %s", e)
+
         if not symbols:
             symbols = {"BTCUSDT", "ETHUSDT"}
         new_rows: List[dict] = []
-        for sym in list(symbols)[:40]:
-            # compact form for spot myTrades
+        for sym in list(symbols)[:50]:
             compact = str(sym).upper().replace("_", "").replace("-", "")
             trades = self.client.get_my_trades(compact, limit=100)
             for tr in trades:
@@ -253,6 +276,66 @@ class FillSyncPoller:
 
 def _futures_cache_path(event_store: EventStore) -> Path:
     return Path(event_store.db_path).parent / "futures_open_cache.json"
+
+
+def _spot_balances_cache_path(event_store: EventStore) -> Path:
+    return Path(event_store.db_path).parent / "spot_balances_cache.json"
+
+
+def _write_spot_balances_cache(
+    event_store: EventStore, user_id: int, bals: List[dict]
+) -> None:
+    path = _spot_balances_cache_path(event_store)
+    try:
+        payload = {"user_id": user_id, "ts": time.time(), "balances": bals}
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    except Exception as e:
+        logger.debug("spot balances cache write: %s", e)
+
+
+def read_spot_balances_authority(
+    event_store: EventStore, user_id: int, *, max_age_s: float = 900.0
+) -> Optional[List[dict]]:
+    """Authoritative spot alt balances (None if missing/stale)."""
+    path = _spot_balances_cache_path(event_store)
+    try:
+        if not path.is_file():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if int(data.get("user_id") or 0) != int(user_id):
+            return None
+        if time.time() - float(data.get("ts") or 0) > max_age_s:
+            return None
+        rows = data.get("balances") or []
+        return rows if isinstance(rows, list) else []
+    except Exception:
+        return None
+
+
+def fetch_live_spot_balances(
+    user_id: int, event_store: Optional[EventStore] = None
+) -> Optional[List[dict]]:
+    """Live GET /api/v3/account when keys present."""
+    import os
+
+    key = (os.getenv("MEXC_API_KEY") or "").strip()
+    sec = (os.getenv("MEXC_API_SECRET") or "").strip()
+    if not key or not sec:
+        return None
+    try:
+        client = MexcPrivateSpotClient(key, sec)
+        bals = client.get_account_balances()
+        alt = [
+            b
+            for b in bals
+            if b.get("asset") not in ("USDT", "USDC", "BUSD", "USD")
+        ]
+        if event_store is not None and int(user_id) > 0:
+            _write_spot_balances_cache(event_store, user_id, alt)
+        return alt
+    except Exception as e:
+        logger.debug("live spot balances: %s", e)
+        return None
 
 
 def _futures_closed_cache_path(event_store: EventStore) -> Path:

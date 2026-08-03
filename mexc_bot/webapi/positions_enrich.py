@@ -56,8 +56,7 @@ def list_position_entities(
         pass
 
     entities: List[dict] = []
-    # Spot only from fill walk (no balance API permission on keys today).
-    # Tag money_truth so coach/teaching never treat spot residual as exchange truth.
+    # Spot fill-walk first, then reconcile size against live balances.
     for sym, mkt in pairs:
         if mkt == "futures":
             continue
@@ -69,12 +68,11 @@ def list_position_entities(
             s["verified"] = False
             s["teach_ok"] = False
             s["source"] = "fill_recon"
-            if s.get("status") == "open":
-                s["notes"] = (
-                    (s.get("notes") or "")
-                    + " · spot residual from fills (not balance-verified)"
-                ).strip(" ·")
             entities.append(s)
+
+    entities = _reconcile_spot_with_balances(
+        entities, store, user_id, fills_all=fills_all
+    )
 
     # Futures OPEN: exchange open_positions + deal layers from fills
     entities = _reconcile_futures_with_exchange(
@@ -244,6 +242,146 @@ def _norm_fut_key(symbol: str) -> str:
     return str(symbol or "").upper().replace("_", "").replace("-", "")
 
 
+def _spot_base_asset(symbol: str) -> str:
+    s = str(symbol or "").upper().replace("_", "").replace("-", "")
+    if s.endswith("USDT"):
+        return s[:-4]
+    if s.endswith("USDC"):
+        return s[:-4]
+    return s
+
+
+def _reconcile_spot_with_balances(
+    entities: List[dict],
+    store: Any,
+    user_id: int,
+    *,
+    fills_all: Optional[List[dict]] = None,
+) -> List[dict]:
+    """Spot OPEN size from account balances; drop ghost fill residuals.
+
+    Entry avg still from fill recon when available. Balances make qty authority.
+    """
+    from ..learning.fills import (
+        fetch_live_spot_balances,
+        read_spot_balances_authority,
+    )
+    from ..learning.trades import segment_positions_from_fills
+
+    fills_all = fills_all or []
+    bals = fetch_live_spot_balances(user_id, event_store=store)
+    if bals is None:
+        bals = read_spot_balances_authority(store, user_id, max_age_s=900.0)
+    if bals is None:
+        # No authority — leave fill-recon tags
+        for e in entities:
+            if (e.get("market") or "").lower() != "spot":
+                continue
+            if e.get("status") == "open" or e.get("is_open"):
+                e["notes"] = (
+                    (e.get("notes") or "")
+                    + " · spot residual from fills (balance API unavailable)"
+                ).strip(" ·")
+        return entities
+
+    by_asset: Dict[str, dict] = {}
+    for b in bals:
+        asset = str(b.get("asset") or "").upper()
+        tot = float(b.get("total") or 0)
+        if asset and tot > 1e-8:
+            by_asset[asset] = b
+
+    kept: List[dict] = []
+    matched: Set[str] = set()
+    for e in entities:
+        if (e.get("market") or "").lower() != "spot":
+            kept.append(e)
+            continue
+        if e.get("status") != "open" and not e.get("is_open"):
+            # closed fill-walk spot — keep, still unverified closed
+            kept.append(e)
+            continue
+        asset = _spot_base_asset(str(e.get("symbol") or ""))
+        bal = by_asset.get(asset)
+        if not bal:
+            # Ghost residual — zero on exchange
+            logger.info("Dropping ghost spot open %s (no balance)", e.get("symbol"))
+            continue
+        tot = float(bal["total"])
+        e["size_remaining"] = tot
+        e["size_qty"] = e.get("size_qty") or tot
+        e["exchange_hold"] = True
+        e["spot_free"] = bal.get("free")
+        e["spot_locked"] = bal.get("locked")
+        e["money_truth"] = "exchange"
+        e["verified"] = True
+        e["teach_ok"] = True  # size+live entry from fills+balance
+        e["source"] = "mexc_spot_account"
+        e["notes"] = (
+            f"spot balance {tot} (free {bal.get('free')} locked {bal.get('locked')})"
+        )
+        matched.add(asset)
+        # attach fill layers for open window
+        if not e.get("buy_orders") and not e.get("sell_orders"):
+            _attach_fills_window(
+                e, fills_all, market="spot", open_position=True
+            )
+        kept.append(e)
+
+    # Balances with no fill-open entity yet — invent open with fill entry if possible
+    for asset, bal in by_asset.items():
+        if asset in matched:
+            continue
+        tot = float(bal["total"])
+        if tot <= 1e-8:
+            continue
+        sym = str(bal.get("symbol") or f"{asset}USDT")
+        segs = segment_positions_from_fills(fills_all, symbol=sym, market="spot")
+        open_seg = next((s for s in segs if s.get("status") == "open"), None)
+        entry = None
+        buys, sells = [], []
+        if open_seg:
+            entry = open_seg.get("entry_avg")
+            buys = open_seg.get("buy_orders") or []
+            sells = open_seg.get("sell_orders") or []
+        ent = {
+            "symbol": sym,
+            "market": "spot",
+            "status": "open",
+            "outcome": "open",
+            "is_open": True,
+            "opened_at": open_seg.get("opened_at") if open_seg else None,
+            "closed_at": None,
+            "entry_avg": entry,
+            "entry_display": entry,
+            "exit_avg": None,
+            "size_remaining": tot,
+            "size_qty": tot,
+            "size_sold": open_seg.get("size_sold") if open_seg else 0,
+            "buy_orders": buys,
+            "sell_orders": sells,
+            "n_buys": len(buys),
+            "n_sells": len(sells),
+            "recon_from_fills": bool(open_seg),
+            "exchange_hold": True,
+            "money_truth": "exchange",
+            "verified": True,
+            "teach_ok": True,
+            "source": "mexc_spot_account",
+            "spot_free": bal.get("free"),
+            "spot_locked": bal.get("locked"),
+            "entity_key": f"sopen:{sym}",
+            "notes": f"spot balance {tot} (from account)",
+        }
+        if not buys and not sells:
+            _attach_fills_window(
+                ent, fills_all, market="spot", open_position=True
+            )
+        kept.append(ent)
+
+    return kept
+
+
 def _reconcile_futures_with_exchange(
     entities: List[dict],
     store: Any,
@@ -385,8 +523,12 @@ def _attach_fills_window(
     buys: List[dict] = []
     sells: List[dict] = []
     for f in fills_all:
-        fm = (f.get("market") or "").lower()
-        if fm and fm != mwant:
+        fm = (f.get("market") or "").lower() or "spot"
+        # spot fills often market=spot or empty
+        if mwant == "spot":
+            if fm not in ("", "spot"):
+                continue
+        elif fm and fm != mwant:
             continue
         if not symbols_match(ent.get("symbol") or "", f.get("symbol") or ""):
             continue

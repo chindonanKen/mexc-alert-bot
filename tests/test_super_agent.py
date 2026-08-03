@@ -442,6 +442,58 @@ class TestFuturesOpenAuthority(unittest.TestCase):
         )
 
 
+class TestSpotBalanceReconcile(unittest.TestCase):
+    def test_balance_sets_size_and_drops_ghost(self):
+        from unittest.mock import patch
+
+        from mexc_bot.webapi.positions_enrich import _reconcile_spot_with_balances
+
+        entities = [
+            {
+                "symbol": "SYNUSDT",
+                "market": "spot",
+                "status": "open",
+                "is_open": True,
+                "size_remaining": 999999,
+                "entry_avg": 0.09,
+                "entry_display": 0.09,
+                "recon_from_fills": True,
+                "money_truth": "fill_recon_unverified",
+                "buy_orders": [],
+                "sell_orders": [],
+            },
+            {
+                "symbol": "GHOSTUSDT",
+                "market": "spot",
+                "status": "open",
+                "is_open": True,
+                "size_remaining": 100,
+                "recon_from_fills": True,
+            },
+        ]
+        bals = [
+            {
+                "asset": "SYN",
+                "free": 50000.0,
+                "locked": 34096.4,
+                "total": 84096.4,
+                "symbol": "SYNUSDT",
+            }
+        ]
+        with patch(
+            "mexc_bot.learning.fills.fetch_live_spot_balances", return_value=bals
+        ):
+            out = _reconcile_spot_with_balances(
+                entities, store=None, user_id=1, fills_all=[]
+            )
+        opens = [e for e in out if e.get("status") == "open"]
+        self.assertEqual(len(opens), 1)
+        self.assertEqual(opens[0]["symbol"], "SYNUSDT")
+        self.assertAlmostEqual(opens[0]["size_remaining"], 84096.4)
+        self.assertTrue(opens[0]["exchange_hold"])
+        self.assertEqual(opens[0]["money_truth"], "exchange")
+
+
 class TestMoneyTruthReviews(unittest.TestCase):
     def test_entity_to_review_exchange_closed(self):
         from mexc_bot.learning.money_truth import entity_to_review
