@@ -1,6 +1,6 @@
 # Session handoff — pick up here
 
-**Last updated:** 2026-08-03 (platform baseline; **learning plan wiped**)  
+**Last updated:** 2026-08-04 (Learning V1 + positions money truth shipped; docs/roadmap/memory refreshed; pause until token reset)  
 **GitHub:** `chindonanKen/mexc-alert-bot` · branch `main`  
 **Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md) · [TRADING_STRATEGY.md](TRADING_STRATEGY.md)
 
@@ -10,21 +10,22 @@ This file is a **dated snapshot** so the next human/agent (including a **new Mac
 
 ## Product baseline (what works — trust this)
 
-Owner assessment accepted **2026-08-03**. Do **not** pretend Learning is a finished product.
+Owner assessment accepted **2026-08-03**, then Learning V1 shipped same day.
 
 | Surface | Status |
 |---------|--------|
-| **Positions** | **Solid** — best part of AD Desk (exchange money truth, opens/closes, layers) |
+| **Positions** | **Solid** — exchange money truth (futures open/history, spot balances, discrete closes, layers) |
 | **Targets / movers** | **Solid** — shared DB with Telegram sensors/alarms |
-| **Overview** | **Partial** — useful; not a full command center |
-| **Learning / coach / Agent tab** | **Not a holistic product** — plumbing exists; plan **wiped clean** (see below) |
+| **Overview** | **Partial** — Needs you · targets · movers · positions · agent memory strip |
+| **Learning** | **V1 live** — you teach, agent student; **not** a coach product |
+| **Voice** | **Turn-based beta** — fluent Voice 2.0 not shipped |
 
 ### Two products (do not blur)
 
 | Product | Role |
 |---------|------|
 | **Telegram alarm bot** | Sensors + push for targets/movers — **leave as-is** |
-| **AD Desk** | Desk UI over same SQLite + MEXC private reads; **not** “full learning platform” until a new plan is written |
+| **AD Desk** | Positions + Learning V1 teach + voice tools + Overview |
 
 Shared SQLite is plumbing. Owner: `DESK_USER_ID=8630949601`.
 
@@ -32,17 +33,20 @@ Shared SQLite is plumbing. Owner: `DESK_USER_ID=8630949601`.
 
 ## Learning V1 (shipped 2026-08-03) — teach the agent
 
-**Model:** You teach · agent is student · no coach product.
+**Model:** You teach · agent is student · no coach product. Super-Agent theater removed.
 
 | Surface | Role |
 |---------|------|
-| **Learning** nav | Pending · Teach · What I’ve learned · Recent · Ask agent |
+| **Learning** nav | Pending · Teach (trade-first) · What I’ve learned (+ delete) · Recent · Ask agent |
 | **Overview** | Needs you (pending only) · Agent memory strip |
-| **Voice** | `what_have_you_learned`, `teach`, pending, fires/trades, `agent_ask` |
+| **Voice** | `what_have_you_learned`, `teach`, pending, fires/trades, `agent_ask`, `delete_lesson` |
 
+Key rules:
 - Money truth: `teach_ok` / `LEARNING_TEACH_SINCE` for $ claims  
-- Old Super-Agent / coach UI removed from Learning view  
-- Module: `mexc_bot/webapi/learning_v1.py`
+- Teach **bound to selected trade** (open or closed); open then close = new lesson chapters  
+- Chips include **`ad_met` / `ad_missed`** + process set  
+- Module: `mexc_bot/webapi/learning_v1.py`  
+- Roadmap API: `GET /api/roadmap` (desk UI)
 
 ---
 
@@ -79,18 +83,20 @@ Do **not** rely on copying `.grok` session folders from the mini unless you expl
 
 ## Latest build (as of handoff)
 
-Recent commits on `main` (newest first, approximate):
+Recent commits on `main` (newest first, approximate — confirm with `git log`):
 
 | Commit (prefix) | What |
 |-----------------|------|
-| `9382793` | AGENTS + SESSION_HANDOFF docs refresh |
-| `e3f48eb` | TSLA resolve also tries `TESLA_USDT` contract id |
-| `80d7639` | Compact stock UI resolve (`TSLAUSDT`); bot gets futures client when client exists |
-| `409a450` | Heat board, velocity, volume, optional kline reds |
-| `990af4e` | Step-down re-arm (cascade dumps; short min-gap) |
-| `3498ac4` | Peak high→now drawdown + faster poll |
+| `fc17c2d` | Delete lesson (UI + API + voice tool) |
+| `fa5a4ab` | Voice longer end-silence; closed chips + AD met/missed |
+| `a5a53f6` | Learning trade-first teach flow with bound context |
+| `787d998` | Learning V1: teach the agent, not a coach product |
+| `7c0f900` | Handoff: platform baseline; wipe coach product plan |
+| `35ae2f3`…`1bf99d0` | `LEARNING_TEACH_SINCE`, money_truth / teach_ok seal |
+| `f4504a7`…`4ba7039` | Spot balances authority; ignore GOONC dust |
+| `eb9d769`… | Futures open layers + history closed cycles |
 
-**Always confirm tip:** `git log -1 --oneline` after `git pull` (MacBook and droplet).
+Older movers/V3 history still on main; tip moves — always: `git log -1 --oneline` after `git pull`.
 
 ---
 
@@ -143,20 +149,16 @@ Smoke: `/s` · `/l` · `/p f TSLA` · `/mw`.
 
 | Status | Item |
 |--------|------|
-| **Design** | [V4_TRADING_ASSISTANT.md](V4_TRADING_ASSISTANT.md) — full plan (learning, fatal news, voice→fluent agent, V2 UI) |
-| **Verify** | [VERIFY_BUILD.md](VERIFY_BUILD.md) + `./scripts/verify_build.sh` + `.grok/workflows/verify-build.rhai` |
-| **Shipped (code)** | V1.0 learning: EventStore, mover **and target** fire log, `/j` `/events` `/trade` `/brief` `/coach`, outcome poller, integrity helpers |
-| **Staging** | **Droplet-first** — [DROPLET_OPS.md](DROPLET_OPS.md). Local Mac staging torn down (no long-running local bot; no local `.env.staging`). |
-| **Ops model** | Prefer **Grok on the droplet** for docker/logs/staging; laptop Grok + `scripts/droplet.sh` if SSH host `mexc-droplet` is set. |
-| **V1** | **COMPLETE** — see [V1_COMPLETE.md](V1_COMPLETE.md) |
-| **Isolated agent** | [ISOLATED_DUMP_AGENT.md](ISOLATED_DUMP_AGENT.md) — async multi-CEX delist/hack check on *extreme isolated* dumps; source expertise learning |
-| **UX** | [ASSISTANT_UX.md](ASSISTANT_UX.md) |
-| **V2.1 desk** | CRUD + positions + Grok voice tools + roadmap — [V2_BETA.md](V2_BETA.md) · `docker compose --profile desk up -d --build mexc-desk` |
-| **Next** | Droplet rebuild desk; set `XAI_API_KEY` + `DESK_USER_ID`; realtime voice / fills later |
+| **Shipped** | Positions money truth · Learning V1 teach (trade-first, AD chips, delete lesson) · turn-based voice tools |
+| **Pause** | Session compact 2026-08-04 — resume after owner token reset (afternoon) |
+| **Local uncommitted** | `Agents.md` · `docs/SESSION_HANDOFF.md` · `mexc_bot/webapi/app.py` (`/api/roadmap`) — commit/push when convenient before droplet deploy of desk roadmap |
+| **Next (when build resumes)** | Overview polish · engagement soak · optional auto AD zone tags · **not** coach unless re-opened |
+| **Deferred** | Fluent Voice 2.0 · coach product · paper/recs · layer planner · desk multi-device push · live orders |
 | **Playbook** | [TRADING_STRATEGY.md](TRADING_STRATEGY.md) |
-| Later | Voice (V1.2), MEXC read-only fills (V1.3), `MOVER_ENRICH_KLINES=true` |
-| Backlog | Named mover buckets, bounce/reclaim, layer planner, TG buttons |
-| Deferred | Full web UI (V2); Buzz as primary chat |
+| **Constitution** | [AGENTS.md](../AGENTS.md) (Learning V1 truth) · roadmap `GET /api/roadmap` |
+| **Ops** | Droplet-first bot+desk — [DROPLET_OPS.md](DROPLET_OPS.md); `XAI_API_KEY` + `DESK_USER_ID` for voice |
+| **Verify** | `make test` · [VERIFY_BUILD.md](VERIFY_BUILD.md) |
+| Backlog | Named mover buckets, bounce/reclaim, TG buttons, `MOVER_ENRICH_KLINES` opt-in |
 | Separate bots | [FUTURE_STRATEGY_BOTS.md](FUTURE_STRATEGY_BOTS.md) |
 
 ### Buzz (context only)

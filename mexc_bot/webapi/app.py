@@ -153,34 +153,40 @@ def create_app() -> FastAPI:
 
     @app.get("/api/roadmap")
     def roadmap(_: bool = Depends(require_auth)):
-        """Where V2 is going — product vision for the finished platform."""
+        """Where AD Desk is going — keep in sync with AGENTS.md + SESSION_HANDOFF."""
         return {
             "vision": (
-                "A futuristic agent trading platform that co-pilots AD panic scale-ins: "
-                "sensors → memory → specialist agents → voice desk → disciplined execution."
+                "AD Desk: exchange-true positions + teach-the-agent learning for AD panic scale-ins. "
+                "Telegram stays sensors/alarms. Desk owns teach, voice tools, and later optional recs — "
+                "never silent live risk."
             ),
             "now": [
-                {"id": "desk_ui", "title": "AD Desk UI", "status": "beta"},
-                {"id": "crud", "title": "Alerts / watchlist / journal CRUD", "status": "beta"},
+                {"id": "positions", "title": "Positions money truth (futures open/history, spot balances, layers)", "status": "live"},
+                {"id": "targets_movers", "title": "Targets + movers (Telegram sensors + desk CRUD)", "status": "live"},
+                {"id": "desk_ui", "title": "AD Desk UI (Overview partial command center)", "status": "beta"},
+                {"id": "learning_v1", "title": "Learning V1: you teach, agent student (trade-first, delete lesson, AD chips)", "status": "live"},
+                {"id": "money_truth", "title": "teach_ok / LEARNING_TEACH_SINCE sealed $ training", "status": "live"},
+                {"id": "voice_tools", "title": "Turn-based voice STT → tools → TTS (teach, pending, agent_ask)", "status": "beta"},
                 {"id": "intel", "title": "Isolated dump + multi-CEX delist intel", "status": "live"},
-                {"id": "voice_tools", "title": "Grok voice + tool agent (desk control)", "status": "beta"},
-                {"id": "learning", "title": "Event labels + source expertise", "status": "live"},
             ],
             "next": [
-                {"id": "voice_realtime", "title": "Grok Speech-to-Speech realtime WebSocket", "status": "planned"},
-                {"id": "fills", "title": "MEXC read-only fills → live positions", "status": "planned"},
-                {"id": "llm_coach", "title": "Fluent multi-turn coach with full tool graph", "status": "planned"},
+                {"id": "overview_polish", "title": "Overview as tighter command center (Needs you → stack)", "status": "planned"},
+                {"id": "engagement_soak", "title": "Engagement bridge soak + fewer false pending Qs", "status": "in_progress"},
+                {"id": "voice_realtime", "title": "Fluent Voice 2.0 (streaming / Speech-to-Speech)", "status": "planned"},
+                {"id": "auto_ad_zones", "title": "Optional auto AD zone tags on fires (owner-gated)", "status": "planned"},
+                {"id": "llm_coach", "title": "Coach product (only if owner re-opens — not default path)", "status": "deferred"},
                 {"id": "layer_planner", "title": "AD layer planner (zones + sizes)", "status": "planned"},
-                {"id": "paper_sim", "title": "Paper PnL sim on journal", "status": "planned"},
+                {"id": "paper_sim", "title": "Paper / ranked recs after teach soak", "status": "planned"},
+                {"id": "desk_push", "title": "Multi-device desk push (alarms off Telegram later)", "status": "planned"},
                 {"id": "live_orders", "title": "Optional gated live orders (explicit flag)", "status": "planned"},
                 {"id": "pwa", "title": "Installable PWA + mobile layouts", "status": "planned"},
-                {"id": "expert_agents", "title": "Per-domain experts (delist, hack, breadth)", "status": "in_progress"},
             ],
             "principles": [
-                "Telegram = panic push; Desk = command + overview",
+                "Telegram = panic push; Desk = positions + teach + overview",
+                "You teach · agent is student — no coach theater by default",
+                "Exchange money_truth only for $ teaching (teach_ok window)",
                 "Never slow mover fires for news I/O",
-                "Isolated dumps get specialist veto",
-                "Journal before ego; tools before YOLO",
+                "Never touch alerts rows for learning/movers paths",
                 "Live exchange orders off unless explicitly enabled",
             ],
         }
@@ -1065,7 +1071,7 @@ def create_app() -> FastAPI:
                 "isolated_agent": "async delist/hack check",
                 "news": "fatal-class continuous",
                 "desk": "CRUD + positions + voice tools",
-                "v2_next": "realtime voice, fills, LLM coach, layer planner",
+                "v2_next": "overview polish, engagement soak; Voice 2.0 deferred; coach only if re-opened",
             },
         }
 

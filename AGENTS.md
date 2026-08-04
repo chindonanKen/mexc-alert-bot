@@ -15,26 +15,37 @@ Guide for humans and coding agents. **Read this before changing production behav
 | Product | Role | Agent rule |
 |---------|------|------------|
 | **Telegram alarm bot** | Sensors + push **today** (targets, movers). Already good. | **Leave as-is.** Do not grow learning/coach into Telegram. |
-| **AD Desk** | **The** learning + coach + voice + strategy tools platform. | Build teach/coach/agents here. **Must work without Telegram open.** |
+| **AD Desk** | Positions + Overview + **Learning V1 (teach)** + voice tools. | Build teach/student memory here. **No coach product** until owner re-opens it. Must work without Telegram open. |
 
-**Long-term:** multi-device target/mover alarms come **from the desk**, not Telegram. Until desk push ships, the bot keeps alarms; desk still owns learning/coach. Shared SQLite for sensor events is plumbing, not “desk depends on Telegram UX.”
+**Long-term:** multi-device target/mover alarms come **from the desk**, not Telegram. Until desk push ships, the bot keeps alarms; desk owns teach/memory. Shared SQLite for sensor events is plumbing, not “desk depends on Telegram UX.”
 
-Full vision: **[docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md)** · strategy: **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)**.
+Full vision: **[docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md)** · strategy: **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** · handoff: **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)**.
 
-### AD Desk product north star (voice-first)
+### Platform baseline (owner-accepted 2026-08-03)
+
+| Surface | Status |
+|---------|--------|
+| **Positions** | **Solid** — exchange money truth (futures open + history, spot balances, discrete closed cycles, buy/sell layers) |
+| **Targets / movers** | **Solid** — Telegram sensors + desk CRUD over shared SQLite |
+| **Overview** | **Partial** — Needs you · targets · movers · positions · agent memory strip |
+| **Learning** | **Learning V1 shipped** — you teach, agent is student (**not** a coach product) |
+| **Voice** | **Turn-based beta** — STT → tools → TTS; fluent streaming Voice 2.0 **not** shipped |
+
+### AD Desk product north star (voice-first, teach-first)
 
 | Principle | Detail |
 |-----------|--------|
-| **Desk = learning platform** | Coach, teach, pending answers, stats, voice — all AD Desk. No Telegram required for that loop. |
-| **Voice first** | Call dock = primary control for desk data + coach |
-| **Overview hierarchy** | **Needs you** → top-3 targets · top-3 movers · positions · book intel · coach pulse |
-| **Learn before recommend** | Auto engagement + outcomes + judgment → coach → later recs; **no silent live risk** |
-| **Teach efficiently** | Learning view: pending, approve drafts, teach, compact fires, stats |
+| **Desk = teach + positions platform** | Pending, teach bound to trades, lessons, agent_ask, voice — all AD Desk. No Telegram required. |
+| **You teach · agent is student** | Durable lessons from Kenneth; agent does **not** coach or invent process judgment. Super-Agent / coach theater removed from Learning UI. |
+| **Money truth sealed** | `$` / PnL teaching only when `teach_ok` / exchange `money_truth` and within `LEARNING_TEACH_SINCE` desk-era window. No dual-truth coach training on junk journal. |
+| **Voice first** | Call dock = primary control for desk data + teach tools |
+| **Overview hierarchy** | **Needs you** (pending only) → targets · movers · positions · book intel · agent memory strip |
+| **Learn before recommend** | Teach soak first; recs / paper later; **no silent live risk** |
 | **Alarm bot stable** | Prefer event log / shared DB hooks over rewriting Telegram |
 | **Future desk push** | Design notify so alarms can leave Telegram later |
 | **Security** | Never commit secrets; additive DB; live defaults OFF; voice auth required |
 
-**Learning loop:** **signal** (fires) + **trade** (dossiers: PnL, hold, layers) + **ticker** (per-chart stats) — desk primary; see **[Learning environment](#learning-environment-feedback--coach)**.
+**Learning loop:** **signal** (fires) + **trade** (exchange positions/layers) + **teach** (lessons bound to trade context) — desk primary; see **[Learning environment](#learning-environment-feedback--coach)**.
 
 **Local desk:** `make desk-dev` · seed: `make desk-seed` · HTTPS droplet: `./scripts/desk_https_up.sh`
 
@@ -267,45 +278,63 @@ Message shapes:
 
 ### Shipped / in progress (AD Desk path)
 
-- FastAPI desk + futuristic SPA; global voice call dock  
-- Voice STT → tools → TTS; history persists in browser localStorage  
-- Desk CRUD: alerts, watchlist, movers, journal, labels  
-- Overview moving toward ranked hierarchy (see AD_DESK_VISION.md)  
-- Learning V1 tables + outcome poller + journal (flagged)  
-- **Engagement bridge** (1h grace → took|skip|partial|late), pending Qs (max 2), lessons/teach, coach desk+voice  
-- **Trade dossiers** (PnL, hold, buy/sell layers, linked fires) + **per-ticker** profiles + rich Needs you cards  
+- FastAPI desk + SPA; global voice call dock (turn-based STT → tools → TTS)
+- Desk CRUD: alerts, watchlist, movers, journal labels
+- Overview hierarchy (partial): Needs you · targets · movers · positions · agent memory
+- **Positions money truth:** MEXC `open_positions` + `history_positions` + spot account balances; discrete closed cycles (dust flat eps); buy/sell deal layers on opens; ignore delisted dust (e.g. GOONC)
+- **Learning V1 (teach, not coach)** — module `mexc_bot/webapi/learning_v1.py`
+  - Trade-first teach: select open or closed trade → bound context → save lesson
+  - Closed behavior chips + **`ad_met` / `ad_missed`**; process chip guide
+  - Pending answers (max 2), What I've learned, Recent, Ask agent
+  - **Delete lesson** (UI + `DELETE /api/learning/lessons/{id}` + voice tool)
+  - `teach_ok` / `LEARNING_TEACH_SINCE` gates $ claims; `teach_only` exchange slice
+- Engagement bridge plumbing (took|skip|partial|late) + OutcomePoller (flagged)
+- Voice tools: teach, what_have_you_learned, pending, fires/trades, agent_ask, delete_lesson
 
-### Not shipped (learning path — later)
+### Not shipped (learning / desk — later)
 
-- Paper agents / ranked recs (after soak)  
-- Full multi-device desk push (notify stub only)  
-- Private MEXC positions on droplet until owner adds read-only keys  
+- **Coach product** (re-opened only by owner; Super-Agent UI removed)
+- Fluent streaming / Speech-to-Speech voice (Voice 2.0)
+- Paper agents / ranked recs
+- AD layer planner persistence
+- Full multi-device desk push (notify stub only)
+- Silent live orders
 
 ---
 
-## Learning environment (feedback & coach)
+## Learning environment (teach the agent — V1)
 
-**Product intent:** Manual “did you take it?” after every fire is the **exception**. Positions/fills show engagement; price path scores the setup; Kenneth teaches discipline (greed, FOMO, pride, …) when needed. Voice and desk share **one** `EventStore` brain.
+**Product intent (2026-08-03):** Kenneth teaches; the agent is a **student** that stores durable lessons and can **ask back**. It is **not** a coach that invents judgment or trains on dual-truth money. Manual "did you take it?" is the exception — positions/fills drive engagement when confident.
 
 ### Three tiers (do not collapse)
 
 | Tier | Content | Writer |
 |------|---------|--------|
-| **A · Facts** | Fire, prices, band, heat, fills, open/close | System |
-| **B · Inference** | took / skip / partial / late (+ confidence) | System (positions/fills/journal) |
-| **C · Judgment** | greed, hesitant, fomo, pride, plan_ok, rule_break, process_skip | Human + coach confirm |
+| **A · Facts** | Fire, prices, band, heat, fills, open/close, exchange PnL | System (MEXC private + sensors) |
+| **B · Inference** | took / skip / partial / late (+ confidence) | System (positions/fills/journal bridge) |
+| **C · Judgment** | greed, hesitant, fomo, pride, plan_ok, rule_break, process_skip, **ad_met**, **ad_missed** | **Human only** via teach chips / free text — agent does not auto-judge |
 
-Took ≠ good trade. Skip ≠ discipline. Lucky green on a rule-break is still a process fail.
+Took ≠ good trade. Skip ≠ discipline. Lucky green on a rule-break is still a process fail — **owner** labels that.
 
-### Loop
+### Money truth (non-negotiable for teaching)
+
+| Rule | Detail |
+|------|--------|
+| Exchange authority | Futures opens from `open_positions`; closed cycles from `history_positions` + fill segmentation; spot opens from account balances (tradeable only) |
+| `money_truth` / `teach_ok` | Bundle and agent tools only claim $ when exchange-backed and teach-ready |
+| `LEARNING_TEACH_SINCE` | Desk-era window — do not train on pre-desk junk journal mega-blobs |
+| Journal dual-truth | Sealed for $ training; journal remains UX/history when useful, not coach money source |
+
+### Loop (V1)
 
 ```text
-Sensor fire → learning_events (always)
-  → position/fill bridge → took|skip|partial|late (high conf = silent)
-  → low conf → at most 1–2 pending questions (voice/UI)
-  → OutcomePoller → bounce/DD horizons (setup quality)
-  → optional behavior propose → confirm when ambiguous
-  → coach/voice reads stats + lessons; teach tool persists durable rules
+Sensor fire → learning_events
+  → engagement bridge → took|skip|partial|late (high conf = silent)
+  → low conf → at most 1–2 pending questions (desk/voice only)
+  → Owner picks trade (open or closed) → teach (chips + notes) → learning_lessons
+  → Open teach → later close teach = new lesson chapters (same symbol OK)
+  → Bad lesson → delete_lesson (permanent unteach)
+  → agent_ask / what_have_you_learned reads lessons + teach_ok trades only
 ```
 
 ### Auto engagement (bridge rules)
@@ -322,80 +351,62 @@ Link unlabeled events on `(symbol, market)` after a **grace window** (**1 hour**
 
 Label with source metadata (`auto_position` / `human` override). Prefer private reads when `FEATURE_MEXC_PRIVATE_READ`; else journal. **Never** touch `alerts`.
 
-### Setup vs execution
+### Behavior codes (closed set → chips / stats)
 
-- **Setup score:** band + heat + news/isolated + outcome bounce/DD (even if skipped).  
-- **Execution score:** only if took — entry timing vs fire, size discipline, hold through failed AD, scale-out vs greed.
-
-### Behavior codes (closed set → stats)
-
-`plan_ok` · `pride` · `greed` · `hesitant` · `fomo` · `rule_break` · `false_panic` · `process_skip`  
-Free text stays in `notes` / lessons, not in aggregate keys.
+`plan_ok` · `pride` · `greed` · `hesitant` · `fomo` · `rule_break` · `false_panic` · `process_skip` · **`ad_met`** · **`ad_missed`**  
+Free text stays in lesson body / notes, not aggregate keys.
 
 ### Ask when unsure (not always)
 
 Silent when confident. Cap **2** open questions. Coalesce same-symbol.  
-**Away-safe:** questions **queue only on AD Desk** (badge + “Needs you” on Overview + Learning). Owner sleeps / leaves trading — on return, **the desk** shows what needs answers. No Telegram required for the teaching loop. Voice-first when a call is active. Engagement from MEXC positions/fills, not TG buttons.
+**Away-safe:** questions **queue only on AD Desk** (badge + Needs you). No Telegram required for the teaching loop. Voice-first when a call is active.
 
-### Desk UI (priority & teach — in scope for learning build)
+### Desk UI (Learning V1 — current)
 
-Overview top → bottom (sparse, high signal):
+Overview top → bottom:
 
-1. **Needs you** — pending questions (max 2) + coach drafts awaiting approve (tap/voice answer)  
-2. **Targets top 3** · **Movers top 3**  
-3. **Positions** (journal / private when on)  
+1. **Needs you** — pending questions only (max 2)  
+2. **Targets** · **Movers**  
+3. **Positions** (exchange-backed)  
 4. **Book intel** (only if matched)  
-5. **Coach pulse** — 2–4 lines from memory stats + open lessons (not a wall of events)  
+5. **Agent memory strip** — short "what I've learned" (not coach theater)
 
-**Learning view** (efficient teaching, not a dump):
+**Learning view:**
 
 | Block | Role |
 |-------|------|
 | Pending answers | Queue; one-tap / voice |
-| Approve drafts | Coach-proposed behavior/lessons — Approve / Edit / Dismiss |
-| Teach | Free-text → durable lesson (owner or voice); % size / $ notes OK |
-| Recent fires | Compact: auto action, outcome snapshot, override |
-| Stats | took/skip by band, behavior counts, bounce rates |
+| Teach | **Trade-first** — select open/closed row → chips + free text → new lesson |
+| What I've learned | Lessons list + **delete** |
+| Recent | Compact fires / engagement |
+| Ask agent | Student Q&A over memory (not coach briefs) |
 
-No clutter: no full unlabeled event feed as hero; no regime chrome.
-
-### Coach (must ship on AD Desk)
-
-Primary surfaces — **desk product only** for this build:
-
-| Surface | Behavior |
-|---------|----------|
-| **API** | `GET/POST` coach brief, ask, drafts, approve — tool-backed from EventStore + lessons + TRADING_STRATEGY |
-| **Desk** | Coach pulse on Overview + Ask coach / drafts on Learning; cite *his* stats |
-| **Voice** | Same tools; draft → owner confirm; teach on useful talk |
-
-Do **not** expand Telegram coach UX. Existing TG learning cmds may keep working if they share DB, but agents should not spend scope on TG. Path: desk becomes complete without Telegram open.
-
-Coach rules: never invent fills/outcomes; tool-backed claims; draft judgment → owner approve; cite real rates; process examples (good take, green-but-fomo, hesitant, pride, process_skip).
+No Super-Agent / approve-drafts coach UI. No full unlabeled event feed as hero.
 
 ### Voice = learning channel (desk)
 
-Tools: list events, label, positions/fills, learning_stats, pending Q answer, **teach**, **coach_ask/brief**, approve_draft, strategy cite. Persistence = desk EventStore / lessons tables only (shared file OK with bot for sensor events).
+Turn-based tools: list events/trades, label, pending answer, **teach**, **what_have_you_learned**, **agent_ask**, **delete_lesson**, strategy cite.  
+**Not shipped:** fluent interruptible streaming voice; do not promise it as current work.
 
 ### Durable lessons
 
-Episodic labels + `learning_lessons` (text, tags, weight, evidence ids, `needs_approval`). Inject top approved lessons into coach/voice context.
+`learning_lessons` (text, tags/chips, weight, evidence / trade binding). Delete is supported. Teach open then teach again on close = **new lessons**, not overwrite.
 
-### Build order (agents) — ship as one goal
+### Build order — status
 
-| Phase | Ship |
-|-------|------|
-| **L1** | Position/fill → took/skip/partial/late + conf; **1h** grace; journal-first + private when flagged |
-| **L2** | Doubt queue (max 2) + **Overview Needs you** + Learning answers (away-safe) |
-| **L3** | Teach + drafts approve + voice tools + Learning view layout above |
-| **L4** | **Coach** desk+voice+API citing memory (not rule-text only) |
-| **L5** | Recs / paper — **out of this goal** |
+| Phase | Ship | Status |
+|-------|------|--------|
+| **L1** | Positions money truth + teach_ok window | **Shipped** |
+| **L2** | Pending queue + Overview Needs you | **Shipped** (engagement soak continues) |
+| **L3** | Learning V1 trade-first teach + delete + AD chips + voice tools | **Shipped** |
+| **L4** | Coach product citing memory | **Out — do not build unless owner re-opens** |
+| **L5** | Recs / paper | **Out of this goal** |
 
-**Do not:** ML day one; label every heat fire; dual memory; paper agents; AD layer planner; expand Telegram learning UX; silent live risk. Desk push can be stub/API-ready only in this goal.
+**Do not:** reintroduce coach theater; train $ on non-`teach_ok` rows; ML day one; expand Telegram learning UX; silent live risk; assume Voice 2.0.
 
-**Flags:** `FEATURE_LEARNING`; `LEARNING_AUTO_FROM_POSITIONS`; `FEATURE_MEXC_PRIVATE_READ`. Owner `DESK_USER_ID=8630949601`.
+**Flags:** `FEATURE_LEARNING`; `LEARNING_AUTO_FROM_POSITIONS`; `FEATURE_MEXC_PRIVATE_READ`; `LEARNING_TEACH_SINCE`. Owner `DESK_USER_ID=8630949601`.
 
-Related: [docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md) · [docs/V4_TRADING_ASSISTANT.md](docs/V4_TRADING_ASSISTANT.md) · [docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)
+Related: [docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md) · [docs/V4_TRADING_ASSISTANT.md](docs/V4_TRADING_ASSISTANT.md) · [docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md) · [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)
 
 ---
 
