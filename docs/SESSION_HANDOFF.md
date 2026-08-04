@@ -1,8 +1,8 @@
 # Session handoff — pick up here
 
-**Last updated:** 2026-08-04 (Learning V1 + positions money truth shipped; docs/roadmap/memory refreshed; pause until token reset)  
+**Last updated:** 2026-08-04 (AD Agent plan locked — full focus P1 case factory)  
 **GitHub:** `chindonanKen/mexc-alert-bot` · branch `main`  
-**Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md) · [TRADING_STRATEGY.md](TRADING_STRATEGY.md)
+**Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md) · **[AD_AGENT_PLAN.md](AD_AGENT_PLAN.md)** · [TRADING_STRATEGY.md](TRADING_STRATEGY.md)
 
 This file is a **dated snapshot** so the next human/agent (including a **new MacBook + new Grok session**) does not rediscover the same ground.
 
@@ -149,16 +149,17 @@ Smoke: `/s` · `/l` · `/p f TSLA` · `/mw`.
 
 | Status | Item |
 |--------|------|
-| **Shipped** | Positions money truth · Learning V1 teach (trade-first, AD chips, delete lesson) · turn-based voice tools |
-| **Pause** | Session compact 2026-08-04 — resume after owner token reset (afternoon) |
-| **Local uncommitted** | `Agents.md` · `docs/SESSION_HANDOFF.md` · `mexc_bot/webapi/app.py` (`/api/roadmap`) — commit/push when convenient before droplet deploy of desk roadmap |
-| **Next (when build resumes)** | Overview polish · engagement soak · optional auto AD zone tags · **not** coach unless re-opened |
-| **Deferred** | Fluent Voice 2.0 · coach product · paper/recs · layer planner · desk multi-device push · live orders |
+| **Canonical plan** | **[AD_AGENT_PLAN.md](AD_AGENT_PLAN.md)** — path to fully autonomous AD agent |
+| **Shipped (P0)** | Money truth · Learning V1 teach · multi-set movers · Binance CMS delist · turn-based voice |
+| **ACTIVE** | **P1 Case factory** — structured freeze on fire/teach (features + chips); full agent focus |
+| **Later** | P2 decide+log → P3 grade → P4 AD policy → P5 paper → P6 advise (gated) → P7 gated live |
+| **Desk** | Small edits only unless phase-blocking |
+| **Owner teach** | Light, high-quality on real trades while P1 builds — do **not** block on more P0 soak |
 | **Playbook** | [TRADING_STRATEGY.md](TRADING_STRATEGY.md) |
-| **Constitution** | [AGENTS.md](../AGENTS.md) (Learning V1 truth) · roadmap `GET /api/roadmap` |
-| **Ops** | Droplet-first bot+desk — [DROPLET_OPS.md](DROPLET_OPS.md); `XAI_API_KEY` + `DESK_USER_ID` for voice |
+| **Constitution** | [AGENTS.md](../AGENTS.md) · roadmap `GET /api/roadmap` |
+| **Ops** | [DROPLET_OPS.md](DROPLET_OPS.md) · `ssh mexc-droplet` · `./scripts/droplet.sh` |
 | **Verify** | `make test` · [VERIFY_BUILD.md](VERIFY_BUILD.md) |
-| Backlog | Named mover buckets, bounce/reclaim, TG buttons, `MOVER_ENRICH_KLINES` opt-in |
+| Backlog (not focus) | Voice 2.0 · desk visual Imagine · TG buttons · mover buckets |
 | Separate bots | [FUTURE_STRATEGY_BOTS.md](FUTURE_STRATEGY_BOTS.md) |
 
 ### Buzz (context only)

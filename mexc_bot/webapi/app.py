@@ -172,40 +172,34 @@ def create_app() -> FastAPI:
         """Where AD Desk is going — keep in sync with AGENTS.md + SESSION_HANDOFF."""
         return {
             "vision": (
-                "AD Desk: exchange-true positions + teach-the-agent learning for AD panic scale-ins. "
-                "Telegram stays sensors/alarms. Desk owns teach, voice tools, and later optional recs — "
-                "never silent live risk."
+                "Fully autonomous AD agent on MEXC panic scale-ins: truth → cases → decide+log → "
+                "grade → AD policy → paper → advise → gated live. Telegram = sensors. "
+                "Desk = positions + teach + agent surfaces. Never silent live risk. "
+                "Canonical: docs/AD_AGENT_PLAN.md"
             ),
             "now": [
-                {"id": "positions", "title": "Positions money truth (futures open/history, spot balances, layers)", "status": "live"},
-                {"id": "targets_movers", "title": "Targets + movers (Telegram sensors + desk CRUD)", "status": "live"},
-                {"id": "desk_ui", "title": "AD Desk UI (Overview partial command center)", "status": "beta"},
-                {"id": "learning_v1", "title": "Learning V1: you teach, agent student (trade-first, delete lesson, AD chips)", "status": "live"},
-                {"id": "money_truth", "title": "teach_ok / LEARNING_TEACH_SINCE sealed $ training", "status": "live"},
-                {"id": "voice_tools", "title": "Turn-based voice STT → tools → TTS (teach, pending, agent_ask)", "status": "beta"},
-                {"id": "intel", "title": "Isolated dump + multi-CEX delist intel (Binance CMS catalog 161 live)", "status": "live"},
-                {"id": "mover_sets", "title": "Multiple mover sets (per-set threshold/lookback/coins)", "status": "live"},
+                {"id": "p0_truth", "title": "P0 Truth & teach (money_truth, Learning V1, positions)", "status": "live"},
+                {"id": "targets_movers", "title": "Targets + multi-set movers + Telegram sensors", "status": "live"},
+                {"id": "intel", "title": "Multi-CEX delist intel (Binance CMS 161)", "status": "live"},
+                {"id": "voice_tools", "title": "Turn-based voice tools (teach, ask, pending)", "status": "beta"},
+                {"id": "desk_ui", "title": "AD Desk (small edits only while agent builds)", "status": "beta"},
             ],
             "next": [
-                {"id": "overview_polish", "title": "Overview as tighter command center (Needs you → stack)", "status": "planned"},
-                {"id": "engagement_soak", "title": "Engagement bridge soak + fewer false pending Qs", "status": "in_progress"},
-                {"id": "desk_visual", "title": "AD Desk visual refresh from Imagine design refs", "status": "planned"},
-                {"id": "learn_chart_bind", "title": "Bind candle/chart thesis into teach lessons (not only free text)", "status": "planned"},
-                {"id": "voice_realtime", "title": "Fluent Voice 2.0 (streaming / Speech-to-Speech)", "status": "planned"},
-                {"id": "auto_ad_zones", "title": "Optional auto AD zone tags on fires (owner-gated)", "status": "planned"},
-                {"id": "llm_coach", "title": "Coach product (only if owner re-opens — not default path)", "status": "deferred"},
-                {"id": "layer_planner", "title": "AD layer planner (zones + sizes)", "status": "planned"},
-                {"id": "paper_sim", "title": "Paper / ranked recs after teach soak", "status": "planned"},
-                {"id": "desk_push", "title": "Multi-device desk push (alarms off Telegram later)", "status": "planned"},
-                {"id": "live_orders", "title": "Optional gated live orders (explicit flag)", "status": "planned"},
-                {"id": "pwa", "title": "Installable PWA + mobile layouts", "status": "planned"},
+                {"id": "p1_cases", "title": "P1 Case factory — structured freeze on fire/teach", "status": "active"},
+                {"id": "p2_decide", "title": "P2 Decide + log (agent_decisions, nearest-case)", "status": "planned"},
+                {"id": "p3_grade", "title": "P3 Grade decisions vs teach_ok / ad_met", "status": "planned"},
+                {"id": "p4_policy", "title": "P4 AD policy proposals (layers/zones)", "status": "planned"},
+                {"id": "p5_paper", "title": "P5 Paper / replay + pass bar", "status": "planned"},
+                {"id": "p6_advise", "title": "P6 Advise / recs (owner re-open + P5 bar)", "status": "deferred"},
+                {"id": "p7_live", "title": "P7 Gated live AD (default off)", "status": "deferred"},
+                {"id": "desk_small", "title": "Occasional small AD Desk UX fixes", "status": "planned"},
             ],
             "principles": [
-                "Telegram = panic push; Desk = positions + teach + overview",
-                "You teach · agent is student — no coach theater by default",
-                "Exchange money_truth only for $ teaching (teach_ok window)",
-                "Never slow mover fires for news I/O",
-                "Never touch alerts rows for learning/movers paths",
+                "Follow docs/AD_AGENT_PLAN.md — do not skip phases",
+                "Telegram = panic push; Desk = positions + teach + agent",
+                "Structured cases over free-text scrapbook",
+                "Exchange money_truth only for $ (teach_ok window)",
+                "Decide+log then grade before any coach or live",
                 "Live exchange orders off unless explicitly enabled",
             ],
         }

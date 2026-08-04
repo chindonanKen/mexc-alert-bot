@@ -7,6 +7,7 @@ Grok sessions **do not** sync between Mac mini and MacBook — only **git (GitHu
 |-----|------|
 | **This file** | First open / machine move |
 | **[AGENTS.md](AGENTS.md)** | Before **any** code change (safety + architecture) |
+| **[docs/AD_AGENT_PLAN.md](docs/AD_AGENT_PLAN.md)** | **Canonical** path to autonomous AD agent (P0–P7) — full focus |
 | **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** | **How Kenneth trades** — required before coach/learning agents |
 | **[docs/V4_TRADING_ASSISTANT.md](docs/V4_TRADING_ASSISTANT.md)** | Learning / coach / news design |
 | **[docs/VERIFY_BUILD.md](docs/VERIFY_BUILD.md)** | Post-change verify gate + **agent prompt** |
@@ -25,7 +26,7 @@ Grok sessions **do not** sync between Mac mini and MacBook — only **git (GitHu
 - Daytrades MEXC; **movers / panic dumps** are the money feature (AD-style scale-in).
 - **Production bot stays on DigitalOcean** — laptop is for **dev with Grok Build**, not hosting the live bot.
 - **Do not break spot target alerts** (large live set).
-- Next phase: **major alarm-system upgrade** (design first; keep V1 path safe).
+- **Full focus:** build the **autonomous AD agent** per [docs/AD_AGENT_PLAN.md](docs/AD_AGENT_PLAN.md) (P0 shipped → **P1 case factory next**). Desk UI = small edits only.
 
 ---
 
