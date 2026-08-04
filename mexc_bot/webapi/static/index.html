@@ -140,25 +140,30 @@
         </div>
       </section>
 
-      <!-- LEARNING — P1 case factory: pick → snapshot → chips + note → save -->
+      <!-- LEARNING — P1 case factory: subtle inline guides -->
       <section class="view" id="view-memory">
-        <div class="learn-lede">
-          <p class="learn-lede-title"><strong>How to teach well</strong> · quality beats volume</p>
-          <ol class="learn-howto">
-            <li><strong>Pick</strong> one trade or fire (left). Prefer real takes/skips you remember.</li>
-            <li><strong>Read the case snapshot</strong> — drop, band, AD zone, vol. That is what the agent will match later.</li>
-            <li><strong>Tap process chips</strong> (how you traded) and <strong>AD chips</strong> (did price hit your zone).</li>
-            <li><strong>Write one concrete note</strong> — prices, layers, why take/skip. Example: “wanted 13.0–13.2, low 13.73 — skip · plan_ok + ad_missed”.</li>
-            <li><strong>Save</strong> — freezes this case. Bad lesson? Delete it below.</li>
-          </ol>
-          <p class="learn-lede-foot mute">Voice works the same: “teach me about SYN — plan_ok, sized small on first layer.”</p>
-        </div>
+        <p class="learn-lede learn-lede-subtle">
+          <span class="mute">You teach · agent stores cases.</span>
+          Pick → snapshot → chips + note → save.
+          <span class="mute">Quality &gt; volume.</span>
+          <details class="learn-guide learn-guide-inline">
+            <summary class="learn-guide-sum">How to teach well</summary>
+            <ol class="learn-howto">
+              <li><strong>Pick</strong> a real trade or fire you remember.</li>
+              <li><strong>Read the snapshot</strong> — drop, band, AD zone, vol (what the agent matches later).</li>
+              <li><strong>Process chips</strong> = how you traded · <strong>AD chips</strong> = did price hit your zone.</li>
+              <li><strong>Note</strong> concrete prices/why — e.g. “wanted 13.0–13.2, low 13.73 — skip · plan_ok + ad_missed”.</li>
+              <li><strong>Save</strong> freezes the case. Bad lesson → Delete below. Voice: “teach me about SYN — plan_ok…”</li>
+            </ol>
+          </details>
+        </p>
 
         <div id="ovNeedsYouLearn" class="panel learn-pending-panel" hidden>
           <header class="panel-h">
-            <h3>1 · Pending — answer about a fire</h3>
+            <h3>1 · Pending</h3>
             <span class="badge quiet" id="learnPendingBadge">0</span>
           </header>
+          <p class="learn-panel-hint mute">Agent is unsure about a fire — one-tap took/skip, or teach it.</p>
           <div id="learnPending" class="scroll learn-block"></div>
         </div>
 
@@ -168,6 +173,7 @@
               <h3>2 · Pick trade or fire</h3>
               <span class="badge quiet" id="learnStatsBadge">—</span>
             </header>
+            <p class="learn-panel-hint mute">Trades = money truth · Fires = dumps. Prefer ones you can label honestly.</p>
             <div id="learnStats" class="learn-stats-line mute"></div>
             <div class="learn-tabs">
               <button type="button" class="btn soft sm learn-tab on" data-learn-tab="trades">Trades</button>
@@ -180,100 +186,57 @@
           <div class="panel learn-teach-panel">
             <header class="panel-h"><h3>3 · Case + teach</h3></header>
             <div id="learnContextBar" class="learn-context empty">
-              Select a trade or fire → case snapshot loads → chips + note → Save.
+              Select left → snapshot loads → chips + note → Save.
             </div>
             <div id="learnContextDetail" class="learn-context-detail" hidden></div>
             <div id="learnCaseSnap" class="learn-case-snap" hidden></div>
+            <p class="learn-panel-hint mute learn-case-hint" id="learnCaseHint">
+              Snapshot indexes the setup. Chips + note are your judgment — not PnL.
+            </p>
             <form id="teachForm" class="form-col">
               <input type="hidden" name="entity_key" id="teachEntityKey" value="" />
               <input type="hidden" name="symbol" id="teachSymbol" value="" />
               <input type="hidden" name="market" id="teachMarket" value="" />
               <input type="hidden" name="event_id" id="teachEventId" value="" />
               <input type="hidden" name="context_type" id="teachContextType" value="" />
-              <p class="learn-chip-hint mute">Process — how you traded (not whether green/red).</p>
-              <div class="learn-chips" id="learnBehaviorChips" aria-label="Process tags">
-                <button type="button" class="chip" data-beh="plan_ok" title="Followed AD plan: size, layers, exit idea. Agent: repeat this process.">plan_ok</button>
-                <button type="button" class="chip" data-beh="greed" title="Held too long / oversized / wouldn’t scale out. Agent: stayed past the plan.">greed</button>
-                <button type="button" class="chip" data-beh="fomo" title="Chased after the fire; late “can’t miss it”. Agent: late / emotional entry.">fomo</button>
-                <button type="button" class="chip" data-beh="hesitant" title="Right idea but tiny size or delayed. Agent: under-committed.">hesitant</button>
-                <button type="button" class="chip" data-beh="pride" title="Wouldn’t cut a failed AD (“has to come back”). Agent: ego hold.">pride</button>
-                <button type="button" class="chip" data-beh="rule_break" title="Broke a hard rule (size, grind, isolated…). Agent: hard do-not.">rule_break</button>
-                <button type="button" class="chip" data-beh="process_skip" title="Should have taken/skipped per plan, but didn’t. Agent: process miss, not setup miss.">process_skip</button>
-                <button type="button" class="chip" data-beh="false_panic" title="Looked like panic but not a real tradeable AD setup.">false_panic</button>
+              <div class="learn-chip-row">
+                <p class="learn-chip-hint mute">Process · how you traded</p>
+                <details class="learn-guide learn-guide-chips">
+                  <summary class="learn-guide-sum">chip meanings</summary>
+                  <ul class="learn-chip-glossary">
+                    <li><code>plan_ok</code> — followed AD plan (incl. clean skip)</li>
+                    <li><code>greed</code> — oversized / held past plan</li>
+                    <li><code>fomo</code> — chased after the fire</li>
+                    <li><code>hesitant</code> — right idea, tiny/late size</li>
+                    <li><code>pride</code> — wouldn’t cut a failed AD</li>
+                    <li><code>rule_break</code> — broke a hard rule</li>
+                    <li><code>process_skip</code> — should have taken/skipped, didn’t</li>
+                    <li><code>false_panic</code> — looked like panic, not tradeable AD</li>
+                  </ul>
+                </details>
               </div>
-              <p class="learn-chip-hint mute">AD zone — did price reach your buy area?</p>
+              <div class="learn-chips" id="learnBehaviorChips" aria-label="Process tags">
+                <button type="button" class="chip" data-beh="plan_ok" title="Followed AD plan (incl. disciplined skip)">plan_ok</button>
+                <button type="button" class="chip" data-beh="greed" title="Oversized / held past plan">greed</button>
+                <button type="button" class="chip" data-beh="fomo" title="Chased after the fire — late entry">fomo</button>
+                <button type="button" class="chip" data-beh="hesitant" title="Right idea, tiny size or delayed">hesitant</button>
+                <button type="button" class="chip" data-beh="pride" title="Wouldn’t cut a failed AD">pride</button>
+                <button type="button" class="chip" data-beh="rule_break" title="Broke a hard rule">rule_break</button>
+                <button type="button" class="chip" data-beh="process_skip" title="Should have taken/skipped per plan, didn’t">process_skip</button>
+                <button type="button" class="chip" data-beh="false_panic" title="Looked like panic; not a tradeable AD setup">false_panic</button>
+              </div>
+              <div class="learn-chip-row">
+                <p class="learn-chip-hint mute">AD zone · did price hit your buy area?</p>
+              </div>
               <div class="learn-chips" id="learnAdChips" aria-label="AD zone">
                 <button type="button" class="chip chip-ad" data-beh="ad_met" title="Price entered your AD / buy zone">ad_met</button>
-                <button type="button" class="chip chip-ad" data-beh="ad_missed" title="Fire/panic OK but price never hit your AD zone — correct skip">ad_missed</button>
+                <button type="button" class="chip chip-ad" data-beh="ad_missed" title="Never hit your zone — often correct skip; note prices">ad_missed</button>
               </div>
-              <p class="learn-hint mute">If <code>ad_missed</code>: always write prices — “wanted 13.0–13.2, low only 13.73”.</p>
-              <details class="learn-guide">
-                <summary class="learn-guide-sum">Process + AD chip guide</summary>
-                <div class="learn-guide-body">
-                  <p class="learn-guide-lede">Process chips = how you traded. AD chips = did the market give you your zone. Lucky green can still be <code>fomo</code>.</p>
-                  <table class="learn-guide-table">
-                    <thead>
-                      <tr><th>Chip</th><th>When you tap it</th><th>Agent learns</th></tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td><code>plan_ok</code></td>
-                        <td>Followed AD plan (including a disciplined skip)</td>
-                        <td>Repeat this process</td>
-                      </tr>
-                      <tr>
-                        <td><code>greed</code></td>
-                        <td>Held too long / oversized / no scale-out</td>
-                        <td>Stayed past the plan</td>
-                      </tr>
-                      <tr>
-                        <td><code>fomo</code></td>
-                        <td>Chased after the fire; late entry</td>
-                        <td>Late / emotional — not clean fire take</td>
-                      </tr>
-                      <tr>
-                        <td><code>hesitant</code></td>
-                        <td>Right idea, tiny size or delayed</td>
-                        <td>Under-committed</td>
-                      </tr>
-                      <tr>
-                        <td><code>pride</code></td>
-                        <td>Wouldn’t cut a failed AD</td>
-                        <td>Ego hold (even if later green)</td>
-                      </tr>
-                      <tr>
-                        <td><code>rule_break</code></td>
-                        <td>Broke a hard rule (size, grind…)</td>
-                        <td>Hard do-not on that pattern</td>
-                      </tr>
-                      <tr>
-                        <td><code>process_skip</code></td>
-                        <td>Should have taken/skipped, but didn’t</td>
-                        <td>Process miss — setup may still be fine</td>
-                      </tr>
-                      <tr>
-                        <td><code>false_panic</code></td>
-                        <td>Looked like panic; not a real tradeable setup</td>
-                        <td>Don’t treat this dump type as AD</td>
-                      </tr>
-                      <tr>
-                        <td><code>ad_met</code></td>
-                        <td>Price hit your buy / AD zone</td>
-                        <td>Zone was available to trade</td>
-                      </tr>
-                      <tr>
-                        <td><code>ad_missed</code></td>
-                        <td>Never reached your zone — often a correct skip</td>
-                        <td>Need zone prices in the note</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </details>
-              <textarea name="text" id="teachText" rows="4" placeholder="About THIS case: e.g. wanted AD 13.0–13.2, only printed 13.73 — skipped. plan_ok + ad_missed." required></textarea>
+              <p class="learn-hint mute">If <code>ad_missed</code>: put zone prices in the note (wanted X–Y, low Z).</p>
+              <textarea name="text" id="teachText" rows="3" placeholder="This case: e.g. wanted 13.0–13.2, only 13.73 — skipped. plan_ok + ad_missed." required></textarea>
               <div class="row-gap">
                 <button class="btn" type="submit" id="teachSubmit" disabled>Save case + lesson</button>
-                <button class="btn soft" type="button" id="teachClear">Clear selection</button>
+                <button class="btn soft" type="button" id="teachClear">Clear</button>
               </div>
             </form>
           </div>
@@ -284,6 +247,7 @@
             <h3>4 · What the agent has learned</h3>
             <button type="button" class="btn soft sm" id="btnWhatLearned">Refresh</button>
           </header>
+          <p class="learn-panel-hint mute">Stored cases &amp; lessons. Delete junk so the agent doesn’t recall it.</p>
           <div id="learnLessons" class="learn-lessons-list"></div>
           <form id="agentRecallForm" class="form-row mt">
             <input name="question" placeholder="What have you learned so far?" class="grow" />

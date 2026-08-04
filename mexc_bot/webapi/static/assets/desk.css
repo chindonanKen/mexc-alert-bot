@@ -1324,17 +1324,79 @@ table.data tr:hover td { background: rgba(56,189,248,.04); }
   .tile.span2, .tile.hero { grid-column: auto; }
 }
 
-/* —— Learning P1 case factory —— */
-.learn-lede-title { margin: 0 0 0.35rem; font-size: 0.88rem; }
-.learn-howto {
-  margin: 0 0 0.4rem;
-  padding-left: 1.15rem;
-  font-size: 0.82rem;
-  line-height: 1.45;
-  max-width: 44rem;
+/* —— Learning P1 case factory (subtle guides) —— */
+.learn-lede-subtle {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  max-width: 42rem;
+  color: rgba(232, 244, 255, 0.78);
 }
-.learn-howto li { margin: 0.2rem 0; }
-.learn-lede-foot { margin: 0.25rem 0 0; font-size: 0.75rem; }
+.learn-lede-subtle .mute { color: var(--mute); }
+.learn-guide-inline {
+  display: inline-block;
+  margin: 0.2rem 0 0;
+  vertical-align: baseline;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+.learn-guide-inline .learn-guide-sum {
+  font-size: 0.72rem;
+  opacity: 0.75;
+  letter-spacing: 0.02em;
+}
+.learn-guide-inline .learn-guide-sum:hover { opacity: 1; color: var(--sky); }
+.learn-howto {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  max-width: 36rem;
+  color: var(--mute);
+}
+.learn-howto li { margin: 0.18rem 0; }
+.learn-howto strong { color: rgba(232, 244, 255, 0.85); font-weight: 600; }
+.learn-panel-hint {
+  margin: 0 0 0.45rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  max-width: 36rem;
+}
+.learn-case-hint { margin-top: 0.15rem; margin-bottom: 0.5rem; }
+.learn-chip-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.15rem;
+}
+.learn-chip-row .learn-chip-hint { margin: 0; }
+.learn-guide-chips {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+}
+.learn-guide-chips .learn-guide-sum {
+  font-size: 0.68rem;
+  opacity: 0.7;
+}
+.learn-chip-glossary {
+  margin: 0.3rem 0 0.5rem;
+  padding-left: 1rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--mute);
+  max-width: 28rem;
+}
+.learn-chip-glossary li { margin: 0.12rem 0; }
+.learn-chip-glossary code {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--mint);
+}
 
 .learn-case-snap {
   margin: 0 0 0.65rem;
