@@ -19,7 +19,8 @@ Guide for humans and coding agents. **Read this before changing production behav
 
 **Long-term:** multi-device target/mover alarms come **from the desk**, not Telegram. Until desk push ships, the bot keeps alarms; desk owns teach/memory. Shared SQLite for sensor events is plumbing, not “desk depends on Telegram UX.”
 
-Full vision: **[docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md)** · strategy: **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** · handoff: **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)**.
+Full vision: **[docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md)** · strategy: **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** · handoff: **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)**.  
+**Autonomy roadmap (canonical):** **[docs/AD_AGENT_PLAN.md](docs/AD_AGENT_PLAN.md)** — P0 shipped → **P1 case factory next** → … → P7 gated live. Full focus = build this agent; desk UI only small edits.
 
 ### Platform baseline (owner-accepted 2026-08-03)
 
@@ -392,21 +393,40 @@ Turn-based tools: list events/trades, label, pending answer, **teach**, **what_h
 
 `learning_lessons` (text, tags/chips, weight, evidence / trade binding). Delete is supported. Teach open then teach again on close = **new lessons**, not overwrite.
 
-### Build order — status
+### Build order — status (legacy L-labels)
 
 | Phase | Ship | Status |
 |-------|------|--------|
-| **L1** | Positions money truth + teach_ok window | **Shipped** |
-| **L2** | Pending queue + Overview Needs you | **Shipped** (engagement soak continues) |
-| **L3** | Learning V1 trade-first teach + delete + AD chips + voice tools | **Shipped** |
-| **L4** | Coach product citing memory | **Out — do not build unless owner re-opens** |
-| **L5** | Recs / paper | **Out of this goal** |
+| **L1** | Positions money truth + teach_ok window | **Shipped** (= P0) |
+| **L2** | Pending queue + Overview Needs you | **Shipped** |
+| **L3** | Learning V1 trade-first teach + delete + AD chips + voice tools | **Shipped** (= P0) |
+| **L4–L5** | Old coach/recs labels | **Superseded** by P6–P7 gates below |
 
-**Do not:** reintroduce coach theater; train $ on non-`teach_ok` rows; ML day one; expand Telegram learning UX; silent live risk; assume Voice 2.0.
+### AD Agent autonomy plan (canonical — follow this)
+
+**Full doc:** **[docs/AD_AGENT_PLAN.md](docs/AD_AGENT_PLAN.md)**  
+**Focus:** build the autonomous AD agent. AD Desk = small edits only unless a phase needs it.
+
+```text
+Observe → Freeze case → Decide + log → Grade → AD policy → Paper → Advise → Gated live
+```
+
+| Phase | What | Status |
+|-------|------|--------|
+| **P0** | Truth & teach (money, chips, trade-bound lessons) | **Shipped** |
+| **P1** | **Case factory** — structured freeze on fire/teach (features + chips; not diary-only) | **NEXT** |
+| **P2** | Decide + log (`agent_decisions`, nearest-case, soft remind) | Not started |
+| **P3** | Grade vs path / `ad_met` / teach_ok PnL | Not started |
+| **P4** | AD policy proposals (layers/zones) | Not started |
+| **P5** | Paper / replay + pass bar | Not started |
+| **P6** | Advise / recs | **Only if owner re-opens + P5 bar** |
+| **P7** | Gated live AD | **Default off; never silent** |
+
+**Do not:** skip to coach/live; train $ on non-`teach_ok`; ML day one; expand Telegram learning; break spot `stable_id` crossing.
 
 **Flags:** `FEATURE_LEARNING`; `LEARNING_AUTO_FROM_POSITIONS`; `FEATURE_MEXC_PRIVATE_READ`; `LEARNING_TEACH_SINCE`. Owner `DESK_USER_ID=8630949601`.
 
-Related: [docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md) · [docs/V4_TRADING_ASSISTANT.md](docs/V4_TRADING_ASSISTANT.md) · [docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md) · [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)
+Related: [docs/AD_AGENT_PLAN.md](docs/AD_AGENT_PLAN.md) · [docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md) · [docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md) · [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)
 
 ---
 
