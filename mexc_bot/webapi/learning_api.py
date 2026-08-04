@@ -6,9 +6,12 @@ Replaces tag-farm learning surface with training cockpit endpoints.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from ..learning.beliefs import BeliefEngine
 from ..learning.chart_features import compute_fire_features
@@ -779,6 +782,55 @@ def teach(
         source="owner",
         evidence_event_ids=evid,
     )
+
+    # P1: freeze / update setup case with features + chips + note
+    case_view: Dict[str, Any] = {}
+    if lid and symbol:
+        try:
+            from ..learning.cases import freeze_case
+
+            store = event_store()
+            fire_price = None
+            fire_ts = None
+            ref_price = None
+            drop_pct = None
+            velocity_band = None
+            heat_breadth = None
+            if event_id:
+                for e in store.recent_events(uid, limit=80):
+                    if int(e.get("id") or 0) == int(event_id):
+                        fire_price = e.get("price")
+                        fire_ts = e.get("ts")
+                        ref_price = e.get("ref_price")
+                        drop_pct = e.get("drop_pct")
+                        velocity_band = e.get("velocity_band")
+                        heat_breadth = e.get("heat_breadth")
+                        market = market or e.get("market")
+                        break
+            case_view = freeze_case(
+                store,
+                uid,
+                symbol=str(symbol),
+                market=str(market or "futures"),
+                event_id=int(event_id) if event_id else None,
+                fire_ts=fire_ts or time.time(),
+                fire_price=fire_price,
+                ref_price=ref_price,
+                drop_pct=drop_pct,
+                velocity_band=velocity_band,
+                heat_breadth=heat_breadth,
+                chips=beh_clean + ad_clean,
+                note=body,
+                lesson_id=int(lid),
+                trade_key=entity_key,
+                source="teach",
+                recompute=True,
+            )
+            if case_view.get("id"):
+                tag_list.append(f"case:{int(case_view['id'])}")
+        except Exception as e:
+            logger.warning("p1 freeze on teach failed: %s", e)
+
     return {
         "ok": bool(lid),
         "lesson_id": lid,
@@ -786,6 +838,8 @@ def teach(
         "entity_key": entity_key,
         "event_id": event_id,
         "text": full_text,
+        "case": case_view or None,
+        "case_id": (case_view or {}).get("id"),
     }
 
 

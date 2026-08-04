@@ -414,7 +414,7 @@ Observe → Freeze case → Decide + log → Grade → AD policy → Paper → A
 | Phase | What | Status |
 |-------|------|--------|
 | **P0** | Truth & teach (money, chips, trade-bound lessons) | **Shipped** |
-| **P1** | **Case factory** — structured freeze on fire/teach (features + chips; not diary-only) | **NEXT** |
+| **P1** | **Case factory** — `agent_setup_cases`, freeze on fire/teach, Learning snapshot UI | **Core shipped** (index/retrieval → P2) |
 | **P2** | Decide + log (`agent_decisions`, nearest-case, soft remind) | Not started |
 | **P3** | Grade vs path / `ad_met` / teach_ok PnL | Not started |
 | **P4** | AD policy proposals (layers/zones) | Not started |

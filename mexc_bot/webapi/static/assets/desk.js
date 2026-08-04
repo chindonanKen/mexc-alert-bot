@@ -140,8 +140,13 @@
     $("#title").textContent = titles[name] || "Desk";
     const sub = $("#subtitle");
     if (sub) {
-      sub.textContent = "";
-      sub.hidden = true;
+      if (name === "memory") {
+        sub.textContent = "You teach. Agent stores cases — not advice.";
+        sub.hidden = false;
+      } else {
+        sub.textContent = "";
+        sub.hidden = true;
+      }
     }
   }
 
@@ -912,9 +917,164 @@
     );
   }
 
-  // Learning V1 — trade-first teaching context
-  state.learnSel = null; // { type, symbol, market, entity_key, event_id, label, detail }
+  // Learning P1 — case factory: pick → snapshot → chips + note
+  state.learnSel = null;
   state.learnBehaviors = [];
+  state.learnCase = null;
+
+  function _metric(label, value, cls) {
+    const v =
+      value == null || value === "" || value === "undefined" ? "—" : value;
+    return `<div class="learn-metric"><span>${escHtml(
+      label
+    )}</span><strong class="${cls || ""}">${escHtml(String(v))}</strong></div>`;
+  }
+
+  function renderCaseSnap(snap, sel) {
+    const host = $("#learnCaseSnap");
+    if (!host) return;
+    if (!sel) {
+      host.hidden = true;
+      host.innerHTML = "";
+      state.learnCase = null;
+      return;
+    }
+    const c = snap || {};
+    state.learnCase = c;
+    const freeze = c.freeze || (c.features_ok ? "ok" : c.ok === false ? "partial" : "partial");
+    const badge =
+      freeze === "ok"
+        ? "FROZEN"
+        : freeze === "partial"
+          ? "PARTIAL"
+          : "NO SNAP";
+    const drop =
+      c.drop_pct != null
+        ? `${Number(c.drop_pct) <= 0 ? "" : "−"}${Math.abs(
+            Number(c.drop_pct)
+          ).toFixed(1)}%`
+        : c.dd_pct != null
+          ? `−${Math.abs(Number(c.dd_pct)).toFixed(1)}%`
+          : null;
+    const vel =
+      c.vel_pct_min != null ? `${Number(c.vel_pct_min).toFixed(2)}%/m` : null;
+    const adDepth =
+      c.ad_depth_ratio != null
+        ? `${Number(c.ad_depth_ratio).toFixed(2)}×`
+        : null;
+    const vol =
+      c.vol_flag || c.vol_ratio != null
+        ? `${c.vol_flag || "vol"}${
+            c.vol_ratio != null ? " " + Number(c.vol_ratio).toFixed(1) + "×" : ""
+          }`
+        : null;
+    const heat =
+      c.heat_breadth != null ? `${c.heat_breadth} names` : null;
+    const setup =
+      c.setup_prior != null ? Number(c.setup_prior).toFixed(2) : null;
+    let tradeLine = "";
+    if (sel.type === "trade" && sel.tradeSnap) {
+      const t = sel.tradeSnap;
+      tradeLine = [
+        t.entry_avg != null ? "entry " + t.entry_avg : "",
+        t.exit_avg != null ? "exit " + t.exit_avg : "",
+        t.pnl_pct != null
+          ? (t.pnl_pct >= 0 ? "+" : "") + Number(t.pnl_pct).toFixed(1) + "%"
+          : "",
+        t.pnl_usd != null ? "$" + t.pnl_usd : "",
+        t.money_truth || "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    }
+    host.hidden = false;
+    host.innerHTML = `
+      <div class="learn-case-h">
+        <span class="learn-case-title">Case snapshot</span>
+        <span class="learn-case-badge" data-freeze="${escHtml(
+          freeze
+        )}">${badge}${
+      sel.type === "fire"
+        ? " · fire"
+        : sel.event_id
+          ? " · trade · fire #" + sel.event_id
+          : " · trade"
+    }</span>
+      </div>
+      <div class="learn-case-grid">
+        ${_metric("Symbol", (c.symbol || sel.symbol || "").toString().toUpperCase())}
+        ${_metric("Market", c.market || sel.market || "—")}
+        ${_metric("Drop", drop, drop ? "dn" : "")}
+        ${_metric("Band", c.band || c.velocity_band || "—")}
+        ${_metric("Vel", vel)}
+        ${_metric("Fire px", c.fire_price != null ? c.fire_price : sel.price)}
+        ${_metric("AD zone", c.ad_zone || "—")}
+        ${_metric("AD depth", adDepth)}
+        ${_metric("Vol", vol)}
+        ${_metric("Heat", heat)}
+        ${_metric(
+          "Setup score",
+          setup,
+          ""
+        )}
+        ${_metric(
+          "Time",
+          c.fire_ts ? fmtTime(c.fire_ts) : sel.ts ? fmtTime(sel.ts) : "—"
+        )}
+      </div>
+      ${
+        tradeLine
+          ? `<p class="learn-case-trade mono mute">${escHtml(tradeLine)}</p>`
+          : ""
+      }
+      <p class="learn-case-foot mute">${
+        freeze === "ok"
+          ? "These numbers index the setup. Your chips + note are the judgment."
+          : "Features incomplete — still teach with chips + note. (Setup score is chart structure only — not a recommendation.)"
+      }</p>`;
+    try {
+      host.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    } catch (_) {}
+  }
+
+  async function loadCasePreview(sel) {
+    if (!sel || !sel.symbol) {
+      renderCaseSnap(null, null);
+      return;
+    }
+    // Prefer case already on fire row
+    if (sel.case && (sel.case.features_ok || sel.case.ad_zone || sel.case.band)) {
+      renderCaseSnap(sel.case, sel);
+      return;
+    }
+    try {
+      let q = `symbol=${encodeURIComponent(sel.symbol)}&market=${encodeURIComponent(
+        sel.market || "futures"
+      )}`;
+      if (sel.event_id) q += `&event_id=${sel.event_id}`;
+      const snap = await api(`/api/learning/case-preview?${q}`);
+      // merge fire identity if preview thin
+      if (sel.drop_pct != null && snap.drop_pct == null)
+        snap.drop_pct = sel.drop_pct;
+      if (sel.velocity_band && !snap.velocity_band)
+        snap.velocity_band = sel.velocity_band;
+      if (sel.price != null && snap.fire_price == null) snap.fire_price = sel.price;
+      renderCaseSnap(snap, sel);
+    } catch (e) {
+      renderCaseSnap(
+        {
+          freeze: "partial",
+          ok: false,
+          symbol: sel.symbol,
+          market: sel.market,
+          drop_pct: sel.drop_pct,
+          velocity_band: sel.velocity_band,
+          fire_price: sel.price,
+        },
+        sel
+      );
+    }
+  }
 
   function setLearnSelection(sel) {
     state.learnSel = sel;
@@ -922,6 +1082,7 @@
     $$(".chip", $("#learnBehaviorChips")).forEach((c) =>
       c.classList.remove("on")
     );
+    $$(".chip-ad", $("#learnAdChips")).forEach((c) => c.classList.remove("on"));
     const bar = $("#learnContextBar");
     const det = $("#learnContextDetail");
     const sub = $("#teachSubmit");
@@ -934,12 +1095,13 @@
       if (bar) {
         bar.className = "learn-context empty";
         bar.textContent =
-          "Select a trade or fire on the left — then write the lesson.";
+          "Select a trade or fire → case snapshot loads → chips + note → Save.";
       }
       if (det) {
         det.hidden = true;
         det.innerHTML = "";
       }
+      renderCaseSnap(null, null);
       if (sub) sub.disabled = true;
       if (ek) ek.value = "";
       if (sy) sy.value = "";
@@ -949,14 +1111,18 @@
       $$(".learn-pick").forEach((el) => el.classList.remove("selected"));
       return;
     }
+    const kind =
+      sel.type === "fire"
+        ? `FIRE #${sel.event_id || "?"}`
+        : (sel.status || "TRADE").toString().toUpperCase();
     if (bar) {
       bar.className = "learn-context on";
-      bar.innerHTML = `<strong>Teaching about:</strong> ${escHtml(
-        sel.label
-      )}`;
+      bar.innerHTML = `<strong>Teaching case</strong> · ${escHtml(
+        (sel.symbol || "").toString()
+      )} · ${escHtml((sel.market || "").toString())} · ${escHtml(kind)}`;
     }
     if (det) {
-      det.hidden = false;
+      det.hidden = !sel.detail;
       det.innerHTML = escHtml(sel.detail || "");
     }
     if (sub) sub.disabled = false;
@@ -965,6 +1131,7 @@
     if (mk) mk.value = sel.market || "";
     if (ev) ev.value = sel.event_id != null ? String(sel.event_id) : "";
     if (ct) ct.value = sel.type || "";
+    loadCasePreview(sel);
   }
 
   async function loadMemory() {
@@ -1095,7 +1262,9 @@
     if (stEl) {
       stEl.textContent = `fires ${stats.events || 0} · took ${
         stats.took || 0
-      } · skip ${stats.skip || 0} · lessons ${lessons.length}`;
+      } · skip ${stats.skip || 0} · lessons ${lessons.length} · cases ${
+        stats.cases != null ? stats.cases : (bundle.cases || []).length
+      }`;
     }
     if (stB) stB.textContent = `${(trades || []).length} trades`;
 
@@ -1159,10 +1328,12 @@
           market: t.market || "futures",
           entity_key: String(t.entity_key || t.id || ""),
           event_id: t.primary_event_id || null,
+          status: t.status,
           label: `${t.symbol} ${(t.market || "").toString()} · ${
             t.status
           } · ${pnl != null ? (pnl >= 0 ? "+" : "") + Number(pnl).toFixed(1) + "%" : "—"}`,
           detail,
+          tradeSnap: t,
         });
         $$(".learn-pick", tradeList).forEach((el) =>
           el.classList.toggle("selected", el.dataset.i === String(i))
@@ -1213,12 +1384,17 @@
           market: e.market || "futures",
           entity_key: "",
           event_id: e.id,
+          price: e.price,
+          drop_pct: e.drop_pct,
+          velocity_band: e.velocity_band,
+          ts: e.ts,
+          case: e.case || null,
           label: `FIRE ${e.symbol} #${e.id} · ${e.velocity_band || ""} · ${
             e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : ""
           }`,
           detail: `Fire @ ${e.price ?? "—"} · ${fmtTime(e.ts)} · action ${
             e.last_action || "unlabeled"
-          }`,
+          }${e.has_case ? " · case frozen" : ""}`,
         });
       };
       $$("[data-pick-fire-btn]", fireList).forEach((b) =>
@@ -1250,10 +1426,27 @@
                 : (l.text || "").startsWith("[")
                   ? "linked"
                   : "general";
+              const chipTags = (tags || []).filter(
+                (x) =>
+                  typeof x === "string" &&
+                  !x.includes(":") &&
+                  x.length < 24
+              );
+              const tagHtml = chipTags.length
+                ? `<div class="learn-lesson-tags">${chipTags
+                    .map((t) => {
+                      const ad = t === "ad_met" || t === "ad_missed";
+                      return `<span class="learn-tag ${
+                        ad ? "ad" : "beh"
+                      }">${escHtml(t)}</span>`;
+                    })
+                    .join("")}</div>`
+                : "";
               return `<div class="learn-lesson">
                 <div class="learn-lesson-main">
                   <span class="learn-about">${escHtml(about)}</span>
                   ${escHtml((l.text || "").slice(0, 220))}
+                  ${tagHtml}
                 </div>
                 <button type="button" class="btn soft sm learn-del" data-del-lesson="${
                   l.id
@@ -1262,7 +1455,7 @@
             })
             .join("")
         : rankEmpty(
-            "No lessons yet. Select a trade → teach about it → Save lesson."
+            "No cases yet. Pick a trade or fire → snapshot → chips + note → Save."
           );
       $$("[data-del-lesson]", lesEl).forEach((b) =>
         b.addEventListener("click", async () => {
@@ -1348,7 +1541,9 @@
         if (!text) return;
         const sel = state.learnSel;
         if (!sel || !sel.symbol) {
-          toast("Select a trade or fire first — lessons must attach to something");
+          toast(
+            "Select a trade or fire first — cases must attach to something"
+          );
           return;
         }
         try {
@@ -1364,12 +1559,16 @@
               behaviors: state.learnBehaviors || [],
             }),
           });
-          toast(`Lesson saved on ${sel.symbol}`);
+          toast(`Case saved on ${sel.symbol}`);
           if ($("#teachText")) $("#teachText").value = "";
           state.learnBehaviors = [];
           $$(".chip", $("#learnBehaviorChips")).forEach((c) =>
             c.classList.remove("on")
           );
+          $$(".chip-ad", $("#learnAdChips")).forEach((c) =>
+            c.classList.remove("on")
+          );
+          setLearnSelection(null);
           loadMemory();
         } catch (e) {
           toast(e.message);

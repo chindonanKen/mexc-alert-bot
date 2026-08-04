@@ -43,6 +43,12 @@ def what_have_you_learned(
             lines.append(f"  · {(L.get('text') or '')[:160]}")
     else:
         lines.append("No durable lessons yet — teach me a rule.")
+    try:
+        n_cases = len(store.list_setup_cases(uid, limit=5))
+        if n_cases:
+            lines.append(f"Setup cases frozen (P1): at least {n_cases} recent.")
+    except Exception:
+        pass
     lines.append("")
     lines.append(
         f"Stats: fires={stats.get('events') or 0} took={stats.get('took') or 0} "
@@ -86,10 +92,20 @@ def learning_home_v1(user_id: Optional[int] = None) -> Dict[str, Any]:
 
     learned = what_have_you_learned(uid)
     trades = list_money_reviews(uid, limit=15, teach_only=True, store=store)
-    # recent fires
+    # recent fires + any frozen case (P1)
     fires = []
     try:
+        from ..learning.cases import case_public_view
+
         for e in store.recent_events(uid, limit=25):
+            case_row = None
+            try:
+                case_row = store.get_setup_case(
+                    uid, event_id=int(e["id"])
+                ) if e.get("id") else None
+            except Exception:
+                case_row = None
+            case_view = case_public_view(case_row) if case_row else None
             fires.append(
                 {
                     "id": e.get("id"),
@@ -99,15 +115,32 @@ def learning_home_v1(user_id: Optional[int] = None) -> Dict[str, Any]:
                     "velocity_band": e.get("velocity_band"),
                     "ts": e.get("ts"),
                     "price": e.get("price"),
+                    "ref_price": e.get("ref_price"),
+                    "heat_breadth": e.get("heat_breadth"),
                     "last_action": e.get("last_action") or e.get("action"),
+                    "case": case_view,
+                    "has_case": bool(case_view),
                 }
             )
     except Exception:
         pass
 
+    cases = []
+    try:
+        from ..learning.cases import case_public_view
+
+        for row in store.list_setup_cases(uid, limit=30):
+            cases.append(case_public_view(row))
+    except Exception:
+        pass
+
+    stats = dict(learned.get("stats") or {})
+    stats["cases"] = len(cases)
+
     return {
         "user_id": uid,
         "product": "learning_v1",
+        "phase": "p1_cases",
         "needs_you": {
             "pending_questions": pending,
             "count": len(pending_all),
@@ -116,9 +149,10 @@ def learning_home_v1(user_id: Optional[int] = None) -> Dict[str, Any]:
         "pending_questions": pending,
         "lessons": learned.get("lessons") or [],
         "what_learned_reply": learned.get("reply") or "",
-        "stats": learned.get("stats") or {},
+        "stats": stats,
         "trades": trades,
         "fires": fires,
+        "cases": cases,
         "agent_summary": learned.get("reply") or "",
     }
 

@@ -190,6 +190,41 @@ class EventStore:
         # Additive columns on labels (source/confidence for auto engagement)
         self._ensure_column(conn, "learning_labels", "source", "TEXT")
         self._ensure_column(conn, "learning_labels", "confidence", "REAL")
+        # P1 case factory — structured setup freeze (features index; chips annotate)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_setup_cases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                event_id INTEGER,
+                symbol TEXT NOT NULL,
+                market TEXT NOT NULL,
+                frozen_at REAL NOT NULL,
+                fire_ts REAL,
+                fire_price REAL,
+                ref_price REAL,
+                drop_pct REAL,
+                velocity_band TEXT,
+                heat_breadth INTEGER,
+                features_json TEXT,
+                features_ok INTEGER NOT NULL DEFAULT 0,
+                chips_json TEXT,
+                note TEXT,
+                lesson_id INTEGER,
+                trade_key TEXT,
+                source TEXT NOT NULL DEFAULT 'fire',
+                UNIQUE(user_id, event_id)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_setup_cases_user_ts "
+            "ON agent_setup_cases (user_id, frozen_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_setup_cases_sym "
+            "ON agent_setup_cases (user_id, symbol, market, frozen_at DESC)"
+        )
 
     @staticmethod
     def _ensure_column(
@@ -716,6 +751,149 @@ class EventStore:
             sql += " ORDER BY created_at DESC LIMIT ?"
             params.append(limit)
             return [dict(r) for r in self._get_conn().execute(sql, params).fetchall()]
+
+    def upsert_setup_case(
+        self,
+        user_id: int,
+        *,
+        symbol: str,
+        market: str,
+        event_id: Optional[int] = None,
+        fire_ts: Optional[float] = None,
+        fire_price: Optional[float] = None,
+        ref_price: Optional[float] = None,
+        drop_pct: Optional[float] = None,
+        velocity_band: Optional[str] = None,
+        heat_breadth: Optional[int] = None,
+        features: Optional[Dict[str, Any]] = None,
+        chips: Optional[List[str]] = None,
+        note: Optional[str] = None,
+        lesson_id: Optional[int] = None,
+        trade_key: Optional[str] = None,
+        source: str = "fire",
+    ) -> int:
+        """Insert or update a P1 setup case. Returns case id. Soft-fail → 0."""
+        try:
+            feats = features or {}
+            features_ok = 1 if feats.get("ok") else 0
+            now = time.time()
+            with self._lock:
+                conn = self._get_conn()
+                existing = None
+                if event_id is not None:
+                    existing = conn.execute(
+                        "SELECT id FROM agent_setup_cases WHERE user_id = ? AND event_id = ?",
+                        (int(user_id), int(event_id)),
+                    ).fetchone()
+                if existing:
+                    cid = int(existing["id"])
+                    conn.execute(
+                        """
+                        UPDATE agent_setup_cases SET
+                            symbol = ?, market = ?, frozen_at = ?,
+                            fire_ts = COALESCE(?, fire_ts),
+                            fire_price = COALESCE(?, fire_price),
+                            ref_price = COALESCE(?, ref_price),
+                            drop_pct = COALESCE(?, drop_pct),
+                            velocity_band = COALESCE(?, velocity_band),
+                            heat_breadth = COALESCE(?, heat_breadth),
+                            features_json = COALESCE(?, features_json),
+                            features_ok = CASE WHEN ? = 1 THEN 1 ELSE features_ok END,
+                            chips_json = COALESCE(?, chips_json),
+                            note = COALESCE(?, note),
+                            lesson_id = COALESCE(?, lesson_id),
+                            trade_key = COALESCE(?, trade_key),
+                            source = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            str(symbol).upper(),
+                            str(market).lower(),
+                            now,
+                            fire_ts,
+                            fire_price,
+                            ref_price,
+                            drop_pct,
+                            velocity_band,
+                            heat_breadth,
+                            json.dumps(feats) if feats else None,
+                            features_ok,
+                            json.dumps(chips) if chips is not None else None,
+                            note,
+                            lesson_id,
+                            trade_key,
+                            source,
+                            cid,
+                        ),
+                    )
+                    return cid
+                cur = conn.execute(
+                    """
+                    INSERT INTO agent_setup_cases (
+                        user_id, event_id, symbol, market, frozen_at,
+                        fire_ts, fire_price, ref_price, drop_pct, velocity_band,
+                        heat_breadth, features_json, features_ok, chips_json,
+                        note, lesson_id, trade_key, source
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(user_id),
+                        int(event_id) if event_id is not None else None,
+                        str(symbol).upper(),
+                        str(market).lower(),
+                        now,
+                        fire_ts,
+                        fire_price,
+                        ref_price,
+                        drop_pct,
+                        velocity_band,
+                        heat_breadth,
+                        json.dumps(feats) if feats else None,
+                        features_ok,
+                        json.dumps(chips or []),
+                        note,
+                        lesson_id,
+                        trade_key,
+                        source,
+                    ),
+                )
+                return int(cur.lastrowid)
+        except Exception as e:
+            logger.error("upsert_setup_case failed: %s", e)
+            return 0
+
+    def get_setup_case(
+        self,
+        user_id: int,
+        *,
+        case_id: Optional[int] = None,
+        event_id: Optional[int] = None,
+    ) -> Optional[dict]:
+        with self._lock:
+            conn = self._get_conn()
+            if case_id is not None:
+                row = conn.execute(
+                    "SELECT * FROM agent_setup_cases WHERE id = ? AND user_id = ?",
+                    (int(case_id), int(user_id)),
+                ).fetchone()
+            elif event_id is not None:
+                row = conn.execute(
+                    "SELECT * FROM agent_setup_cases WHERE event_id = ? AND user_id = ?",
+                    (int(event_id), int(user_id)),
+                ).fetchone()
+            else:
+                return None
+            return dict(row) if row else None
+
+    def list_setup_cases(self, user_id: int, *, limit: int = 40) -> List[dict]:
+        limit = max(1, min(int(limit), 100))
+        with self._lock:
+            rows = self._get_conn().execute(
+                "SELECT * FROM agent_setup_cases WHERE user_id = ? "
+                "ORDER BY frozen_at DESC LIMIT ?",
+                (int(user_id), limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def approve_lesson(
         self, user_id: int, lesson_id: int, *, dismiss: bool = False

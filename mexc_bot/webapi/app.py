@@ -185,7 +185,7 @@ def create_app() -> FastAPI:
                 {"id": "desk_ui", "title": "AD Desk (small edits only while agent builds)", "status": "beta"},
             ],
             "next": [
-                {"id": "p1_cases", "title": "P1 Case factory — structured freeze on fire/teach", "status": "active"},
+                {"id": "p1_cases", "title": "P1 Case factory — freeze on fire/teach + Learning snapshot UI", "status": "live"},
                 {"id": "p2_decide", "title": "P2 Decide + log (agent_decisions, nearest-case)", "status": "planned"},
                 {"id": "p3_grade", "title": "P3 Grade decisions vs teach_ok / ad_met", "status": "planned"},
                 {"id": "p4_policy", "title": "P4 AD policy proposals (layers/zones)", "status": "planned"},
@@ -921,6 +921,29 @@ def create_app() -> FastAPI:
                 event_id=body.event_id,
                 case_id=body.case_id,
                 symbol=body.symbol,
+            )
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/learning/case-preview")
+    def learning_case_preview(
+        event_id: Optional[int] = None,
+        symbol: Optional[str] = None,
+        market: Optional[str] = None,
+        _: bool = Depends(require_auth),
+    ):
+        """P1: frozen or live-computed setup case for Learning teach panel."""
+        from ..learning.cases import case_preview
+        from .learning_v1 import event_store, uid_or_raise
+
+        try:
+            uid = uid_or_raise()
+            return case_preview(
+                event_store(),
+                uid,
+                event_id=event_id,
+                symbol=symbol,
+                market=market,
             )
         except Exception as e:
             raise HTTPException(400, str(e))

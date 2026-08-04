@@ -140,12 +140,19 @@
         </div>
       </section>
 
-      <!-- LEARNING — trade-first teaching -->
+      <!-- LEARNING — P1 case factory: pick → snapshot → chips + note → save -->
       <section class="view" id="view-memory">
-        <p class="learn-lede">
-          <strong>How to use:</strong> pick a trade (or fire) → teach about <em>that</em> trade → agent stores the lesson with symbol/context.
-          Voice: “teach me about SYN — plan_ok, sized small on first layer.”
-        </p>
+        <div class="learn-lede">
+          <p class="learn-lede-title"><strong>How to teach well</strong> · quality beats volume</p>
+          <ol class="learn-howto">
+            <li><strong>Pick</strong> one trade or fire (left). Prefer real takes/skips you remember.</li>
+            <li><strong>Read the case snapshot</strong> — drop, band, AD zone, vol. That is what the agent will match later.</li>
+            <li><strong>Tap process chips</strong> (how you traded) and <strong>AD chips</strong> (did price hit your zone).</li>
+            <li><strong>Write one concrete note</strong> — prices, layers, why take/skip. Example: “wanted 13.0–13.2, low 13.73 — skip · plan_ok + ad_missed”.</li>
+            <li><strong>Save</strong> — freezes this case. Bad lesson? Delete it below.</li>
+          </ol>
+          <p class="learn-lede-foot mute">Voice works the same: “teach me about SYN — plan_ok, sized small on first layer.”</p>
+        </div>
 
         <div id="ovNeedsYouLearn" class="panel learn-pending-panel" hidden>
           <header class="panel-h">
@@ -158,7 +165,7 @@
         <div class="learn-holistic">
           <div class="panel learn-pick-panel">
             <header class="panel-h">
-              <h3>2 · Pick what you’re teaching about</h3>
+              <h3>2 · Pick trade or fire</h3>
               <span class="badge quiet" id="learnStatsBadge">—</span>
             </header>
             <div id="learnStats" class="learn-stats-line mute"></div>
@@ -171,18 +178,19 @@
           </div>
 
           <div class="panel learn-teach-panel">
-            <header class="panel-h"><h3>3 · Teach about selection</h3></header>
+            <header class="panel-h"><h3>3 · Case + teach</h3></header>
             <div id="learnContextBar" class="learn-context empty">
-              Select a trade or fire on the left — then write the lesson.
+              Select a trade or fire → case snapshot loads → chips + note → Save.
             </div>
             <div id="learnContextDetail" class="learn-context-detail" hidden></div>
+            <div id="learnCaseSnap" class="learn-case-snap" hidden></div>
             <form id="teachForm" class="form-col">
               <input type="hidden" name="entity_key" id="teachEntityKey" value="" />
               <input type="hidden" name="symbol" id="teachSymbol" value="" />
               <input type="hidden" name="market" id="teachMarket" value="" />
               <input type="hidden" name="event_id" id="teachEventId" value="" />
               <input type="hidden" name="context_type" id="teachContextType" value="" />
-              <p class="learn-chip-hint mute">Process labels (not PnL). Hover a chip · or open the guide.</p>
+              <p class="learn-chip-hint mute">Process — how you traded (not whether green/red).</p>
               <div class="learn-chips" id="learnBehaviorChips" aria-label="Process tags">
                 <button type="button" class="chip" data-beh="plan_ok" title="Followed AD plan: size, layers, exit idea. Agent: repeat this process.">plan_ok</button>
                 <button type="button" class="chip" data-beh="greed" title="Held too long / oversized / wouldn’t scale out. Agent: stayed past the plan.">greed</button>
@@ -262,9 +270,9 @@
                   </table>
                 </div>
               </details>
-              <textarea name="text" id="teachText" rows="4" placeholder="About THIS fire/trade: e.g. wanted AD 13.0–13.2, only printed 13.73 — skipped. plan_ok + ad_missed." required></textarea>
+              <textarea name="text" id="teachText" rows="4" placeholder="About THIS case: e.g. wanted AD 13.0–13.2, only printed 13.73 — skipped. plan_ok + ad_missed." required></textarea>
               <div class="row-gap">
-                <button class="btn" type="submit" id="teachSubmit" disabled>Save lesson on selection</button>
+                <button class="btn" type="submit" id="teachSubmit" disabled>Save case + lesson</button>
                 <button class="btn soft" type="button" id="teachClear">Clear selection</button>
               </div>
             </form>

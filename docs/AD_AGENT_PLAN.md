@@ -25,11 +25,12 @@ Fires, positions, `teach_ok` money, teach on trades, chips (`ad_met`/`ad_missed`
 **Exit:** Reliable data + human labels possible.  
 **Owner while later phases build:** Light teach on real trades (quality > volume). Do not block engineering on a “teach soak.”
 
-### P1 — Case factory ← **ACTIVE / NEXT BUILD**
+### P1 — Case factory ← **IN PROGRESS (shipped core)**
 **Need:** Situations the agent can match, not diary text.  
-On **fire** (+ re-snap on **teach/close**): freeze structured features (drop %, velocity/band, heat, multi-TF AD zone/depth, vol, regime, symbol/market) + owner chips/note. Auto klines (MEXC spot/futures/stock-perp ids). Interactive Learning charts = optional later, not critical path.  
-Words **annotate**; **features index**. Chart thesis = attachable structure, **not** owner judgment.  
-**Exit:** Cases queryable by symbol + setup similarity.
+On **fire** (async freeze) + **teach** (re-snap + chips/note): table `agent_setup_cases`, module `learning/cases.py`, desk snapshot UI + howto.  
+Auto klines via `compute_fire_features`. Interactive charts still optional later.  
+Words **annotate**; **features index**.  
+**Exit (remaining):** richer nearest-case index for P2; backfill polish.
 
 ### P2 — Decide + log
 **Need:** Agent **thinks** on a dump.  

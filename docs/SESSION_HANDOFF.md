@@ -151,7 +151,7 @@ Smoke: `/s` · `/l` · `/p f TSLA` · `/mw`.
 |--------|------|
 | **Canonical plan** | **[AD_AGENT_PLAN.md](AD_AGENT_PLAN.md)** — path to fully autonomous AD agent |
 | **Shipped (P0)** | Money truth · Learning V1 teach · multi-set movers · Binance CMS delist · turn-based voice |
-| **ACTIVE** | **P1 Case factory** — structured freeze on fire/teach (features + chips); full agent focus |
+| **ACTIVE** | **P1 Case factory core shipped** — freeze on fire/teach + Learning snapshot UX; next = P2 decide+log |
 | **Later** | P2 decide+log → P3 grade → P4 AD policy → P5 paper → P6 advise (gated) → P7 gated live |
 | **Desk** | Small edits only unless phase-blocking |
 | **Owner teach** | Light, high-quality on real trades while P1 builds — do **not** block on more P0 soak |

@@ -533,8 +533,30 @@ class MoverScanner:
                             drop_pct=float(pct),
                             velocity_band=vel_band,
                             mode=fire_mode,
+                            heat_breadth=heat_dumping_count,
                             payload={"lookback_seconds": lookback, "set_id": set_id, "set_name": set_name},
                         )
+                        # P1 case factory — async freeze (never block notify)
+                        if event_id:
+                            try:
+                                from ..learning.cases import freeze_case_async
+
+                                freeze_case_async(
+                                    self.event_store,
+                                    user_id,
+                                    symbol=symbol,
+                                    market=market,
+                                    event_id=int(event_id),
+                                    fire_ts=now,
+                                    fire_price=float(price_now),
+                                    ref_price=float(ref_price),
+                                    drop_pct=float(pct),
+                                    velocity_band=vel_band,
+                                    heat_breadth=heat_dumping_count,
+                                    source="fire",
+                                )
+                            except Exception as ce:
+                                logger.debug("p1 case freeze schedule failed: %s", ce)
                         if event_id:
                             try:
                                 from ..assistant.ux import fire_action_keyboard
