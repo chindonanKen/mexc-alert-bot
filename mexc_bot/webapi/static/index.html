@@ -100,21 +100,29 @@
         </div>
       </section>
 
-      <!-- MOVERS -->
+      <!-- MOVERS — multiple named sets (each: on/off, %, lookback, coins) -->
       <section class="view" id="view-movers">
         <div class="panel clean grow">
+          <div class="form-row tight" id="moverSetsBar">
+            <label class="quiet sm">Set</label>
+            <select id="moverSetSelect" aria-label="Mover set"></select>
+            <button type="button" class="btn soft sm" id="moverSetNew">+ Set</button>
+            <button type="button" class="btn soft sm" id="moverSetRename">Rename</button>
+            <button type="button" class="btn soft sm" id="moverSetDelete">Delete</button>
+          </div>
           <form id="watchForm" class="form-row">
             <input name="symbol" placeholder="Symbol" required />
             <select name="market"><option value="futures">Futures</option><option value="spot">Spot</option></select>
-            <button class="btn" type="submit">Add</button>
+            <button class="btn" type="submit">Add to set</button>
           </form>
           <form id="moversForm" class="form-row tight">
             <label class="chk"><input type="checkbox" name="enabled" /> On</label>
-            <input name="threshold_percent" type="number" step="0.1" placeholder="%" />
-            <input name="lookback_minutes" type="number" step="1" placeholder="min" />
-            <button class="btn soft" type="submit">Save</button>
+            <input name="threshold_percent" type="number" step="0.1" placeholder="%" title="Drop %" />
+            <input name="lookback_minutes" type="number" step="1" placeholder="min" title="Lookback minutes" />
+            <button class="btn soft" type="submit">Save set</button>
             <span class="badge quiet" id="mwBadge"></span>
           </form>
+          <p class="quiet sm" id="moverSetHint">Each set has its own coins and threshold. Scanner runs every enabled set.</p>
           <div id="moversTable" class="scroll"></div>
         </div>
       </section>

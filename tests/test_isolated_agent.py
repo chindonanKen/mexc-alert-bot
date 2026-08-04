@@ -141,6 +141,17 @@ class TestStoreAndQueue(unittest.TestCase):
         self.assertTrue(_DELIST_RE.search("Notice of Removal of Spot Trading Pairs"))
         bases = _extract_bases("Binance Will Delist ATA FARM MLN on 2026-05-27")
         self.assertTrue(any(b in bases for b in ("ATA", "FARM", "MLN")))
+        named = _extract_bases(
+            "Binance Will Delist ACX, HFT, PIVX, PYR, VANRY, VIC on 2026-08-17"
+        )
+        self.assertEqual(
+            set(named) & {"ACX", "HFT", "PIVX", "PYR", "VANRY", "VIC"},
+            {"ACX", "HFT", "PIVX", "PYR", "VANRY", "VIC"},
+        )
+        pairs = _extract_bases(
+            "Binance will remove QNT/BTC, RPL/USDC, SIGN/BNB and SKL/USDC"
+        )
+        self.assertTrue(all(b in pairs for b in ("QNT", "RPL", "SIGN", "SKL")))
 
 
 class TestAgentEnqueue(unittest.TestCase):

@@ -2,6 +2,12 @@
 (function () {
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+  const escapeHtml = (s) =>
+    String(s ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
 
   const state = {
     token: localStorage.getItem("desk_token") || "",
@@ -766,21 +772,64 @@
     host.scrollTop = scrollY;
   }
 
+  let _activeMoverSetId = null;
+
+  function _moverSetQuery() {
+    return _activeMoverSetId != null ? `?set_id=${_activeMoverSetId}` : "";
+  }
+
+  function _fillMoverSetSelect(sets, activeId) {
+    const sel = $("#moverSetSelect");
+    if (!sel) return;
+    const list = sets || [];
+    if (!list.length) {
+      sel.innerHTML = "";
+      return;
+    }
+    let aid = activeId;
+    if (aid == null || !list.some((s) => +s.id === +aid)) {
+      aid = list[0].id;
+    }
+    _activeMoverSetId = +aid;
+    sel.innerHTML = list
+      .map(
+        (s) =>
+          `<option value="${s.id}" ${+s.id === +_activeMoverSetId ? "selected" : ""}>${escapeHtml(
+            s.name
+          )} · ${s.enabled ? "ON" : "off"} · ${s.threshold_percent}% · ${s.watch_count || 0} coins</option>`
+      )
+      .join("");
+  }
+
   async function loadMovers() {
-    const d = await api("/api/watchlist");
+    const q = _moverSetQuery();
+    const d = await api(`/api/watchlist${q}`);
+    _fillMoverSetSelect(d.sets || [], d.active_set_id ?? _activeMoverSetId);
+    // Re-fetch if select changed active id and response was unfiltered
+    if (_activeMoverSetId != null && d.active_set_id == null) {
+      const d2 = await api(`/api/watchlist?set_id=${_activeMoverSetId}`);
+      return _renderMovers(d2);
+    }
+    _renderMovers(d);
+  }
+
+  function _renderMovers(d) {
     const s = d.settings;
+    const setMeta = (d.sets || []).find((x) => +x.id === +_activeMoverSetId);
     $("#mwBadge").textContent = s
-      ? `${s.enabled ? "ON" : "OFF"} · ${s.threshold_percent}% · ${Math.round(
+      ? `${setMeta ? setMeta.name + " · " : ""}${s.enabled ? "ON" : "OFF"} · ${s.threshold_percent}% · ${Math.round(
           (s.lookback_seconds || 0) / 60
         )}m`
       : "movers";
     if (s) {
       const f = $("#moversForm");
-      f.enabled.checked = !!s.enabled;
-      f.threshold_percent.value = s.threshold_percent ?? "";
-      f.lookback_minutes.value = s.lookback_seconds
-        ? Math.round(s.lookback_seconds / 60)
-        : "";
+      if (f) {
+        f.enabled.checked = !!s.enabled;
+        f.threshold_percent.value = s.threshold_percent ?? "";
+        f.lookback_minutes.value = s.lookback_seconds
+          ? Math.round(s.lookback_seconds / 60)
+          : "";
+      }
     }
     const by = {};
     (d.tickers || []).forEach((t) => (by[t.symbol] = t));
@@ -794,7 +843,7 @@
           <td>${w.symbol}</td>
           <td>${t ? fmtPx(t.price) : "—"}</td>
           <td class="${chg != null && chg < 0 ? "dn" : "up"}">${fmtChg(chg)}</td>
-          <td><button type="button" class="btn soft sm" data-unwatch="${w.symbol}" data-m="${w.market}">✕</button></td>
+          <td><button type="button" class="btn soft sm" data-unwatch="${w.symbol}" data-m="${w.market}" data-set="${w.set_id || _activeMoverSetId || ""}">✕</button></td>
         </tr>`;
       })
       .join("");
@@ -803,11 +852,10 @@
     $$("[data-unwatch]").forEach((b) =>
       b.addEventListener("click", async () => {
         try {
-          await api(
-            `/api/watchlist?symbol=${encodeURIComponent(b.dataset.unwatch)}&market=${b.dataset.m}`,
-            { method: "DELETE" }
-          );
-          toast("Removed from watchlist");
+          let url = `/api/watchlist?symbol=${encodeURIComponent(b.dataset.unwatch)}&market=${b.dataset.m}`;
+          if (b.dataset.set) url += `&set_id=${b.dataset.set}`;
+          await api(url, { method: "DELETE" });
+          toast("Removed from set");
           loadMovers();
         } catch (e) {
           toast(e.message);
@@ -2197,10 +2245,14 @@
     try {
       await api("/api/watchlist", {
         method: "POST",
-        body: JSON.stringify({ symbol: f.symbol.value, market: f.market.value }),
+        body: JSON.stringify({
+          symbol: f.symbol.value,
+          market: f.market.value,
+          set_id: _activeMoverSetId,
+        }),
       });
       f.reset();
-      toast("Watch added");
+      toast("Added to set");
       loadMovers();
     } catch (err) {
       toast(err.message);
@@ -2221,14 +2273,79 @@
           lookback_minutes: f.lookback_minutes.value
             ? +f.lookback_minutes.value
             : null,
+          set_id: _activeMoverSetId,
         }),
       });
-      toast("Movers settings saved");
+      toast("Set settings saved");
       loadMovers();
     } catch (err) {
       toast(err.message);
     }
   });
+
+  const moverSetSelect = $("#moverSetSelect");
+  if (moverSetSelect) {
+    moverSetSelect.addEventListener("change", () => {
+      _activeMoverSetId = +moverSetSelect.value;
+      loadMovers();
+    });
+  }
+  const moverSetNew = $("#moverSetNew");
+  if (moverSetNew) {
+    moverSetNew.addEventListener("click", async () => {
+      const name = prompt("New mover set name (e.g. Panic 7% / Grind 4%)");
+      if (!name) return;
+      try {
+        const s = await api("/api/mover-sets", {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            threshold_percent: 5,
+            lookback_minutes: 15,
+            enabled: false,
+          }),
+        });
+        _activeMoverSetId = s.id;
+        toast(`Created set ${s.name}`);
+        loadMovers();
+      } catch (e) {
+        toast(e.message);
+      }
+    });
+  }
+  const moverSetRename = $("#moverSetRename");
+  if (moverSetRename) {
+    moverSetRename.addEventListener("click", async () => {
+      if (_activeMoverSetId == null) return;
+      const name = prompt("Rename set to:");
+      if (!name) return;
+      try {
+        await api(`/api/mover-sets/${_activeMoverSetId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name }),
+        });
+        toast("Renamed");
+        loadMovers();
+      } catch (e) {
+        toast(e.message);
+      }
+    });
+  }
+  const moverSetDelete = $("#moverSetDelete");
+  if (moverSetDelete) {
+    moverSetDelete.addEventListener("click", async () => {
+      if (_activeMoverSetId == null) return;
+      if (!confirm("Delete this set and its coins? Default set cannot be deleted.")) return;
+      try {
+        await api(`/api/mover-sets/${_activeMoverSetId}`, { method: "DELETE" });
+        _activeMoverSetId = null;
+        toast("Set deleted");
+        loadMovers();
+      } catch (e) {
+        toast(e.message);
+      }
+    });
+  }
 
   $("#alertForm").addEventListener("submit", async (e) => {
     e.preventDefault();

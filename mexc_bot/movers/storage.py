@@ -1,6 +1,9 @@
-"""SQLite tables for mover scanner settings + watchlist.
+"""SQLite tables for mover scanner settings + watchlist + named sets.
 
 Uses the same DB file as AlertStore but never touches the alerts table.
+
+Multiple **sets** per user: each has its own name, on/off, threshold %, lookback,
+and coin list. Legacy single-row mover_settings is mirrored to the Default set.
 """
 
 from __future__ import annotations
@@ -13,9 +16,11 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SET_NAME = "Default"
+
 
 class MoverStore:
-    """Per-user mover settings and watchlist. Isolated from target-price alerts."""
+    """Per-user mover sets (settings + watchlist). Isolated from target-price alerts."""
 
     def __init__(self, path: Path):
         self._lock = RLock()
@@ -65,15 +70,477 @@ class MoverStore:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_mover_watch_user ON mover_watchlist (user_id)"
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mover_sets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                threshold_percent REAL NOT NULL,
+                lookback_seconds INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, name)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mover_sets_user ON mover_sets (user_id)"
+        )
+        # Additive set_id on watchlist (nullable until backfill)
+        cols = {
+            r[1]
+            for r in conn.execute("PRAGMA table_info(mover_watchlist)").fetchall()
+        }
+        if "set_id" not in cols:
+            conn.execute(
+                "ALTER TABLE mover_watchlist ADD COLUMN set_id INTEGER"
+            )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mover_watch_set ON mover_watchlist (set_id)"
+        )
+        self._migrate_legacy_to_sets(conn)
+        self._migrate_watchlist_pk(conn)
+
+    def _migrate_watchlist_pk(self, conn: sqlite3.Connection) -> None:
+        """Allow the same symbol in multiple sets: PK (set_id, symbol, market)."""
+        # Detect legacy PK (user_id, symbol, market) by trying to see table sql
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='mover_watchlist'"
+        ).fetchone()
+        sql = (row["sql"] if row else "") or ""
+        if "PRIMARY KEY (set_id, symbol, market)" in sql.replace(" ", ""):
+            return
+        if "PRIMARY KEY (set_id" in sql.replace(" ", ""):
+            return
+        # Rebuild table
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mover_watchlist_new (
+                user_id INTEGER NOT NULL,
+                set_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                market TEXT NOT NULL DEFAULT 'futures',
+                PRIMARY KEY (set_id, symbol, market)
+            )
+            """
+        )
+        # Ensure all rows have set_id
+        self._migrate_legacy_to_sets(conn)
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO mover_watchlist_new (user_id, set_id, symbol, market)
+            SELECT user_id, set_id, symbol, market FROM mover_watchlist
+            WHERE set_id IS NOT NULL
+            """
+        )
+        conn.execute("DROP TABLE mover_watchlist")
+        conn.execute("ALTER TABLE mover_watchlist_new RENAME TO mover_watchlist")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mover_watch_user ON mover_watchlist (user_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mover_watch_set ON mover_watchlist (set_id)"
+        )
+
+    def _migrate_legacy_to_sets(self, conn: sqlite3.Connection) -> None:
+        """Ensure every user with settings/watchlist has a Default set + set_id backfill."""
+        user_ids = set()
+        for r in conn.execute("SELECT user_id FROM mover_settings"):
+            user_ids.add(int(r["user_id"]))
+        for r in conn.execute("SELECT DISTINCT user_id FROM mover_watchlist"):
+            user_ids.add(int(r["user_id"]))
+        for r in conn.execute("SELECT DISTINCT user_id FROM mover_sets"):
+            user_ids.add(int(r["user_id"]))
+
+        for uid in user_ids:
+            row = conn.execute(
+                "SELECT id FROM mover_sets WHERE user_id = ? AND name = ?",
+                (uid, DEFAULT_SET_NAME),
+            ).fetchone()
+            if row:
+                set_id = int(row["id"])
+            else:
+                st = conn.execute(
+                    "SELECT enabled, threshold_percent, lookback_seconds "
+                    "FROM mover_settings WHERE user_id = ?",
+                    (uid,),
+                ).fetchone()
+                if st:
+                    enabled = int(st["enabled"] or 0)
+                    thr = float(st["threshold_percent"])
+                    lb = int(st["lookback_seconds"])
+                else:
+                    enabled, thr, lb = 0, 5.0, 900
+                cur = conn.execute(
+                    "INSERT INTO mover_sets "
+                    "(user_id, name, enabled, threshold_percent, lookback_seconds, sort_order) "
+                    "VALUES (?, ?, ?, ?, ?, 0)",
+                    (uid, DEFAULT_SET_NAME, enabled, thr, lb),
+                )
+                set_id = int(cur.lastrowid)
+
+            conn.execute(
+                "UPDATE mover_watchlist SET set_id = ? "
+                "WHERE user_id = ? AND (set_id IS NULL OR set_id = 0)",
+                (set_id, uid),
+            )
+
+    def _ensure_default_set(
+        self,
+        conn: sqlite3.Connection,
+        user_id: int,
+        default_threshold: float = 5.0,
+        default_lookback: int = 900,
+    ) -> int:
+        row = conn.execute(
+            "SELECT id FROM mover_sets WHERE user_id = ? AND name = ?",
+            (user_id, DEFAULT_SET_NAME),
+        ).fetchone()
+        if row:
+            return int(row["id"])
+        st = conn.execute(
+            "SELECT enabled, threshold_percent, lookback_seconds FROM mover_settings WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if st:
+            enabled = int(st["enabled"] or 0)
+            thr = float(st["threshold_percent"])
+            lb = int(st["lookback_seconds"])
+        else:
+            enabled, thr, lb = 0, float(default_threshold), int(default_lookback)
+        cur = conn.execute(
+            "INSERT INTO mover_sets "
+            "(user_id, name, enabled, threshold_percent, lookback_seconds, sort_order) "
+            "VALUES (?, ?, ?, ?, ?, 0)",
+            (user_id, DEFAULT_SET_NAME, enabled, thr, lb),
+        )
+        return int(cur.lastrowid)
+
+    def _mirror_settings_from_default(self, conn: sqlite3.Connection, user_id: int) -> None:
+        """Keep legacy mover_settings in sync with Default set (Telegram + old desk)."""
+        row = conn.execute(
+            "SELECT enabled, threshold_percent, lookback_seconds FROM mover_sets "
+            "WHERE user_id = ? AND name = ?",
+            (user_id, DEFAULT_SET_NAME),
+        ).fetchone()
+        if not row:
+            # Any enabled set → settings on
+            any_en = conn.execute(
+                "SELECT enabled, threshold_percent, lookback_seconds FROM mover_sets "
+                "WHERE user_id = ? ORDER BY sort_order, id LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            if not any_en:
+                return
+            row = any_en
+        existing = conn.execute(
+            "SELECT 1 FROM mover_settings WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE mover_settings SET enabled = ?, threshold_percent = ?, "
+                "lookback_seconds = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+                (
+                    int(row["enabled"]),
+                    float(row["threshold_percent"]),
+                    int(row["lookback_seconds"]),
+                    user_id,
+                ),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO mover_settings (user_id, enabled, threshold_percent, lookback_seconds) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    user_id,
+                    int(row["enabled"]),
+                    float(row["threshold_percent"]),
+                    int(row["lookback_seconds"]),
+                ),
+            )
+
+    def _set_row(self, conn: sqlite3.Connection, set_id: int) -> Optional[sqlite3.Row]:
+        return conn.execute(
+            "SELECT * FROM mover_sets WHERE id = ?", (set_id,)
+        ).fetchone()
+
+    def list_sets(self, user_id: int) -> List[dict]:
+        with self._lock:
+            conn = self._get_conn()
+            self._ensure_default_set(conn, user_id)
+            rows = conn.execute(
+                "SELECT id, user_id, name, enabled, threshold_percent, lookback_seconds, "
+                "sort_order FROM mover_sets WHERE user_id = ? ORDER BY sort_order ASC, id ASC",
+                (user_id,),
+            ).fetchall()
+            out = []
+            for r in rows:
+                n = conn.execute(
+                    "SELECT COUNT(*) AS c FROM mover_watchlist WHERE set_id = ?",
+                    (int(r["id"]),),
+                ).fetchone()["c"]
+                out.append(
+                    {
+                        "id": int(r["id"]),
+                        "user_id": int(r["user_id"]),
+                        "name": r["name"],
+                        "enabled": bool(r["enabled"]),
+                        "threshold_percent": float(r["threshold_percent"]),
+                        "lookback_seconds": int(r["lookback_seconds"]),
+                        "sort_order": int(r["sort_order"] or 0),
+                        "watch_count": int(n),
+                    }
+                )
+            return out
+
+    def create_set(
+        self,
+        user_id: int,
+        name: str,
+        *,
+        threshold_percent: float = 5.0,
+        lookback_seconds: int = 900,
+        enabled: bool = False,
+    ) -> dict:
+        name = (name or "").strip() or "Set"
+        if len(name) > 40:
+            name = name[:40]
+        with self._lock:
+            conn = self._get_conn()
+            self._ensure_default_set(conn, user_id, threshold_percent, lookback_seconds)
+            max_ord = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) AS m FROM mover_sets WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()["m"]
+            try:
+                cur = conn.execute(
+                    "INSERT INTO mover_sets "
+                    "(user_id, name, enabled, threshold_percent, lookback_seconds, sort_order) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        user_id,
+                        name,
+                        1 if enabled else 0,
+                        float(threshold_percent),
+                        int(lookback_seconds),
+                        int(max_ord) + 1,
+                    ),
+                )
+            except sqlite3.IntegrityError as e:
+                raise ValueError(f"Set name already exists: {name}") from e
+            sid = int(cur.lastrowid)
+            return self.get_set(user_id, sid)  # type: ignore[return-value]
+
+    def get_set(self, user_id: int, set_id: int) -> Optional[dict]:
+        with self._lock:
+            conn = self._get_conn()
+            r = conn.execute(
+                "SELECT * FROM mover_sets WHERE id = ? AND user_id = ?",
+                (set_id, user_id),
+            ).fetchone()
+            if not r:
+                return None
+            n = conn.execute(
+                "SELECT COUNT(*) AS c FROM mover_watchlist WHERE set_id = ?",
+                (set_id,),
+            ).fetchone()["c"]
+            return {
+                "id": int(r["id"]),
+                "user_id": int(r["user_id"]),
+                "name": r["name"],
+                "enabled": bool(r["enabled"]),
+                "threshold_percent": float(r["threshold_percent"]),
+                "lookback_seconds": int(r["lookback_seconds"]),
+                "sort_order": int(r["sort_order"] or 0),
+                "watch_count": int(n),
+            }
+
+    def update_set(
+        self,
+        user_id: int,
+        set_id: int,
+        *,
+        name: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        threshold_percent: Optional[float] = None,
+        lookback_seconds: Optional[int] = None,
+    ) -> dict:
+        with self._lock:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT * FROM mover_sets WHERE id = ? AND user_id = ?",
+                (set_id, user_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("Set not found")
+            new_name = row["name"]
+            if name is not None:
+                new_name = (name or "").strip() or row["name"]
+                if len(new_name) > 40:
+                    new_name = new_name[:40]
+            new_en = int(row["enabled"]) if enabled is None else (1 if enabled else 0)
+            new_thr = (
+                float(row["threshold_percent"])
+                if threshold_percent is None
+                else float(threshold_percent)
+            )
+            new_lb = (
+                int(row["lookback_seconds"])
+                if lookback_seconds is None
+                else int(lookback_seconds)
+            )
+            try:
+                conn.execute(
+                    "UPDATE mover_sets SET name = ?, enabled = ?, threshold_percent = ?, "
+                    "lookback_seconds = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (new_name, new_en, new_thr, new_lb, set_id),
+                )
+            except sqlite3.IntegrityError as e:
+                raise ValueError(f"Set name already exists: {new_name}") from e
+            if new_name == DEFAULT_SET_NAME or row["name"] == DEFAULT_SET_NAME:
+                self._mirror_settings_from_default(conn, user_id)
+            # If any set enabled, also flip legacy enabled for scanner health UX
+            any_on = conn.execute(
+                "SELECT 1 FROM mover_sets WHERE user_id = ? AND enabled = 1 LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            if any_on:
+                # Ensure mover_settings exists and at least reflects on when any set on
+                self._mirror_settings_from_default(conn, user_id)
+                if not conn.execute(
+                    "SELECT enabled FROM mover_settings WHERE user_id = ?", (user_id,)
+                ).fetchone():
+                    pass
+                else:
+                    # Prefer: enabled if ANY set on
+                    conn.execute(
+                        "UPDATE mover_settings SET enabled = 1, updated_at = CURRENT_TIMESTAMP "
+                        "WHERE user_id = ?",
+                        (user_id,),
+                    )
+            else:
+                conn.execute(
+                    "UPDATE mover_settings SET enabled = 0, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE user_id = ?",
+                    (user_id,),
+                )
+            return self.get_set(user_id, set_id)  # type: ignore[return-value]
+
+    def delete_set(self, user_id: int, set_id: int) -> None:
+        with self._lock:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT name FROM mover_sets WHERE id = ? AND user_id = ?",
+                (set_id, user_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("Set not found")
+            n = conn.execute(
+                "SELECT COUNT(*) AS c FROM mover_sets WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()["c"]
+            if int(n) <= 1:
+                raise ValueError("Cannot delete the last mover set")
+            if row["name"] == DEFAULT_SET_NAME:
+                raise ValueError("Cannot delete the Default set — rename or clear it instead")
+            conn.execute("DELETE FROM mover_watchlist WHERE set_id = ?", (set_id,))
+            conn.execute(
+                "DELETE FROM mover_sets WHERE id = ? AND user_id = ?",
+                (set_id, user_id),
+            )
+            self._mirror_settings_from_default(conn, user_id)
+
+    def list_enabled_set_scans(self) -> List[dict]:
+        """All enabled sets across users — scanner iterates these."""
+        with self._lock:
+            conn = self._get_conn()
+            # Backfill any legacy users first
+            for r in conn.execute(
+                "SELECT DISTINCT user_id FROM mover_settings WHERE enabled = 1"
+            ):
+                self._ensure_default_set(conn, int(r["user_id"]))
+            rows = conn.execute(
+                "SELECT id, user_id, name, enabled, threshold_percent, lookback_seconds "
+                "FROM mover_sets WHERE enabled = 1 ORDER BY user_id, sort_order, id"
+            ).fetchall()
+            # Fallback: users with legacy enabled but no set rows yet
+            if not rows:
+                legacy = conn.execute(
+                    "SELECT user_id, threshold_percent, lookback_seconds FROM mover_settings "
+                    "WHERE enabled = 1"
+                ).fetchall()
+                out = []
+                for r in legacy:
+                    sid = self._ensure_default_set(
+                        conn,
+                        int(r["user_id"]),
+                        float(r["threshold_percent"]),
+                        int(r["lookback_seconds"]),
+                    )
+                    conn.execute(
+                        "UPDATE mover_sets SET enabled = 1 WHERE id = ?", (sid,)
+                    )
+                    out.append(
+                        {
+                            "id": sid,
+                            "user_id": int(r["user_id"]),
+                            "name": DEFAULT_SET_NAME,
+                            "enabled": True,
+                            "threshold_percent": float(r["threshold_percent"]),
+                            "lookback_seconds": int(r["lookback_seconds"]),
+                        }
+                    )
+                return out
+            return [
+                {
+                    "id": int(r["id"]),
+                    "user_id": int(r["user_id"]),
+                    "name": r["name"],
+                    "enabled": True,
+                    "threshold_percent": float(r["threshold_percent"]),
+                    "lookback_seconds": int(r["lookback_seconds"]),
+                }
+                for r in rows
+            ]
 
     def get_settings(
         self,
         user_id: int,
         default_threshold: float,
         default_lookback: int,
+        set_id: Optional[int] = None,
     ) -> dict:
         with self._lock:
             conn = self._get_conn()
+            if set_id is not None:
+                r = conn.execute(
+                    "SELECT enabled, threshold_percent, lookback_seconds FROM mover_sets "
+                    "WHERE id = ? AND user_id = ?",
+                    (set_id, user_id),
+                ).fetchone()
+                if r:
+                    return {
+                        "enabled": bool(r["enabled"]),
+                        "threshold_percent": float(r["threshold_percent"]),
+                        "lookback_seconds": int(r["lookback_seconds"]),
+                        "set_id": set_id,
+                    }
+            sid = self._ensure_default_set(
+                conn, user_id, default_threshold, default_lookback
+            )
+            r = conn.execute(
+                "SELECT enabled, threshold_percent, lookback_seconds FROM mover_sets WHERE id = ?",
+                (sid,),
+            ).fetchone()
+            if r:
+                return {
+                    "enabled": bool(r["enabled"]),
+                    "threshold_percent": float(r["threshold_percent"]),
+                    "lookback_seconds": int(r["lookback_seconds"]),
+                    "set_id": sid,
+                }
             row = conn.execute(
                 "SELECT enabled, threshold_percent, lookback_seconds FROM mover_settings WHERE user_id = ?",
                 (user_id,),
@@ -83,30 +550,28 @@ class MoverStore:
                     "enabled": False,
                     "threshold_percent": default_threshold,
                     "lookback_seconds": default_lookback,
+                    "set_id": sid,
                 }
             return {
                 "enabled": bool(row["enabled"]),
                 "threshold_percent": float(row["threshold_percent"]),
                 "lookback_seconds": int(row["lookback_seconds"]),
+                "set_id": sid,
             }
 
-    def set_enabled(self, user_id: int, enabled: bool, default_threshold: float, default_lookback: int) -> dict:
+    def set_enabled(
+        self, user_id: int, enabled: bool, default_threshold: float, default_lookback: int
+    ) -> dict:
         with self._lock:
             conn = self._get_conn()
-            existing = conn.execute(
-                "SELECT 1 FROM mover_settings WHERE user_id = ?", (user_id,)
-            ).fetchone()
-            if existing:
-                conn.execute(
-                    "UPDATE mover_settings SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
-                    (1 if enabled else 0, user_id),
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO mover_settings (user_id, enabled, threshold_percent, lookback_seconds) "
-                    "VALUES (?, ?, ?, ?)",
-                    (user_id, 1 if enabled else 0, default_threshold, default_lookback),
-                )
+            sid = self._ensure_default_set(
+                conn, user_id, default_threshold, default_lookback
+            )
+            conn.execute(
+                "UPDATE mover_sets SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (1 if enabled else 0, sid),
+            )
+            self._mirror_settings_from_default(conn, user_id)
             return self.get_settings(user_id, default_threshold, default_lookback)
 
     def set_params(
@@ -118,57 +583,115 @@ class MoverStore:
     ) -> dict:
         with self._lock:
             conn = self._get_conn()
-            existing = conn.execute(
-                "SELECT enabled FROM mover_settings WHERE user_id = ?", (user_id,)
+            sid = self._ensure_default_set(
+                conn, user_id, threshold_percent, lookback_seconds
+            )
+            row = conn.execute(
+                "SELECT enabled FROM mover_sets WHERE id = ?", (sid,)
             ).fetchone()
-            if existing:
+            en = int(row["enabled"]) if row else (1 if default_enabled else 0)
+            if row is None and default_enabled:
+                en = 1
+            conn.execute(
+                "UPDATE mover_sets SET threshold_percent = ?, lookback_seconds = ?, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (float(threshold_percent), int(lookback_seconds), sid),
+            )
+            if not row and default_enabled:
                 conn.execute(
-                    "UPDATE mover_settings SET threshold_percent = ?, lookback_seconds = ?, "
-                    "updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
-                    (float(threshold_percent), int(lookback_seconds), user_id),
+                    "UPDATE mover_sets SET enabled = 1 WHERE id = ?", (sid,)
                 )
-                enabled = bool(existing["enabled"])
-            else:
-                conn.execute(
-                    "INSERT INTO mover_settings (user_id, enabled, threshold_percent, lookback_seconds) "
-                    "VALUES (?, ?, ?, ?)",
-                    (user_id, 1 if default_enabled else 0, float(threshold_percent), int(lookback_seconds)),
-                )
-                enabled = default_enabled
+            self._mirror_settings_from_default(conn, user_id)
             return {
-                "enabled": enabled,
+                "enabled": bool(en),
                 "threshold_percent": float(threshold_percent),
                 "lookback_seconds": int(lookback_seconds),
+                "set_id": sid,
             }
 
-    def get_watchlist(self, user_id: int) -> List[dict]:
+    def get_watchlist(
+        self, user_id: int, set_id: Optional[int] = None
+    ) -> List[dict]:
         with self._lock:
             conn = self._get_conn()
-            rows = conn.execute(
-                "SELECT symbol, market FROM mover_watchlist WHERE user_id = ? ORDER BY symbol ASC",
-                (user_id,),
-            ).fetchall()
-            return [{"symbol": r["symbol"], "market": r["market"]} for r in rows]
+            if set_id is None:
+                # Union all sets for user (Telegram /mw heat); include set metadata
+                rows = conn.execute(
+                    "SELECT w.symbol, w.market, w.set_id, s.name AS set_name "
+                    "FROM mover_watchlist w "
+                    "LEFT JOIN mover_sets s ON s.id = w.set_id "
+                    "WHERE w.user_id = ? ORDER BY s.sort_order, w.symbol ASC",
+                    (user_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT w.symbol, w.market, w.set_id, s.name AS set_name "
+                    "FROM mover_watchlist w "
+                    "LEFT JOIN mover_sets s ON s.id = w.set_id "
+                    "WHERE w.user_id = ? AND w.set_id = ? ORDER BY w.symbol ASC",
+                    (user_id, set_id),
+                ).fetchall()
+            return [
+                {
+                    "symbol": r["symbol"],
+                    "market": r["market"],
+                    "set_id": int(r["set_id"]) if r["set_id"] is not None else None,
+                    "set_name": r["set_name"] or DEFAULT_SET_NAME,
+                }
+                for r in rows
+            ]
 
-    def set_watchlist(self, user_id: int, items: List[dict]) -> int:
-        """Replace entire watchlist. items: [{symbol, market}, ...]."""
+    def set_watchlist(
+        self, user_id: int, items: List[dict], set_id: Optional[int] = None
+    ) -> int:
+        """Replace watchlist for one set (default set if set_id omitted)."""
         with self._lock:
             conn = self._get_conn()
+            sid = set_id or self._ensure_default_set(conn, user_id)
+            own = conn.execute(
+                "SELECT 1 FROM mover_sets WHERE id = ? AND user_id = ?",
+                (sid, user_id),
+            ).fetchone()
+            if not own:
+                raise ValueError("Set not found")
             with conn:
-                conn.execute("DELETE FROM mover_watchlist WHERE user_id = ?", (user_id,))
+                conn.execute(
+                    "DELETE FROM mover_watchlist WHERE user_id = ? AND set_id = ?",
+                    (user_id, sid),
+                )
                 for it in items:
                     conn.execute(
-                        "INSERT OR IGNORE INTO mover_watchlist (user_id, symbol, market) VALUES (?, ?, ?)",
-                        (user_id, str(it["symbol"]).upper(), str(it.get("market", "futures")).lower()),
+                        "INSERT OR IGNORE INTO mover_watchlist "
+                        "(user_id, symbol, market, set_id) VALUES (?, ?, ?, ?)",
+                        (
+                            user_id,
+                            str(it["symbol"]).upper(),
+                            str(it.get("market", "futures")).lower(),
+                            sid,
+                        ),
                     )
-            return len(self.get_watchlist(user_id))
+            return len(self.get_watchlist(user_id, set_id=sid))
 
-    def add_watchlist(self, user_id: int, symbol: str, market: str = "futures") -> None:
+    def add_watchlist(
+        self,
+        user_id: int,
+        symbol: str,
+        market: str = "futures",
+        set_id: Optional[int] = None,
+    ) -> None:
         with self._lock:
             conn = self._get_conn()
+            sid = set_id or self._ensure_default_set(conn, user_id)
+            own = conn.execute(
+                "SELECT 1 FROM mover_sets WHERE id = ? AND user_id = ?",
+                (sid, user_id),
+            ).fetchone()
+            if not own:
+                raise ValueError("Set not found")
             conn.execute(
-                "INSERT OR IGNORE INTO mover_watchlist (user_id, symbol, market) VALUES (?, ?, ?)",
-                (user_id, symbol.upper(), market.lower()),
+                "INSERT OR IGNORE INTO mover_watchlist (user_id, symbol, market, set_id) "
+                "VALUES (?, ?, ?, ?)",
+                (user_id, symbol.upper(), market.lower(), sid),
             )
 
     def remove_from_watchlist(
@@ -176,8 +699,8 @@ class MoverStore:
         user_id: int,
         symbols: List[str],
         market: Optional[str] = None,
+        set_id: Optional[int] = None,
     ) -> int:
-        """Remove one or more symbols. If market is None, remove that symbol on any market."""
         if not symbols:
             return 0
         with self._lock:
@@ -185,7 +708,18 @@ class MoverStore:
             removed = 0
             for raw in symbols:
                 sym = str(raw).upper()
-                if market:
+                if set_id is not None and market:
+                    cur = conn.execute(
+                        "DELETE FROM mover_watchlist WHERE user_id = ? AND symbol = ? "
+                        "AND market = ? AND set_id = ?",
+                        (user_id, sym, market.lower(), set_id),
+                    )
+                elif set_id is not None:
+                    cur = conn.execute(
+                        "DELETE FROM mover_watchlist WHERE user_id = ? AND symbol = ? AND set_id = ?",
+                        (user_id, sym, set_id),
+                    )
+                elif market:
                     cur = conn.execute(
                         "DELETE FROM mover_watchlist WHERE user_id = ? AND symbol = ? AND market = ?",
                         (user_id, sym, market.lower()),
@@ -198,15 +732,30 @@ class MoverStore:
                 removed += cur.rowcount
             return removed
 
-    def clear_watchlist(self, user_id: int) -> int:
+    def clear_watchlist(self, user_id: int, set_id: Optional[int] = None) -> int:
         with self._lock:
             conn = self._get_conn()
-            cur = conn.execute("DELETE FROM mover_watchlist WHERE user_id = ?", (user_id,))
+            if set_id is not None:
+                cur = conn.execute(
+                    "DELETE FROM mover_watchlist WHERE user_id = ? AND set_id = ?",
+                    (user_id, set_id),
+                )
+            else:
+                cur = conn.execute(
+                    "DELETE FROM mover_watchlist WHERE user_id = ?", (user_id,)
+                )
             return cur.rowcount
 
     def get_enabled_users(self) -> List[int]:
         with self._lock:
             conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT DISTINCT user_id FROM mover_sets WHERE enabled = 1"
+            ).fetchall()
+            uids = [int(r["user_id"]) for r in rows]
+            if uids:
+                return uids
+            # Legacy fallback
             rows = conn.execute(
                 "SELECT user_id FROM mover_settings WHERE enabled = 1"
             ).fetchall()

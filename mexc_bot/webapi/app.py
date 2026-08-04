@@ -76,9 +76,25 @@ class AlertPatch(BaseModel):
 class WatchBody(BaseModel):
     symbol: str
     market: str = "futures"
+    set_id: Optional[int] = None
 
 
 class MoversBody(BaseModel):
+    enabled: Optional[bool] = None
+    threshold_percent: Optional[float] = None
+    lookback_minutes: Optional[float] = None
+    set_id: Optional[int] = None
+
+
+class MoverSetCreate(BaseModel):
+    name: str
+    threshold_percent: float = 5.0
+    lookback_minutes: float = 15.0
+    enabled: bool = False
+
+
+class MoverSetPatch(BaseModel):
+    name: Optional[str] = None
     enabled: Optional[bool] = None
     threshold_percent: Optional[float] = None
     lookback_minutes: Optional[float] = None
@@ -167,11 +183,14 @@ def create_app() -> FastAPI:
                 {"id": "learning_v1", "title": "Learning V1: you teach, agent student (trade-first, delete lesson, AD chips)", "status": "live"},
                 {"id": "money_truth", "title": "teach_ok / LEARNING_TEACH_SINCE sealed $ training", "status": "live"},
                 {"id": "voice_tools", "title": "Turn-based voice STT → tools → TTS (teach, pending, agent_ask)", "status": "beta"},
-                {"id": "intel", "title": "Isolated dump + multi-CEX delist intel", "status": "live"},
+                {"id": "intel", "title": "Isolated dump + multi-CEX delist intel (Binance CMS catalog 161 live)", "status": "live"},
+                {"id": "mover_sets", "title": "Multiple mover sets (per-set threshold/lookback/coins)", "status": "live"},
             ],
             "next": [
                 {"id": "overview_polish", "title": "Overview as tighter command center (Needs you → stack)", "status": "planned"},
                 {"id": "engagement_soak", "title": "Engagement bridge soak + fewer false pending Qs", "status": "in_progress"},
+                {"id": "desk_visual", "title": "AD Desk visual refresh from Imagine design refs", "status": "planned"},
+                {"id": "learn_chart_bind", "title": "Bind candle/chart thesis into teach lessons (not only free text)", "status": "planned"},
                 {"id": "voice_realtime", "title": "Fluent Voice 2.0 (streaming / Speech-to-Speech)", "status": "planned"},
                 {"id": "auto_ad_zones", "title": "Optional auto AD zone tags on fires (owner-gated)", "status": "planned"},
                 {"id": "llm_coach", "title": "Coach product (only if owner re-opens — not default path)", "status": "deferred"},
@@ -566,33 +585,95 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(400, str(e))
 
+    @app.get("/api/mover-sets")
+    def get_mover_sets(_: bool = Depends(require_auth)):
+        try:
+            return {"sets": actions.list_mover_sets()}
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/mover-sets")
+    def post_mover_set(body: MoverSetCreate, _: bool = Depends(require_auth)):
+        try:
+            return actions.create_mover_set(
+                body.name,
+                threshold_percent=body.threshold_percent,
+                lookback_minutes=body.lookback_minutes,
+                enabled=body.enabled,
+            )
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.patch("/api/mover-sets/{set_id}")
+    def patch_mover_set(
+        set_id: int, body: MoverSetPatch, _: bool = Depends(require_auth)
+    ):
+        try:
+            return actions.update_mover_set(
+                set_id,
+                name=body.name,
+                enabled=body.enabled,
+                threshold_percent=body.threshold_percent,
+                lookback_minutes=body.lookback_minutes,
+            )
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.delete("/api/mover-sets/{set_id}")
+    def delete_mover_set(set_id: int, _: bool = Depends(require_auth)):
+        try:
+            return actions.delete_mover_set(set_id)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
     @app.get("/api/watchlist")
-    def get_watch(_: bool = Depends(require_auth)):
+    def get_watch(
+        set_id: Optional[int] = None, _: bool = Depends(require_auth)
+    ):
         try:
             uid = db.default_user_id()
-            rows = actions.list_watchlist()
+            sets = actions.list_mover_sets() if uid else []
+            rows = actions.list_watchlist(set_id=set_id)
             symbols = []
             for r in rows:
                 s = r["symbol"]
                 symbols.append(s.replace("_", "") if "_" in s else s)
             tickers = watchlist_tickers(symbols[:40])
-            settings = db.fetch_one(
-                "SELECT enabled, threshold_percent, lookback_seconds FROM mover_settings WHERE user_id = ?",
-                (uid,),
-            ) if uid else None
+            settings = None
+            if uid:
+                if set_id is not None:
+                    for s in sets:
+                        if int(s["id"]) == int(set_id):
+                            settings = {
+                                "enabled": s["enabled"],
+                                "threshold_percent": s["threshold_percent"],
+                                "lookback_seconds": s["lookback_seconds"],
+                                "set_id": s["id"],
+                                "name": s["name"],
+                            }
+                            break
+                if settings is None:
+                    settings = actions.get_movers_settings()
             return {
                 "user_id": uid,
                 "watchlist": rows,
                 "settings": settings,
+                "sets": sets,
+                "active_set_id": set_id,
                 "tickers": tickers,
             }
         except ValueError:
-            return {"watchlist": [], "tickers": [], "settings": None}
+            return {
+                "watchlist": [],
+                "tickers": [],
+                "settings": None,
+                "sets": [],
+            }
 
     @app.post("/api/watchlist")
     def post_watch(body: WatchBody, _: bool = Depends(require_auth)):
         try:
-            return actions.add_watch(body.symbol, body.market)
+            return actions.add_watch(body.symbol, body.market, set_id=body.set_id)
         except Exception as e:
             raise HTTPException(400, str(e))
 
@@ -600,10 +681,11 @@ def create_app() -> FastAPI:
     def del_watch(
         symbol: str = Query(...),
         market: Optional[str] = None,
+        set_id: Optional[int] = None,
         _: bool = Depends(require_auth),
     ):
         try:
-            return actions.remove_watch(symbol, market)
+            return actions.remove_watch(symbol, market, set_id=set_id)
         except Exception as e:
             raise HTTPException(400, str(e))
 
@@ -614,6 +696,7 @@ def create_app() -> FastAPI:
                 enabled=body.enabled,
                 threshold_percent=body.threshold_percent,
                 lookback_minutes=body.lookback_minutes,
+                set_id=body.set_id,
             )
         except Exception as e:
             raise HTTPException(400, str(e))

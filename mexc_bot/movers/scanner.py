@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # Hard floor for poll interval (seconds). Env may set lower; we clamp here.
 _MIN_POLL_SECONDS = 2.0
 
-Key = Tuple[int, str, str]  # user_id, market, symbol
+Key = Tuple[int, int, str, str]  # user_id, set_id, market, symbol
 
 
 class MoverScanner:
@@ -137,8 +137,10 @@ class MoverScanner:
         """
         needed: Set[str] = set()
         try:
-            for uid in self.mover_store.get_enabled_users():
-                for it in self.mover_store.get_watchlist(uid):
+            for scan in self.mover_store.list_enabled_set_scans():
+                for it in self.mover_store.get_watchlist(
+                    int(scan["user_id"]), set_id=int(scan["id"])
+                ):
                     m = str(it.get("market") or "futures").lower()
                     if m in ("spot", "futures"):
                         needed.add(m)
@@ -343,40 +345,45 @@ class MoverScanner:
         self._record_all(prices_by_market, now)
         self._last_success = time.monotonic()
 
-        enabled_users = self.mover_store.get_enabled_users()
+        enabled_scans = self.mover_store.list_enabled_set_scans()
         fired = 0
         recovery_frac = self._recovery_frac()
         panic_v, fast_v = self._velocity_thresholds()
         enrich_velocity = getattr(self.settings, "mover_enrich_velocity", True)
+        # Heat board once per user per cycle (not once per set)
+        heat_users_done: Set[int] = set()
 
-        for user_id in enabled_users:
-            settings = self.mover_store.get_settings(
-                user_id,
-                self.settings.mover_threshold_percent,
-                self.settings.mover_lookback_seconds,
-            )
-            if not settings["enabled"]:
-                continue
-
-            threshold_frac = float(settings["threshold_percent"]) / 100.0
-            lookback = float(settings["lookback_seconds"])
-            watchlist = self.mover_store.get_watchlist(user_id)
+        for scan in enabled_scans:
+            user_id = int(scan["user_id"])
+            set_id = int(scan["id"])
+            set_name = str(scan.get("name") or "Default")
+            threshold_frac = float(scan["threshold_percent"]) / 100.0
+            lookback = float(scan["lookback_seconds"])
+            watchlist = self.mover_store.get_watchlist(user_id, set_id=set_id)
             if not watchlist:
                 continue
 
-            # Auto panic board FIRST (triage before individual fires)
-            try:
-                self._maybe_send_heat_board(
-                    user_id, lookback, float(settings["threshold_percent"]), watchlist, now
-                )
-            except Exception as e:
-                logger.warning(f"Heat board error user={user_id}: {e}")
+            # Auto panic board FIRST (triage before individual fires) — once/user
+            if user_id not in heat_users_done:
+                try:
+                    # Union watchlist for heat breadth across sets
+                    all_wl = self.mover_store.get_watchlist(user_id)
+                    self._maybe_send_heat_board(
+                        user_id,
+                        lookback,
+                        float(scan["threshold_percent"]),
+                        all_wl or watchlist,
+                        now,
+                    )
+                except Exception as e:
+                    logger.warning(f"Heat board error user={user_id}: {e}")
+                heat_users_done.add(user_id)
 
             # Snapshot heat breadth once per user for isolated-dump filter (cheap)
             heat_dumping_count = None
             watchlist_count = len(watchlist)
             try:
-                breadth_pct = float(settings["threshold_percent"]) * 0.6
+                breadth_pct = float(scan["threshold_percent"]) * 0.6
                 if getattr(self.settings, "mover_heat_breadth_pct", None) is not None:
                     breadth_pct = float(self.settings.mover_heat_breadth_pct)
                 board = heat_snapshot(
@@ -413,7 +420,7 @@ class MoverScanner:
                 if price_now <= 0:
                     continue
 
-                key: Key = (user_id, market, symbol)
+                key: Key = (user_id, set_id, market, symbol)
                 anchor = self._anchors.get(key)
 
                 if anchor is not None and recovery_frac > 0:
@@ -498,7 +505,8 @@ class MoverScanner:
                 if rline:
                     extra_lines.append(_html.escape(rline))
 
-                msg = f"📉 <b>MOVER</b> [{tag}]\n{line2}\n{line3}"
+                set_tag = "" if set_name == "Default" else f" · {_html.escape(set_name)}"
+                msg = f"📉 <b>MOVER</b> [{tag}]{set_tag}\n{line2}\n{line3}"
                 if extra_lines:
                     msg += "\n" + "\n".join(extra_lines)
 
@@ -525,7 +533,7 @@ class MoverScanner:
                             drop_pct=float(pct),
                             velocity_band=vel_band,
                             mode=fire_mode,
-                            payload={"lookback_seconds": lookback},
+                            payload={"lookback_seconds": lookback, "set_id": set_id, "set_name": set_name},
                         )
                         if event_id:
                             try:
@@ -556,7 +564,7 @@ class MoverScanner:
                     self._fires_total += 1
                     fired += 1
                     logger.info(
-                        f"MOVER FIRED user={user_id} {market}:{symbol} mode={fire_mode} "
+                        f"MOVER FIRED user={user_id} set={set_name}({set_id}) {market}:{symbol} mode={fire_mode} "
                         f"pct={pct:.2f}% ref={ref_price} now={price_now} lookback={lookback}s"
                         f" event_id={event_id or '-'}"
                     )

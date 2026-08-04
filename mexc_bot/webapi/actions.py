@@ -125,17 +125,77 @@ def delete_alert_visual(visual_id: int, user_id: Optional[int] = None) -> dict:
     raise ValueError(f"No alert at visual #{visual_id}")
 
 
-# ---- Watchlist ----
+# ---- Watchlist / mover sets ----
 
-def list_watchlist(user_id: Optional[int] = None) -> List[dict]:
+def _mover_store():
+    from ..movers.storage import MoverStore
+
+    return MoverStore(db.db_path())
+
+
+def list_mover_sets(user_id: Optional[int] = None) -> List[dict]:
     uid = _uid(user_id)
-    return db.fetch_all(
-        "SELECT symbol, market FROM mover_watchlist WHERE user_id = ? ORDER BY market, symbol",
-        (uid,),
+    return _mover_store().list_sets(uid)
+
+
+def create_mover_set(
+    name: str,
+    *,
+    threshold_percent: float = 5.0,
+    lookback_minutes: float = 15.0,
+    enabled: bool = False,
+    user_id: Optional[int] = None,
+) -> dict:
+    uid = _uid(user_id)
+    return _mover_store().create_set(
+        uid,
+        name,
+        threshold_percent=float(threshold_percent),
+        lookback_seconds=int(float(lookback_minutes) * 60),
+        enabled=enabled,
     )
 
 
-def add_watch(symbol: str, market: str = "futures", user_id: Optional[int] = None) -> dict:
+def update_mover_set(
+    set_id: int,
+    *,
+    name: Optional[str] = None,
+    enabled: Optional[bool] = None,
+    threshold_percent: Optional[float] = None,
+    lookback_minutes: Optional[float] = None,
+    user_id: Optional[int] = None,
+) -> dict:
+    uid = _uid(user_id)
+    lb = int(float(lookback_minutes) * 60) if lookback_minutes is not None else None
+    return _mover_store().update_set(
+        uid,
+        int(set_id),
+        name=name,
+        enabled=enabled,
+        threshold_percent=threshold_percent,
+        lookback_seconds=lb,
+    )
+
+
+def delete_mover_set(set_id: int, user_id: Optional[int] = None) -> dict:
+    uid = _uid(user_id)
+    _mover_store().delete_set(uid, int(set_id))
+    return {"ok": True, "deleted": int(set_id)}
+
+
+def list_watchlist(
+    user_id: Optional[int] = None, set_id: Optional[int] = None
+) -> List[dict]:
+    uid = _uid(user_id)
+    return _mover_store().get_watchlist(uid, set_id=set_id)
+
+
+def add_watch(
+    symbol: str,
+    market: str = "futures",
+    user_id: Optional[int] = None,
+    set_id: Optional[int] = None,
+) -> dict:
     uid = _uid(user_id)
     mkt = (market or "futures").lower()
     if mkt not in ("spot", "futures"):
@@ -144,18 +204,9 @@ def add_watch(symbol: str, market: str = "futures", user_id: Optional[int] = Non
     if mkt == "futures" and "_" not in sym and not sym.endswith("USDT"):
         sym = f"{sym}_USDT"
     elif mkt == "futures" and sym.endswith("USDT") and "_" not in sym:
-        # keep compact form if already TSLAUSDT-like
         pass
-    conn = db.connect()
-    try:
-        conn.execute(
-            "INSERT OR IGNORE INTO mover_watchlist (user_id, symbol, market) VALUES (?, ?, ?)",
-            (uid, sym, mkt),
-        )
-        conn.commit()
-        return {"ok": True, "symbol": sym, "market": mkt}
-    finally:
-        conn.close()
+    _mover_store().add_watchlist(uid, sym, mkt, set_id=set_id)
+    return {"ok": True, "symbol": sym, "market": mkt, "set_id": set_id}
 
 
 def _norm_sym(s: str) -> str:
@@ -191,39 +242,36 @@ def watch_symbols_match(query: str, row_symbol: str) -> bool:
     return _base_asset(q) == _base_asset(r) and bool(_base_asset(q))
 
 
-def remove_watch(symbol: str, market: Optional[str] = None, user_id: Optional[int] = None) -> dict:
+def remove_watch(
+    symbol: str,
+    market: Optional[str] = None,
+    user_id: Optional[int] = None,
+    set_id: Optional[int] = None,
+) -> dict:
     """Remove watchlist row(s). Matches compact / underscore / STOCK forms only (exact base)."""
     uid = _uid(user_id)
     sym = symbol.upper().strip()
-    conn = db.connect()
-    try:
-        rows = conn.execute(
-            "SELECT symbol, market FROM mover_watchlist WHERE user_id = ?",
-            (uid,),
-        ).fetchall()
-        removed: List[str] = []
-        for r in rows:
-            rsym = r["symbol"] if hasattr(r, "keys") else r[0]
-            rmkt = r["market"] if hasattr(r, "keys") else r[1]
-            if market and (rmkt or "").lower() != market.lower():
-                continue
-            if not watch_symbols_match(sym, str(rsym)):
-                continue
-            conn.execute(
-                "DELETE FROM mover_watchlist WHERE user_id = ? AND symbol = ? AND market = ?",
-                (uid, rsym, rmkt),
-            )
-            removed.append(f"{rsym}:{rmkt}")
-        conn.commit()
-        if not removed:
-            raise ValueError(
-                f"No watchlist row matched {sym!r}"
-                + (f" market={market}" if market else "")
-                + " — check symbol form (e.g. BTC_USDT vs BTCUSDT)"
-            )
-        return {"ok": True, "removed": removed, "symbol": sym}
-    finally:
-        conn.close()
+    store = _mover_store()
+    rows = store.get_watchlist(uid, set_id=set_id)
+    removed: List[str] = []
+    for r in rows:
+        rsym = r["symbol"]
+        rmkt = r["market"]
+        if market and (rmkt or "").lower() != market.lower():
+            continue
+        if not watch_symbols_match(sym, str(rsym)):
+            continue
+        store.remove_from_watchlist(
+            uid, [str(rsym)], market=rmkt, set_id=r.get("set_id") or set_id
+        )
+        removed.append(f"{rsym}:{rmkt}")
+    if not removed:
+        raise ValueError(
+            f"No watchlist row matched {sym!r}"
+            + (f" market={market}" if market else "")
+            + " — check symbol form (e.g. BTC_USDT vs BTCUSDT)"
+        )
+    return {"ok": True, "removed": removed, "symbol": sym}
 
 
 def set_movers(
@@ -232,51 +280,52 @@ def set_movers(
     threshold_percent: Optional[float] = None,
     lookback_minutes: Optional[float] = None,
     user_id: Optional[int] = None,
+    set_id: Optional[int] = None,
 ) -> dict:
+    """Update Default set (or set_id). Mirrors legacy mover_settings."""
     uid = _uid(user_id)
-    conn = db.connect()
-    try:
-        row = conn.execute(
-            "SELECT * FROM mover_settings WHERE user_id = ?", (uid,)
-        ).fetchone()
-        thr = float(threshold_percent) if threshold_percent is not None else (
-            float(row["threshold_percent"]) if row else 5.0
+    store = _mover_store()
+    if set_id is not None:
+        return store.update_set(
+            uid,
+            int(set_id),
+            enabled=enabled,
+            threshold_percent=threshold_percent,
+            lookback_seconds=(
+                int(float(lookback_minutes) * 60)
+                if lookback_minutes is not None
+                else None
+            ),
         )
-        look = int(lookback_minutes * 60) if lookback_minutes is not None else (
-            int(row["lookback_seconds"]) if row else 900
-        )
-        en = (
-            (1 if enabled else 0)
-            if enabled is not None
-            else (int(row["enabled"]) if row else 0)
-        )
-        if row:
-            conn.execute(
-                """
-                UPDATE mover_settings
-                SET enabled = ?, threshold_percent = ?, lookback_seconds = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE user_id = ?
-                """,
-                (en, thr, look, uid),
-            )
-        else:
-            conn.execute(
-                """
-                INSERT INTO mover_settings (user_id, enabled, threshold_percent, lookback_seconds)
-                VALUES (?, ?, ?, ?)
-                """,
-                (uid, en, thr, look),
-            )
-        conn.commit()
-        return {
-            "ok": True,
-            "enabled": bool(en),
-            "threshold_percent": thr,
-            "lookback_seconds": look,
-        }
-    finally:
-        conn.close()
+    # Default set path
+    cur = store.get_settings(uid, 5.0, 900)
+    thr = (
+        float(threshold_percent)
+        if threshold_percent is not None
+        else float(cur["threshold_percent"])
+    )
+    look = (
+        int(float(lookback_minutes) * 60)
+        if lookback_minutes is not None
+        else int(cur["lookback_seconds"])
+    )
+    if threshold_percent is not None or lookback_minutes is not None:
+        store.set_params(uid, thr, look, default_enabled=bool(cur["enabled"]))
+    if enabled is not None:
+        store.set_enabled(uid, bool(enabled), thr, look)
+    out = store.get_settings(uid, thr, look)
+    return {
+        "ok": True,
+        "enabled": out["enabled"],
+        "threshold_percent": out["threshold_percent"],
+        "lookback_seconds": out["lookback_seconds"],
+        "set_id": out.get("set_id"),
+    }
+
+
+def get_movers_settings(user_id: Optional[int] = None) -> dict:
+    uid = _uid(user_id)
+    return _mover_store().get_settings(uid, 5.0, 900)
 
 
 # ---- Journal / positions ----
@@ -444,21 +493,6 @@ def list_news(limit: int = 12) -> List[dict]:
         """,
         (max(1, min(int(limit), 40)),),
     )
-
-
-def get_movers_settings(user_id: Optional[int] = None) -> dict:
-    uid = _uid(user_id)
-    row = db.fetch_one(
-        "SELECT enabled, threshold_percent, lookback_seconds FROM mover_settings WHERE user_id = ?",
-        (uid,),
-    )
-    if not row:
-        return {"enabled": False, "threshold_percent": 5.0, "lookback_seconds": 900}
-    return {
-        "enabled": bool(row.get("enabled")),
-        "threshold_percent": float(row.get("threshold_percent") or 5),
-        "lookback_seconds": int(row.get("lookback_seconds") or 900),
-    }
 
 
 # ---- Voice / agent tool registry (full desk control) ----
