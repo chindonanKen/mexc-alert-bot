@@ -1593,3 +1593,11 @@ table.data tr:hover td { background: rgba(56,189,248,.04); }
   font-size: 0.72rem;
 }
 .intel-link:hover { text-decoration: underline; }
+
+#newsTable.scroll {
+  max-height: min(55vh, 28rem);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}

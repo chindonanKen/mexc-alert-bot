@@ -112,9 +112,26 @@ class NewsWatcher:
             if self.news_store.has_fingerprint(fp):
                 continue
 
-            hints = extract_symbol_hints(f"{title} {body}", bases) if bases else set()
-            # Official delist without base match still store; push only if match or exchange-wide delist wording
-            symbol = next(iter(hints), None)
+            all_bases = list(item.get("bases") or [])
+            if not all_bases:
+                from .tickers import extract_delist_bases
+
+                all_bases = extract_delist_bases(title, body)
+            hints = set()
+            if bases:
+                hints = extract_symbol_hints(f"{title} {body} {' '.join(all_bases)}", bases)
+                # also match extracted bases against watchlist
+                for b in all_bases:
+                    if b in bases:
+                        hints.add(b)
+            # Store all tickers: primary symbol + full list in raw
+            symbol = (
+                ",".join(all_bases)
+                if all_bases
+                else (next(iter(hints), None) if hints else None)
+            )
+            raw_item = dict(item)
+            raw_item["bases"] = all_bases
 
             nid = self.news_store.insert(
                 symbol=symbol,
@@ -125,7 +142,7 @@ class NewsWatcher:
                 source=item.get("source") or "unknown",
                 source_trust=trust,
                 ts=item.get("ts"),
-                raw=item,
+                raw=raw_item,
                 fingerprint=fp,
             )
             if not nid:
@@ -139,11 +156,12 @@ class NewsWatcher:
                 do_push = False
             if not do_push:
                 logger.info(
-                    "news stored silent id=%s class=%s sev=%s title=%s",
+                    "news stored silent id=%s class=%s sev=%s title=%s bases=%s",
                     nid,
                     cls,
                     severity,
                     title[:80],
+                    all_bases,
                 )
                 continue
 
@@ -156,11 +174,12 @@ class NewsWatcher:
                 logger.info("news fatal but no notify users configured id=%s", nid)
                 continue
 
-            sym_bit = f"{_html.escape(symbol)} · " if symbol else ""
+            tickers = ", ".join(all_bases) if all_bases else (symbol or "—")
             msg = (
                 f"⚠️ <b>FATAL NEWS</b> · {_html.escape(cls)}\n"
-                f"{sym_bit}source: {_html.escape(str(item.get('source')))}\n"
-                f"{_html.escape(title[:300])}\n"
+                f"Tickers: <b>{_html.escape(tickers)}</b>\n"
+                f"source: {_html.escape(str(item.get('source')))}\n"
+                f"{_html.escape(title[:320])}\n"
                 f"<i>Strategy: isolated/destructive risk (Rule 6). Prefer no-trade.</i>"
             )
             for uid in users:

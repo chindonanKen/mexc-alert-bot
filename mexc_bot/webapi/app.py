@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import os
+import re
 import secrets
 import time
 from pathlib import Path
@@ -805,10 +806,12 @@ def create_app() -> FastAPI:
 
     @app.get("/api/news")
     def news(limit: int = Query(50, ge=1, le=150), _: bool = Depends(require_auth)):
-        """Fatal news + delist radar. Delists are grouped so all tickers on one notice show."""
+        """Fatal news + delist radar. Always expand full ticker lists for delists."""
         from pathlib import Path
 
         from ..investigators.store import InvestigatorStore
+        from ..news.sources import enrich_news_item_bases, _enrich_mexc_article, _session
+        from ..news.tickers import extract_delist_bases
 
         delist_rows = db.fetch_all(
             "SELECT * FROM delist_cache ORDER BY ts DESC LIMIT ?",
@@ -819,13 +822,77 @@ def create_app() -> FastAPI:
             inv = InvestigatorStore(Path(db.db_path()))
             announcements = inv.list_delist_announcements(limit=int(limit))
         except Exception:
-            # Fallback: one row per base (legacy shape)
             announcements = []
+
+        news_rows = db.fetch_all(
+            "SELECT * FROM news_events ORDER BY ts DESC LIMIT ?", (limit,)
+        )
+        # Expand incomplete MEXC "and N other" titles for the desk
+        sess = None
+        enriched_news = []
+        for row in news_rows:
+            item = dict(row)
+            bases = enrich_news_item_bases(item)
+            title = item.get("title") or ""
+            url = item.get("url") or ""
+            needs = (
+                (not bases or len(bases) < 3)
+                and "mexc" in (item.get("source") or "").lower()
+                and (
+                    re.search(r"and\s+\d+\s+other", title, re.I)
+                    or "/announcements/article/" in url
+                )
+            )
+            if needs and "/announcements/article/" in url:
+                try:
+                    if sess is None:
+                        sess = _session()
+                    enr = _enrich_mexc_article(sess, url, title, timeout=12.0)
+                    more = enr.get("bases") or []
+                    if more:
+                        bases = more
+                        # Persist backfill so next load is free
+                        try:
+                            from pathlib import Path as _P
+
+                            from ..news.store import NewsStore
+
+                            ns = NewsStore(_P(db.db_path()))
+                            list_title = title.split(" · full:")[0].strip()
+                            display = (
+                                f"{list_title} · full: {', '.join(bases)}"
+                                if re.search(r"and\s+\d+\s+other", list_title, re.I)
+                                else title
+                            )
+                            raw = item.get("raw_json")
+                            import json as _json
+
+                            try:
+                                raw_d = _json.loads(raw) if raw else {}
+                            except Exception:
+                                raw_d = {}
+                            raw_d["bases"] = bases
+                            raw_d["body"] = enr.get("body") or raw_d.get("body")
+                            ns.update_news_symbols(
+                                int(item["id"]),
+                                symbol=",".join(bases),
+                                title=display,
+                                raw=raw_d,
+                            )
+                            item["title"] = display
+                            item["symbol"] = ",".join(bases)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            if not bases and item.get("symbol"):
+                bases = extract_delist_bases(item.get("symbol") or "", title)
+            item["bases"] = bases
+            item["bases_text"] = ", ".join(bases) if bases else (item.get("symbol") or "—")
+            enriched_news.append(item)
+
         return {
-            "news": db.fetch_all(
-                "SELECT * FROM news_events ORDER BY ts DESC LIMIT ?", (limit,)
-            ),
-            # Flat rows still available for debug; UI prefers announcements
+            "news": enriched_news,
             "delist_cache": delist_rows[: max(40, int(limit))],
             "delist_announcements": announcements,
         }

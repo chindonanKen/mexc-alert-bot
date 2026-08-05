@@ -1725,21 +1725,54 @@
       api("/api/news?limit=60"),
       api("/api/investigations"),
     ]);
-    $("#newsTable").innerHTML = table(
-      ["Class", "Sym", "Title", "Src", "When"],
-      (news.news || [])
-        .map(
-          (n) =>
-            `<tr><td>${escHtml(n.class || "")}</td><td>${escHtml(
-              n.symbol || "—"
-            )}</td><td title="${escHtml(n.title || "")}">${escHtml(
-              (n.title || "").slice(0, 90)
-            )}</td><td>${escHtml(n.source || "")}</td><td>${fmtTime(
-              n.ts
-            )}</td></tr>`
-        )
-        .join("")
-    );
+    // Fatal news — always show full ticker list (not "and 3 other…")
+    const newsHost = $("#newsTable");
+    if (newsHost) {
+      const items = news.news || [];
+      if (!items.length) {
+        newsHost.innerHTML = rankEmpty("No fatal news stored yet.");
+      } else {
+        newsHost.innerHTML = items
+          .map((n) => {
+            const bases =
+              n.bases_text ||
+              (Array.isArray(n.bases) ? n.bases.join(", ") : "") ||
+              n.symbol ||
+              "—";
+            const nTick =
+              (Array.isArray(n.bases) && n.bases.length) ||
+              (typeof n.symbol === "string" && n.symbol.includes(",")
+                ? n.symbol.split(",").length
+                : n.symbol
+                  ? 1
+                  : 0);
+            const title = (n.title || "").split(" · full:")[0];
+            const url = n.url
+              ? `<a class="intel-link" href="${escHtml(
+                  n.url
+                )}" target="_blank" rel="noopener">open</a>`
+              : "";
+            return `<article class="intel-delist-card">
+              <div class="intel-delist-h">
+                <span class="intel-cex">${escHtml(
+                  (n.class || "NEWS").toString()
+                )}</span>
+                <span class="badge quiet">${escHtml(
+                  n.source || ""
+                )} · ${nTick || "?"} ticker${nTick === 1 ? "" : "s"}</span>
+                <span class="mute mono">${fmtTime(n.ts)}</span>
+                ${url}
+              </div>
+              <div class="intel-delist-title">${escHtml(title)}</div>
+              <div class="intel-delist-bases" title="${escHtml(bases)}">
+                <span class="mute">Tickers</span>
+                <strong>${escHtml(bases)}</strong>
+              </div>
+            </article>`;
+          })
+          .join("");
+      }
+    }
 
     // Prefer grouped announcements so every ticker on a notice is visible
     let anns = news.delist_announcements || [];

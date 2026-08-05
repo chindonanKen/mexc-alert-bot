@@ -114,6 +114,52 @@ class NewsStore:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def update_news_symbols(
+        self,
+        news_id: int,
+        *,
+        symbol: Optional[str],
+        title: Optional[str] = None,
+        raw: Optional[dict] = None,
+    ) -> bool:
+        """Backfill full ticker list on an existing news row."""
+        try:
+            with self._lock:
+                conn = self._get_conn()
+                row = conn.execute(
+                    "SELECT id FROM news_events WHERE id = ?", (int(news_id),)
+                ).fetchone()
+                if not row:
+                    return False
+                if title is not None and raw is not None:
+                    conn.execute(
+                        "UPDATE news_events SET symbol = ?, title = ?, raw_json = ? WHERE id = ?",
+                        (
+                            symbol,
+                            title[:500],
+                            json.dumps(raw),
+                            int(news_id),
+                        ),
+                    )
+                elif title is not None:
+                    conn.execute(
+                        "UPDATE news_events SET symbol = ?, title = ? WHERE id = ?",
+                        (symbol, title[:500], int(news_id)),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE news_events SET symbol = ?, raw_json = COALESCE(?, raw_json) WHERE id = ?",
+                        (
+                            symbol,
+                            json.dumps(raw) if raw is not None else None,
+                            int(news_id),
+                        ),
+                    )
+                return True
+        except Exception as e:
+            logger.error("update_news_symbols failed: %s", e)
+            return False
+
     def recent_for_symbol(self, symbol_base: str, within_seconds: float = 86400) -> List[dict]:
         cutoff = time.time() - within_seconds
         with self._lock:
