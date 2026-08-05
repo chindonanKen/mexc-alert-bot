@@ -132,6 +132,7 @@
       targets: "Targets",
       movers: "Movers",
       positions: "Positions",
+      pnl: "PnL",
       memory: "Learning",
       intel: "Intel",
       voice: "Voice log",
@@ -549,27 +550,64 @@
       (p.n_buys || p.n_sells)
         ? ` · B${p.n_buys || 0}/S${p.n_sells || 0}`
         : "";
+    const boughtU =
+      p.bought_usd != null ? "$" + Number(p.bought_usd).toFixed(0) : null;
+    const soldU =
+      p.sold_usd != null ? "$" + Number(p.sold_usd).toFixed(0) : null;
+    const heldU =
+      p.remaining_mark_usd != null
+        ? "$" + Number(p.remaining_mark_usd).toFixed(0)
+        : null;
+    const realU =
+      p.realized_pnl_usd != null
+        ? (Number(p.realized_pnl_usd) >= 0 ? "+$" : "-$") +
+          Math.abs(Number(p.realized_pnl_usd)).toFixed(0)
+        : null;
     const sizeBit = isOpen
-      ? p.size_remaining != null
-        ? "qty " + Number(p.size_remaining).toFixed(2) + layersBit
-        : "qty —"
-      : p.size_qty != null
-        ? "sz " + Number(p.size_qty).toFixed(2) + layersBit
-        : "sz —";
+      ? [
+          boughtU ? "in " + boughtU : null,
+          soldU ? "out " + soldU : null,
+          heldU ? "held " + heldU : null,
+          layersBit.trim(),
+        ]
+          .filter(Boolean)
+          .join(" · ") || "—"
+      : [
+          boughtU ? "in " + boughtU : null,
+          soldU ? "out " + soldU : null,
+          realU ? "PnL " + realU : null,
+          layersBit.trim(),
+        ]
+          .filter(Boolean)
+          .join(" · ") || "—";
+    const freeBadge = p.free_coins
+      ? `<span class="pos-free" title="Principal recovered — free inventory">FREE</span>`
+      : p.free_coins_status === "near_free"
+        ? `<span class="pos-free near" title="Almost principal recovered">NEAR FREE</span>`
+        : "";
+    const fillUsd = (o) => {
+      const q =
+        o.quote_qty != null
+          ? Number(o.quote_qty)
+          : o.price != null && o.qty != null
+            ? Number(o.price) * Number(o.qty)
+            : null;
+      return q != null && !Number.isNaN(q) ? "$" + q.toFixed(0) : "—";
+    };
     const buys = (p.buy_orders || [])
       .map(
         (o) =>
-          `<div class="pos-fill buy">BUY ${
+          `<div class="pos-fill buy">BUY ${fillUsd(o)} @ ${
             o.price != null ? fmtPx(o.price) : "—"
-          } × ${o.qty != null ? o.qty : "—"} · ${fmtTime(o.ts)}</div>`
+          } · qty ${o.qty != null ? o.qty : "—"} · ${fmtTime(o.ts)}</div>`
       )
       .join("");
     const sells = (p.sell_orders || [])
       .map(
         (o) =>
-          `<div class="pos-fill sell">SELL ${
+          `<div class="pos-fill sell">SELL ${fillUsd(o)} @ ${
             o.price != null ? fmtPx(o.price) : "—"
-          } × ${o.qty != null ? o.qty : "—"} · ${fmtTime(o.ts)}</div>`
+          } · qty ${o.qty != null ? o.qty : "—"} · ${fmtTime(o.ts)}</div>`
       )
       .join("");
     const canCloseJournal =
@@ -607,13 +645,32 @@
         : p.position_side === "long"
           ? " · long"
           : "";
+    const freeBtns =
+      isOpen && (p.market || "").toLowerCase() === "spot"
+        ? `<div class="row-gap pos-free-actions">
+            <button type="button" class="btn soft sm" data-free-on="${escHtml(
+              String(posId)
+            )}" data-sym="${escHtml(p.symbol || "")}" data-mkt="spot" data-mark="${
+              p.remaining_mark_usd != null ? p.remaining_mark_usd : ""
+            }">Mark free coins</button>
+            <button type="button" class="btn soft sm" data-free-off="${escHtml(
+              String(posId)
+            )}" data-sym="${escHtml(p.symbol || "")}" data-mkt="spot">Not free</button>
+          </div>`
+        : "";
     return `<details class="pos-card ${isOpen ? "is-open" : "is-closed"} outcome-${
       (p.outcome || "flat").toLowerCase()
-    }" data-pos-id="${String(posId).replace(/"/g, "")}">
+    }${p.free_coins ? " is-free" : ""}" data-pos-id="${String(posId).replace(
+      /"/g,
+      ""
+    )}">
       <summary class="pos-sum">
         <span class="pos-sym">${p.symbol}</span>
         ${posOutcomeBadge(p)}
-        <span class="pos-pnl">${pnlS}${usd ? " " + usd : ""}</span>
+        ${freeBadge}
+        <span class="pos-pnl">${pnlS}${usd ? " " + usd : ""}${
+      realU && isOpen ? " · real " + realU : ""
+    }</span>
         <span class="pos-when">${when}</span>
         <span class="pos-size">${sizeBit}</span>
         ${posMarketPill(p.market)}
@@ -633,10 +690,30 @@
                 ? Number(p.realized_pnl_usd).toFixed(2)
                 : "—") +
               (p.fee != null ? " · fee " + p.fee : "")
-            : `bought ${p.size_qty ?? "—"} / sold ${p.size_sold ?? "—"} · ${
-                p.n_buys || 0
-              } buys · ${p.n_sells || 0} sells`
+            : `$ bought ${
+                p.bought_usd != null ? Number(p.bought_usd).toFixed(0) : "—"
+              } · $ sold ${
+                p.sold_usd != null ? Number(p.sold_usd).toFixed(0) : "—"
+              } · residual cost $${
+                p.remaining_cost_usd != null
+                  ? Number(p.remaining_cost_usd).toFixed(0)
+                  : "—"
+              }${
+                p.principal_recovered
+                  ? " · principal recovered"
+                  : ""
+              } · qty bought ${p.size_qty ?? "—"} / sold ${p.size_sold ?? "—"}`
         }</div>
+        ${
+          p.free_coins
+            ? `<div class="learn-card-meta pos-free-note">Free coins · bag mark $${
+                p.remaining_mark_usd != null
+                  ? Number(p.remaining_mark_usd).toFixed(0)
+                  : "—"
+              } · scale out in layers on the way up</div>`
+            : ""
+        }
+        ${freeBtns}
         <div class="learn-card-meta">Notes: ${(p.notes || "—").slice(0, 120)}</div>
         <div class="pos-fills-h">Buy layers (${p.n_buys || 0})</div>
         ${
@@ -685,6 +762,26 @@
     if (head) {
       head.textContent = `${opens.length} open · ${closed.length} closed`;
     }
+    const br = $("#posBankroll");
+    if (br) {
+      let openMark = 0,
+        freeMark = 0,
+        freeN = 0,
+        openReal = 0;
+      opens.forEach((p) => {
+        if (p.remaining_mark_usd != null) openMark += Number(p.remaining_mark_usd);
+        if (p.free_coins) {
+          freeN += 1;
+          if (p.remaining_mark_usd != null) freeMark += Number(p.remaining_mark_usd);
+        }
+        if (p.realized_pnl_usd != null) openReal += Number(p.realized_pnl_usd);
+      });
+      br.textContent = `Open mark $${openMark.toFixed(0)} · free bags ${freeN} ($${freeMark.toFixed(
+        0
+      )}) · partial realized on opens ${
+        openReal >= 0 ? "+" : ""
+      }$${openReal.toFixed(0)} · figures $ not shares`;
+    }
     let html = "";
     if (opens.length) {
       html += `<div class="pos-band-h">Open risk <span class="pos-band-n">${opens.length}</span></div>`;
@@ -709,6 +806,49 @@
     host.addEventListener("scroll", bump, { passive: true });
     host.addEventListener("pointerdown", bump);
     host.addEventListener("click", async (ev) => {
+      const freeOn = ev.target.closest("[data-free-on]");
+      if (freeOn && host.contains(freeOn)) {
+        ev.preventDefault();
+        try {
+          await api("/api/positions/flags", {
+            method: "POST",
+            body: JSON.stringify({
+              entity_key: freeOn.dataset.freeOn,
+              symbol: freeOn.dataset.sym,
+              market: freeOn.dataset.mkt || "spot",
+              free_coins_override: "on",
+              free_mark_usd: freeOn.dataset.mark
+                ? +freeOn.dataset.mark
+                : null,
+            }),
+          });
+          toast("Marked free coins");
+          loadPositions({ force: true });
+        } catch (e) {
+          toast(e.message);
+        }
+        return;
+      }
+      const freeOff = ev.target.closest("[data-free-off]");
+      if (freeOff && host.contains(freeOff)) {
+        ev.preventDefault();
+        try {
+          await api("/api/positions/flags", {
+            method: "POST",
+            body: JSON.stringify({
+              entity_key: freeOff.dataset.freeOff,
+              symbol: freeOff.dataset.sym,
+              market: freeOff.dataset.mkt || "spot",
+              free_coins_override: "off",
+            }),
+          });
+          toast("Unmarked free coins");
+          loadPositions({ force: true });
+        } catch (e) {
+          toast(e.message);
+        }
+        return;
+      }
       const b = ev.target.closest("[data-close]");
       if (!b || !host.contains(b)) return;
       ev.preventDefault();
@@ -723,6 +863,116 @@
         toast(e.message);
       }
     });
+  }
+
+  state.pnlWindow = "30d";
+
+  async function loadPnl() {
+    const host = $("#pnlBody");
+    if (!host) return;
+    try {
+      const d = await api(`/api/pnl?window=${encodeURIComponent(state.pnlWindow || "30d")}`);
+      const b = d.bankroll || {};
+      const r = d.realized || {};
+      const free = d.free_bags || [];
+      const book = d.open_book || [];
+      host.innerHTML = `
+        <div class="pnl-grid">
+          <div class="pnl-card">
+            <div class="pnl-k">Bankroll</div>
+            <div class="pnl-v">Open mark $${Number(b.open_mark_usd || 0).toFixed(0)}</div>
+            <div class="mute">uPnL $${Number(b.open_upnl_usd || 0).toFixed(0)} · residual cost $${Number(
+        b.open_cost_usd || 0
+      ).toFixed(0)}</div>
+            <div class="mute">Free bags ${b.free_bags_n || 0} · $${Number(
+        b.free_mark_usd || 0
+      ).toFixed(0)}</div>
+          </div>
+          <div class="pnl-card">
+            <div class="pnl-k">Realized (${escHtml(d.window || "")})</div>
+            <div class="pnl-v ${Number(r.pnl_usd || 0) >= 0 ? "up" : "dn"}">${
+              Number(r.pnl_usd || 0) >= 0 ? "+" : ""
+            }$${Number(r.pnl_usd || 0).toFixed(0)}</div>
+            <div class="mute">W ${r.win_n || 0} ($${Number(r.win_usd || 0).toFixed(
+        0
+      )}) · L ${r.miss_n || 0} ($${Number(r.miss_usd || 0).toFixed(0)}) · flat ${
+        r.flat_n || 0
+      }</div>
+            <div class="mute">Best ${
+              r.best
+                ? escHtml(r.best.symbol) +
+                  " $" +
+                  Number(r.best.realized_pnl_usd).toFixed(0)
+                : "—"
+            } · Worst ${
+              r.worst
+                ? escHtml(r.worst.symbol) +
+                  " $" +
+                  Number(r.worst.realized_pnl_usd).toFixed(0)
+                : "—"
+            }</div>
+          </div>
+          <div class="pnl-card">
+            <div class="pnl-k">By book</div>
+            <div class="mute">Spot $${Number(
+              (d.by_book && d.by_book.spot_realized_usd) || 0
+            ).toFixed(0)}</div>
+            <div class="mute">Futures $${Number(
+              (d.by_book && d.by_book.futures_realized_usd) || 0
+            ).toFixed(0)}</div>
+          </div>
+        </div>
+        <h4 class="pnl-sec">Open book ($)</h4>
+        ${
+          book.length
+            ? `<div class="scroll">${table(
+                ["Sym", "In $", "Out $", "Real $", "Held $", "Free"],
+                book
+                  .map(
+                    (p) =>
+                      `<tr><td>${escHtml(p.symbol)}</td><td>${
+                        p.bought_usd != null ? Number(p.bought_usd).toFixed(0) : "—"
+                      }</td><td>${
+                        p.sold_usd != null ? Number(p.sold_usd).toFixed(0) : "—"
+                      }</td><td>${
+                        p.realized_pnl_usd != null
+                          ? Number(p.realized_pnl_usd).toFixed(0)
+                          : "—"
+                      }</td><td>${
+                        p.remaining_mark_usd != null
+                          ? Number(p.remaining_mark_usd).toFixed(0)
+                          : "—"
+                      }</td><td>${p.free_coins ? "FREE" : "—"}</td></tr>`
+                  )
+                  .join("")
+              )}</div>`
+            : rankEmpty("No open positions")
+        }
+        <h4 class="pnl-sec">Free bags</h4>
+        ${
+          free.length
+            ? free
+                .map(
+                  (f) =>
+                    `<div class="learn-card-meta">${escHtml(f.symbol)} · held $${
+                      f.remaining_mark_usd != null
+                        ? Number(f.remaining_mark_usd).toFixed(0)
+                        : "—"
+                    } · sold $${
+                      f.sold_usd != null ? Number(f.sold_usd).toFixed(0) : "—"
+                    } · real $${
+                      f.realized_pnl_usd != null
+                        ? Number(f.realized_pnl_usd).toFixed(0)
+                        : "—"
+                    }</div>`
+                )
+                .join("")
+            : `<div class="mute">No free bags yet — mark when principal is back (e.g. SYN).</div>`
+        }
+      `;
+    } catch (e) {
+      host.innerHTML = rankEmpty(e.message || "PnL failed");
+    }
   }
 
   /** @param {{ force?: boolean, soft?: boolean }} [opts] */
@@ -1416,6 +1666,9 @@
       "rule_break",
       "process_skip",
       "false_panic",
+      "free_coins",
+      "free_tp_ok",
+      "free_tp_greed",
     ];
     const AD_CHIPS = ["ad_met", "ad_missed"];
 
@@ -2832,6 +3085,7 @@
     const map = {
       overview: loadOverview,
       positions: () => loadPositions({ force: true }),
+      pnl: loadPnl,
       movers: loadMovers,
       targets: loadTargets,
       memory: loadMemory,
@@ -2858,6 +3112,14 @@
     b.addEventListener("click", () => {
       setView(b.dataset.view);
       refreshAll();
+    })
+  );
+  $$(".pnl-win").forEach((b) =>
+    b.addEventListener("click", () => {
+      $$(".pnl-win").forEach((x) => x.classList.remove("on"));
+      b.classList.add("on");
+      state.pnlWindow = b.dataset.pnlWin || "30d";
+      loadPnl();
     })
   );
   $("#btnRefresh").addEventListener("click", refreshAll);

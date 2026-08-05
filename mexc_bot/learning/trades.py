@@ -187,6 +187,8 @@ def segment_positions_from_fills(
                 outcome = "success"
             elif pnl_pct < -0.5:
                 outcome = "miss"
+        bought_usd = round(bought_cost_cycle, 4) if bought_cost_cycle else 0.0
+        sold_usd = round(realized_quote, 4) if realized_quote else 0.0
         positions.append(
             {
                 "symbol": symbol,
@@ -202,6 +204,13 @@ def segment_positions_from_fills(
                 "size_remaining": 0.0,
                 "size_qty": bought_qty_cycle,
                 "size_sold": sold_qty_cycle,
+                "bought_usd": bought_usd,
+                "sold_usd": sold_usd,
+                "remaining_cost_usd": 0.0,
+                "remaining_mark_usd": 0.0,
+                "principal_recovered": bool(
+                    bought_usd > 0 and sold_usd + 1e-6 >= bought_usd
+                ),
                 "buy_orders": list(cycle_buys),
                 "sell_orders": list(cycle_sells),
                 "n_buys": len(cycle_buys),
@@ -265,7 +274,25 @@ def segment_positions_from_fills(
 
     # open remainder (ignore dust)
     if not _inventory_is_flat(qty, bought_qty_cycle) and cycle_buys:
-        entry_avg = cost / qty if qty > 0 else None
+        entry_avg = cost / qty if qty > 0 else None  # residual inventory avg
+        entry_avg_full = (
+            (bought_cost_cycle / bought_qty_cycle) if bought_qty_cycle > 1e-12 else None
+        )
+        bought_usd = round(bought_cost_cycle, 4) if bought_cost_cycle else 0.0
+        sold_usd = round(realized_quote, 4) if realized_quote else 0.0
+        remaining_cost = round(cost, 4) if cost > 0 else 0.0
+        # Partial realized on sells so far (avg-cost of sold vs sell proceeds)
+        pnl_usd = None
+        pnl_pct = None
+        if entry_avg_full and entry_avg_full > 0 and sold_qty_cycle > 0:
+            cost_basis_sold = entry_avg_full * sold_qty_cycle
+            pnl_usd = sold_usd - cost_basis_sold
+            exit_avg = sold_usd / sold_qty_cycle if sold_qty_cycle > 0 else None
+            if exit_avg is not None:
+                pnl_pct = (exit_avg - entry_avg_full) / entry_avg_full * 100.0
+        principal_recovered = bool(
+            bought_usd > 0 and sold_usd + max(1.0, 0.005 * bought_usd) >= bought_usd
+        )
         positions.append(
             {
                 "symbol": symbol,
@@ -283,12 +310,17 @@ def segment_positions_from_fills(
                 "size_remaining": qty,
                 "size_qty": bought_qty_cycle,
                 "size_sold": sold_qty_cycle,
+                "bought_usd": bought_usd,
+                "sold_usd": sold_usd,
+                "remaining_cost_usd": remaining_cost,
+                "remaining_mark_usd": None,  # filled when mark available
+                "principal_recovered": principal_recovered,
                 "buy_orders": list(cycle_buys),
                 "sell_orders": list(cycle_sells),
                 "n_buys": len(cycle_buys),
                 "n_sells": len(cycle_sells),
-                "realized_pnl_pct": None,
-                "realized_pnl_usd": None,
+                "realized_pnl_pct": round(pnl_pct, 3) if pnl_pct is not None else None,
+                "realized_pnl_usd": round(pnl_usd, 4) if pnl_usd is not None else None,
                 "outcome": "open",
                 "is_open": True,
                 "recon_from_fills": True,

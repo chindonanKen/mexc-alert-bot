@@ -225,6 +225,22 @@ class EventStore:
             "CREATE INDEX IF NOT EXISTS idx_setup_cases_sym "
             "ON agent_setup_cases (user_id, symbol, market, frozen_at DESC)"
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS position_flags (
+                user_id INTEGER NOT NULL,
+                entity_key TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                market TEXT NOT NULL,
+                free_coins_override TEXT,
+                free_since_ts REAL,
+                free_mark_usd REAL,
+                notes TEXT,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (user_id, entity_key)
+            )
+            """
+        )
 
     @staticmethod
     def _ensure_column(
@@ -894,6 +910,86 @@ class EventStore:
                 (int(user_id), limit),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def list_position_flags(self, user_id: int) -> List[dict]:
+        with self._lock:
+            rows = self._get_conn().execute(
+                "SELECT * FROM position_flags WHERE user_id = ?",
+                (int(user_id),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def set_position_flag(
+        self,
+        user_id: int,
+        entity_key: str,
+        *,
+        symbol: str,
+        market: str = "spot",
+        free_coins_override: Optional[str] = None,
+        free_mark_usd: Optional[float] = None,
+        notes: Optional[str] = None,
+    ) -> dict:
+        """free_coins_override: 'on' | 'off' | None (clear)."""
+        ov = free_coins_override
+        if ov is not None:
+            ov = str(ov).lower().strip()
+            if ov in ("", "null", "none", "clear"):
+                ov = None
+            elif ov not in ("on", "off"):
+                raise ValueError("free_coins_override must be on|off|null")
+        now = time.time()
+        with self._lock:
+            conn = self._get_conn()
+            existing = conn.execute(
+                "SELECT * FROM position_flags WHERE user_id = ? AND entity_key = ?",
+                (int(user_id), str(entity_key)),
+            ).fetchone()
+            free_since = None
+            mark = free_mark_usd
+            if ov == "on":
+                free_since = (
+                    float(existing["free_since_ts"])
+                    if existing and existing["free_since_ts"]
+                    else now
+                )
+                if mark is None and existing and existing["free_mark_usd"] is not None:
+                    mark = float(existing["free_mark_usd"])
+            elif existing and ov is None:
+                # clearing override
+                pass
+            conn.execute(
+                """
+                INSERT INTO position_flags (
+                    user_id, entity_key, symbol, market, free_coins_override,
+                    free_since_ts, free_mark_usd, notes, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, entity_key) DO UPDATE SET
+                    symbol = excluded.symbol,
+                    market = excluded.market,
+                    free_coins_override = excluded.free_coins_override,
+                    free_since_ts = excluded.free_since_ts,
+                    free_mark_usd = excluded.free_mark_usd,
+                    notes = COALESCE(excluded.notes, position_flags.notes),
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    int(user_id),
+                    str(entity_key),
+                    str(symbol).upper(),
+                    str(market or "spot").lower(),
+                    ov,
+                    free_since,
+                    mark,
+                    notes,
+                    now,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM position_flags WHERE user_id = ? AND entity_key = ?",
+                (int(user_id), str(entity_key)),
+            ).fetchone()
+            return dict(row) if row else {}
 
     def approve_lesson(
         self, user_id: int, lesson_id: int, *, dismiss: bool = False

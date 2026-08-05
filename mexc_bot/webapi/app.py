@@ -729,6 +729,55 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(400, str(e))
 
+    class PositionFlagBody(BaseModel):
+        entity_key: str
+        symbol: str
+        market: str = "spot"
+        free_coins_override: Optional[str] = None  # on | off | null
+        free_mark_usd: Optional[float] = None
+        notes: Optional[str] = None
+
+    @app.post("/api/positions/flags")
+    def post_position_flag(body: PositionFlagBody, _: bool = Depends(require_auth)):
+        """Mark / unmark free coins on an open position (manual override)."""
+        from ..learning.store import EventStore
+
+        try:
+            uid = db.default_user_id()
+            if not uid:
+                raise HTTPException(400, "DESK_USER_ID not set")
+            store = EventStore(db.db_path())
+            row = store.set_position_flag(
+                int(uid),
+                body.entity_key,
+                symbol=body.symbol,
+                market=body.market,
+                free_coins_override=body.free_coins_override,
+                free_mark_usd=body.free_mark_usd,
+                notes=body.notes,
+            )
+            return {"ok": True, "flag": row}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/pnl")
+    def get_pnl(
+        window: str = Query("30d"),
+        _: bool = Depends(require_auth),
+    ):
+        """Smart PnL — dollar bankroll, realized, free bags, open book."""
+        from .pnl import build_pnl_summary
+
+        try:
+            uid = db.default_user_id()
+            if not uid:
+                return {"error": "no user", "bankroll": {}, "realized": {}}
+            return build_pnl_summary(int(uid), window=window)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
     @app.get("/api/events")
     def events(limit: int = Query(40, ge=1, le=200), _: bool = Depends(require_auth)):
         uid = db.default_user_id()

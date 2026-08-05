@@ -90,4 +90,9 @@ Flags, size caps, kill switch, allowlists; only paper-proven policy; full audit.
 6. Never break spot target `stable_id` crossing; never grow learning into Telegram.  
 7. After shipping a phase: update this file status, `SESSION_HANDOFF`, `GET /api/roadmap`, `Agents.md`.
 
-**Status snapshot:** P0 done · **P1 next** · P2–P7 not started.
+**Status snapshot:** P0 done · P1 case core shipped · **desk money UX: $ bought/sold + free coins + PnL page** · P2 decide+log next for agent brain.
+
+### Free coins (spot discipline)
+
+When **$ sold ≥ $ bought** on an open spot cycle, residual bag = **free inventory** (scale out in layers).  
+Auto badge `FREE` + manual **Mark free coins / Not free**. Teach chips: `free_coins`, `free_tp_ok`, `free_tp_greed`.

@@ -201,6 +201,21 @@ def list_position_entities(
                         d["mark_source"] = "mexc_position"
                 except Exception:
                     pass
+            # Dollar held at mark
+            try:
+                rem = float(d.get("size_remaining") or 0)
+                mark = float(d.get("mark_price") or 0)
+                if rem > 0 and mark > 0:
+                    d["remaining_mark_usd"] = round(rem * mark, 4)
+            except Exception:
+                pass
+            # Spot residual cost / mark for free-coin math if missing
+            if d.get("bought_usd") is None and d.get("size_qty") and d.get("entry_display"):
+                try:
+                    # fallback rough: not preferred
+                    pass
+                except Exception:
+                    pass
             d["outcome"] = d.get("outcome") or "open"
         else:
             d["mark_price"] = d.get("mark_price")
@@ -212,6 +227,12 @@ def list_position_entities(
                 )
             if d.get("closed_at"):
                 d["closed_ago_seconds"] = max(0.0, now - float(d["closed_at"]))
+
+    # Free-coin flags (spot open) — merge manual overrides from SQLite
+    try:
+        _apply_free_coins(entities, user_id=user_id, store=store)
+    except Exception as e:
+        logger.debug("free_coins: %s", e)
 
     opens = [e for e in entities if e.get("status") == "open"]
     closed = [e for e in entities if e.get("status") == "closed"]
@@ -236,6 +257,79 @@ def list_position_entities(
             e["journal_id"] = None
         e["band"] = "open" if e.get("status") == "open" else "closed"
     return entities
+
+
+def _apply_free_coins(
+    entities: List[dict], *, user_id: int, store: Any
+) -> None:
+    """Spot open bags: principal recovered → free coins (auto) + manual override."""
+    flags: Dict[str, dict] = {}
+    try:
+        if store is not None and hasattr(store, "list_position_flags"):
+            for f in store.list_position_flags(user_id):
+                flags[str(f.get("entity_key") or "")] = f
+    except Exception:
+        flags = {}
+
+    for d in entities:
+        ek = str(d.get("entity_key") or "")
+        # stable key for spot open by symbol
+        alt = f"sopen:{(d.get('symbol') or '').upper()}"
+        fl = flags.get(ek) or flags.get(alt) or {}
+        override = (fl.get("free_coins_override") or "").lower() or None
+
+        bought = float(d.get("bought_usd") or 0)
+        sold = float(d.get("sold_usd") or 0)
+        rem = float(d.get("size_remaining") or 0)
+        mkt = (d.get("market") or "").lower()
+        is_open = d.get("status") == "open" or d.get("is_open")
+        verified = d.get("money_truth") in (
+            "exchange",
+            "exchange_history",
+            "spot_balance",
+        ) or d.get("verified") is True
+
+        principal = bool(d.get("principal_recovered"))
+        if not principal and bought > 0 and sold + max(1.0, 0.005 * bought) >= bought:
+            principal = True
+            d["principal_recovered"] = True
+
+        auto = False
+        near = False
+        if (
+            is_open
+            and mkt == "spot"
+            and rem > 1e-8
+            and bought > 0
+            and verified
+            and d.get("money_truth") != "fill_recon_unverified"
+        ):
+            if principal:
+                auto = True
+            elif sold >= 0.9 * bought:
+                near = True
+
+        if override == "on":
+            status, source = "manual_on", "manual"
+        elif override == "off":
+            status, source = "manual_off", "manual"
+        elif auto:
+            status, source = "auto", "auto"
+        elif near:
+            status, source = "near_free", "auto"
+        else:
+            status, source = "none", "none"
+
+        d["free_coins_status"] = status
+        d["free_coins_source"] = source
+        d["free_coins"] = status in ("auto", "manual_on")
+        d["free_coins_override"] = override
+        if fl.get("free_since_ts"):
+            d["free_since_ts"] = fl.get("free_since_ts")
+        if fl.get("free_mark_usd") is not None:
+            d["free_mark_usd_at_flag"] = fl.get("free_mark_usd")
+        elif d.get("free_coins") and d.get("remaining_mark_usd") is not None:
+            d["free_mark_usd_at_flag"] = d.get("remaining_mark_usd")
 
 
 def _norm_fut_key(symbol: str) -> str:

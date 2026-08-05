@@ -25,6 +25,7 @@
         <button data-view="targets">Targets</button>
         <button data-view="movers">Movers</button>
         <button data-view="positions">Positions</button>
+        <button data-view="pnl">PnL</button>
         <div class="nav-sep">More</div>
         <button data-view="memory" class="nav-dim" id="navLearning">Learning <span id="navLearnBadge" class="nav-badge" hidden>0</span></button>
         <button data-view="intel" class="nav-dim">Intel</button>
@@ -79,13 +80,14 @@
         <div id="ovAgentLearned" class="ov-agent-learned panel clean mt" hidden></div>
       </section>
 
-      <!-- POSITIONS -->
+      <!-- POSITIONS — dollar-first + free coins -->
       <section class="view" id="view-positions">
         <div class="panel clean">
           <header class="panel-h pos-page-h">
             <h3>Positions</h3>
-            <span class="badge quiet" id="posListHead">open first · closed latest</span>
+            <span class="badge quiet" id="posListHead">$ bought / sold · free coins</span>
           </header>
+          <p class="pos-bankroll mute" id="posBankroll">—</p>
           <div id="posTable" class="scroll pos-list"></div>
           <details class="pos-manual">
             <summary class="pos-manual-sum">Log manual journal</summary>
@@ -97,6 +99,22 @@
               <button class="btn" type="submit">Open</button>
             </form>
           </details>
+        </div>
+      </section>
+
+      <!-- PnL -->
+      <section class="view" id="view-pnl">
+        <div class="panel clean">
+          <header class="panel-h">
+            <h3>PnL</h3>
+            <div class="pnl-windows">
+              <button type="button" class="btn soft sm pnl-win on" data-pnl-win="7d">7d</button>
+              <button type="button" class="btn soft sm pnl-win" data-pnl-win="30d">30d</button>
+              <button type="button" class="btn soft sm pnl-win" data-pnl-win="all">All</button>
+            </div>
+          </header>
+          <p class="learn-panel-hint mute">Dollar facts from exchange / fill cycles. Free bags = principal recovered on spot.</p>
+          <div id="pnlBody" class="pnl-body"></div>
         </div>
       </section>
 
@@ -224,6 +242,9 @@
                 <button type="button" class="chip" data-beh="rule_break" title="Broke a hard rule">rule_break</button>
                 <button type="button" class="chip" data-beh="process_skip" title="Should have taken/skipped per plan, didn’t">process_skip</button>
                 <button type="button" class="chip" data-beh="false_panic" title="Looked like panic; not a tradeable AD setup">false_panic</button>
+                <button type="button" class="chip" data-beh="free_coins" title="Bag treated as free inventory after principal back">free_coins</button>
+                <button type="button" class="chip" data-beh="free_tp_ok" title="Scaled free coins well in layers">free_tp_ok</button>
+                <button type="button" class="chip" data-beh="free_tp_greed" title="Held free bag too long / no scale-out">free_tp_greed</button>
               </div>
               <div class="learn-chip-row">
                 <p class="learn-chip-hint mute">AD zone · did price hit your buy area?</p>

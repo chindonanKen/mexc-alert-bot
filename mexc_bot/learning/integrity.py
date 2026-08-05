@@ -36,6 +36,9 @@ ALLOWED_BEHAVIOR = frozenset(
         "fomo",
         "rule_break",
         "process_skip",
+        "free_coins",
+        "free_tp_ok",
+        "free_tp_greed",
         None,
     }
 )
