@@ -374,46 +374,40 @@
     $("#ovPos").innerHTML = pos.length
       ? pos
           .map((p) => {
-            const entry = p.entry_display != null ? p.entry_display : p.entry_avg;
-            const up = p.upnl_pct;
-            const upS =
-              up != null
-                ? `<span class="${up >= 0 ? "up" : "dn"}">${
-                    up >= 0 ? "+" : ""
-                  }${Number(up).toFixed(1)}%</span>`
-                : "—";
-            const truth =
-              p.exchange_hold || p.verified || p.money_truth === "exchange"
-                ? "LIVE"
-                : p.money_truth === "fill_recon_unverified"
-                  ? "FILL?"
-                  : "";
+            const free = p.free_coins
+              ? `<span class="pos-free">FREE</span>`
+              : "";
+            const hero =
+              p.free_coins && p.remaining_mark_usd != null
+                ? "$" + Number(p.remaining_mark_usd).toFixed(0)
+                : p.upnl_usd_est != null
+                  ? (Number(p.upnl_usd_est) >= 0 ? "+$" : "−$") +
+                    Math.abs(Number(p.upnl_usd_est)).toFixed(0)
+                  : p.realized_pnl_usd != null
+                    ? (Number(p.realized_pnl_usd) >= 0 ? "+$" : "−$") +
+                      Math.abs(Number(p.realized_pnl_usd)).toFixed(0)
+                    : "—";
+            const flow = [
+              p.bought_usd != null ? "in $" + Number(p.bought_usd).toFixed(0) : null,
+              p.sold_usd != null ? "out $" + Number(p.sold_usd).toFixed(0) : null,
+              p.remaining_mark_usd != null && !p.free_coins
+                ? "held $" + Number(p.remaining_mark_usd).toFixed(0)
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ");
             return `<div class="cmd-row pos">
             <div class="cmd-row-main">
               <div>
-                <div class="cmd-sym">${p.symbol}${
-              truth
-                ? ` <span class="pos-src">${truth}</span>`
-                : ""
-            }</div>
-                <div class="cmd-meta">avg ${
-                  entry != null ? fmtPx(entry) : "—"
-                } · mark ${
-                  p.mark_price != null ? fmtPx(p.mark_price) : "—"
+                <div class="cmd-sym">${escHtml(String(p.symbol || ""))} ${free}</div>
+                <div class="cmd-meta">${flow || "—"}</div>
+                <div class="cmd-meta">${
+                  p.hold_hours != null ? p.hold_hours + "h" : ""
                 }</div>
-                <div class="cmd-meta">qty ${
-                  p.size_remaining != null
-                    ? Number(p.size_remaining).toFixed(2)
-                    : "—"
-                } · ${p.hold_hours != null ? p.hold_hours + "h" : ""}${
-              p.upnl_usd_est != null
-                ? " · ~$" + Number(p.upnl_usd_est).toFixed(0)
-                : ""
-            }</div>
               </div>
             </div>
             <div class="cmd-side">
-              <div class="cmd-px">${upS}</div>
+              <div class="cmd-px mono">${hero}</div>
             </div>
           </div>`;
           })
@@ -475,38 +469,21 @@
   }
 
   function posOutcomeBadge(p) {
-    const o = (p.outcome || p.status || "").toLowerCase();
-    if (o === "open" || p.status === "open") {
+    const isOpen = p.status === "open" || p.is_open;
+    if (isOpen) {
+      if (p.free_coins) {
+        const src = p.free_coins_source === "manual" ? " · manual" : "";
+        return `<span class="pos-outcome free" title="Principal recovered — free inventory${src}">FREE</span>`;
+      }
+      if (p.free_coins_status === "near_free") {
+        return `<span class="pos-outcome near" title="Almost principal recovered">NEAR</span>`;
+      }
       return `<span class="pos-outcome open">OPEN</span>`;
     }
+    const o = (p.outcome || p.status || "").toLowerCase();
     if (o === "success") return `<span class="pos-outcome success">WIN</span>`;
     if (o === "miss") return `<span class="pos-outcome miss">MISS</span>`;
     return `<span class="pos-outcome flat">FLAT</span>`;
-  }
-
-  function posPnlClass(p, isOpen) {
-    if (isOpen) {
-      const u = p.upnl_pct;
-      if (u == null) return "mute";
-      return u >= 0 ? "up" : "dn";
-    }
-    const o = (p.outcome || "").toLowerCase();
-    if (o === "success") return "up";
-    if (o === "miss") return "dn";
-    return "mute"; // flat band — not green on +0.2%
-  }
-
-  function posPnlLine(p) {
-    const isOpen = p.status === "open" || p.is_open;
-    const cls = posPnlClass(p, isOpen);
-    if (isOpen) {
-      const upnl = p.upnl_pct;
-      if (upnl == null) return `<span class="mute">—</span>`;
-      return `<span class="${cls}">${upnl >= 0 ? "+" : ""}${Number(upnl).toFixed(1)}%</span>`;
-    }
-    const rp = p.realized_pnl_pct;
-    if (rp == null) return `<span class="mute">—</span>`;
-    return `<span class="${cls}">${rp >= 0 ? "+" : ""}${Number(rp).toFixed(1)}%</span>`;
   }
 
   function posMarketPill(m) {
@@ -516,135 +493,136 @@
     return `<span class="pos-mkt">?</span>`;
   }
 
+  function _usd(n, signed) {
+    if (n == null || Number.isNaN(Number(n))) return "—";
+    const v = Number(n);
+    if (signed) {
+      return (v >= 0 ? "+$" : "−$") + Math.abs(v).toFixed(0);
+    }
+    return "$" + Math.abs(v).toFixed(0);
+  }
+
+  function _holdWhen(p, isOpen) {
+    if (isOpen) {
+      if (p.hold_hours == null) return "—";
+      return p.hold_hours >= 24
+        ? (p.hold_hours / 24).toFixed(1) + "d"
+        : p.hold_hours + "h";
+    }
+    if (p.closed_ago_seconds != null) {
+      const sec = p.closed_ago_seconds;
+      if (sec < 3600) return Math.round(sec / 60) + "m ago";
+      if (sec < 86400) return (sec / 3600).toFixed(1) + "h ago";
+      return (sec / 86400).toFixed(1) + "d ago";
+    }
+    if (p.hold_hours != null) return "held " + p.hold_hours + "h";
+    return "—";
+  }
+
+  function _fillUsd(o) {
+    const q =
+      o.quote_qty != null
+        ? Number(o.quote_qty)
+        : o.price != null && o.qty != null
+          ? Number(o.price) * Number(o.qty)
+          : null;
+    return q != null && !Number.isNaN(q) ? "$" + q.toFixed(0) : "—";
+  }
+
   function posCardHtml(p) {
     const isOpen = p.status === "open" || p.is_open;
     const entry = p.entry_display != null ? p.entry_display : p.entry_avg;
     const exit_ = p.exit_avg;
     const mark = p.mark_price;
-    const pnlS = posPnlLine(p);
-    const usd =
-      isOpen && p.upnl_usd_est != null
-        ? `<span class="pos-usd">~$${Number(p.upnl_usd_est).toFixed(0)}</span>`
-        : !isOpen && p.realized_pnl_usd != null
-          ? `<span class="pos-usd">$${Number(p.realized_pnl_usd).toFixed(0)}</span>`
-          : "";
-    const when = isOpen
-      ? p.hold_hours != null
-        ? p.hold_hours >= 24
-          ? (p.hold_hours / 24).toFixed(1) + "d held"
-          : p.hold_hours + "h held"
-        : ""
-      : p.closed_ago_seconds != null
-        ? "closed " +
-          (function () {
-            const sec = p.closed_ago_seconds;
-            if (sec < 60) return Math.round(sec) + "s ago";
-            if (sec < 3600) return Math.round(sec / 60) + "m ago";
-            if (sec < 86400) return (sec / 3600).toFixed(1) + "h ago";
-            return (sec / 86400).toFixed(1) + "d ago";
-          })()
-        : p.hold_hours != null
-          ? "held " + p.hold_hours + "h"
-          : "";
-    const layersBit =
-      (p.n_buys || p.n_sells)
-        ? ` · B${p.n_buys || 0}/S${p.n_sells || 0}`
+    const bought = p.bought_usd != null ? Number(p.bought_usd) : null;
+    const sold = p.sold_usd != null ? Number(p.sold_usd) : null;
+    const held = p.remaining_mark_usd != null ? Number(p.remaining_mark_usd) : null;
+    const real = p.realized_pnl_usd != null ? Number(p.realized_pnl_usd) : null;
+    const cashBanked =
+      bought != null && sold != null ? sold - bought : null;
+    const posId =
+      p.entity_key ||
+      p.exchange_position_id ||
+      `${p.market || "?"}:${p.symbol}:${p.status}:${p.opened_at || ""}:${p.closed_at || ""}`;
+
+    // Hero money (token 3): free bag → held $; open → uPnL $; closed → realized $
+    let heroMain = "—";
+    let heroSub = "";
+    let heroCls = "mute";
+    if (isOpen && p.free_coins && held != null) {
+      heroMain = _usd(held, false);
+      heroCls = "up";
+      if (cashBanked != null) heroSub = "cash " + _usd(cashBanked, true);
+    } else if (isOpen) {
+      if (p.upnl_usd_est != null) {
+        heroMain = _usd(p.upnl_usd_est, true);
+        heroCls = Number(p.upnl_usd_est) >= 0 ? "up" : "dn";
+      }
+      if (p.upnl_pct != null) {
+        heroSub =
+          (Number(p.upnl_pct) >= 0 ? "+" : "") +
+          Number(p.upnl_pct).toFixed(1) +
+          "%";
+      }
+    } else {
+      if (real != null) {
+        heroMain = _usd(real, true);
+        heroCls = real >= 0 ? "up" : "dn";
+      }
+      if (p.realized_pnl_pct != null) {
+        heroSub =
+          (Number(p.realized_pnl_pct) >= 0 ? "+" : "") +
+          Number(p.realized_pnl_pct).toFixed(1) +
+          "%";
+      }
+    }
+
+    // Flow: In · Out · Held (open) or In · Out · PnL (closed)
+    const flow3k = isOpen ? "Held" : "PnL";
+    const flow3v = isOpen
+      ? held != null
+        ? _usd(held, false)
+        : "—"
+      : real != null
+        ? _usd(real, true)
+        : "—";
+
+    const when = _holdWhen(p, isOpen);
+    const layers =
+      p.n_buys || p.n_sells
+        ? `B${p.n_buys || 0}/S${p.n_sells || 0}`
         : "";
-    const boughtU =
-      p.bought_usd != null ? "$" + Number(p.bought_usd).toFixed(0) : null;
-    const soldU =
-      p.sold_usd != null ? "$" + Number(p.sold_usd).toFixed(0) : null;
-    const heldU =
-      p.remaining_mark_usd != null
-        ? "$" + Number(p.remaining_mark_usd).toFixed(0)
-        : null;
-    const realU =
-      p.realized_pnl_usd != null
-        ? (Number(p.realized_pnl_usd) >= 0 ? "+$" : "-$") +
-          Math.abs(Number(p.realized_pnl_usd)).toFixed(0)
-        : null;
-    const sizeBit = isOpen
-      ? [
-          boughtU ? "in " + boughtU : null,
-          soldU ? "out " + soldU : null,
-          heldU ? "held " + heldU : null,
-          layersBit.trim(),
-        ]
-          .filter(Boolean)
-          .join(" · ") || "—"
-      : [
-          boughtU ? "in " + boughtU : null,
-          soldU ? "out " + soldU : null,
-          realU ? "PnL " + realU : null,
-          layersBit.trim(),
-        ]
-          .filter(Boolean)
-          .join(" · ") || "—";
-    const freeBadge = p.free_coins
-      ? `<span class="pos-free" title="Principal recovered — free inventory">FREE</span>`
-      : p.free_coins_status === "near_free"
-        ? `<span class="pos-free near" title="Almost principal recovered">NEAR FREE</span>`
-        : "";
-    const fillUsd = (o) => {
-      const q =
-        o.quote_qty != null
-          ? Number(o.quote_qty)
-          : o.price != null && o.qty != null
-            ? Number(o.price) * Number(o.qty)
-            : null;
-      return q != null && !Number.isNaN(q) ? "$" + q.toFixed(0) : "—";
-    };
+
+    const truth =
+      p.exchange_history || p.money_truth === "exchange"
+        ? `<span class="pos-src" title="Exchange history">EXCH</span>`
+        : p.exchange_hold || p.money_truth === "spot_balance"
+          ? `<span class="pos-src" title="Live / balance">LIVE</span>`
+          : p.money_truth === "fill_recon_unverified" || p.verified === false
+            ? `<span class="pos-src" title="Fill residual">FILL?</span>`
+            : "";
+
     const buys = (p.buy_orders || [])
       .map(
         (o) =>
-          `<div class="pos-fill buy">BUY ${fillUsd(o)} @ ${
+          `<div class="pos-layer buy"><span>BUY</span><span class="pos-layer-usd">${_fillUsd(
+            o
+          )}</span><span>@ ${
             o.price != null ? fmtPx(o.price) : "—"
-          } · qty ${o.qty != null ? o.qty : "—"} · ${fmtTime(o.ts)}</div>`
+          }</span><span class="mute">${fmtTime(o.ts)}</span></div>`
       )
       .join("");
     const sells = (p.sell_orders || [])
       .map(
         (o) =>
-          `<div class="pos-fill sell">SELL ${fillUsd(o)} @ ${
+          `<div class="pos-layer sell"><span>SELL</span><span class="pos-layer-usd">${_fillUsd(
+            o
+          )}</span><span>@ ${
             o.price != null ? fmtPx(o.price) : "—"
-          } · qty ${o.qty != null ? o.qty : "—"} · ${fmtTime(o.ts)}</div>`
+          }</span><span class="mute">${fmtTime(o.ts)}</span></div>`
       )
       .join("");
-    const canCloseJournal =
-      isOpen && p.journal_id != null && Number(p.journal_id) > 0;
-    const holdAvg =
-      p.hold_avg != null && p.hold_avg !== entry
-        ? ` · inv ${fmtPx(p.hold_avg)}`
-        : "";
-    const fundBit =
-      isOpen && p.hold_fee != null && Number(p.hold_fee) !== 0
-        ? ` · fund ${Number(p.hold_fee) >= 0 ? "+" : ""}${Number(p.hold_fee).toFixed(2)}`
-        : "";
-    const priceDetail = isOpen
-      ? `live avg ${entry != null ? fmtPx(entry) : "—"}${holdAvg} · mark ${
-          mark != null ? fmtPx(mark) : "—"
-        }${fundBit}`
-      : `in ${entry != null ? fmtPx(entry) : "—"} → out ${
-          exit_ != null ? fmtPx(exit_) : "—"
-        }`;
-    const posId =
-      p.entity_key ||
-      p.exchange_position_id ||
-      `${p.market || "?"}:${p.symbol}:${p.status}:${p.opened_at || ""}:${p.closed_at || ""}`;
-    const exchBadge =
-      p.exchange_history || p.money_truth === "exchange"
-        ? `<span class="pos-src" title="MEXC history_positions">EXCH</span>`
-        : p.exchange_hold
-          ? `<span class="pos-src" title="MEXC open_positions">LIVE</span>`
-          : p.money_truth === "fill_recon_unverified" || p.verified === false
-            ? `<span class="pos-src" title="Fill residual — not balance-verified">FILL?</span>`
-            : "";
-    const sideBit =
-      p.position_side === "short"
-        ? " · short"
-        : p.position_side === "long"
-          ? " · long"
-          : "";
+
     const freeBtns =
       isOpen && (p.market || "").toLowerCase() === "spot"
         ? `<div class="row-gap pos-free-actions">
@@ -652,86 +630,147 @@
               String(posId)
             )}" data-sym="${escHtml(p.symbol || "")}" data-mkt="spot" data-mark="${
               p.remaining_mark_usd != null ? p.remaining_mark_usd : ""
-            }">Mark free coins</button>
+            }">Mark free</button>
             <button type="button" class="btn soft sm" data-free-off="${escHtml(
               String(posId)
             )}" data-sym="${escHtml(p.symbol || "")}" data-mkt="spot">Not free</button>
           </div>`
         : "";
+
+    const markLine = isOpen
+      ? `Avg ${entry != null ? fmtPx(entry) : "—"} · Mark ${
+          mark != null ? fmtPx(mark) : "—"
+        }${
+          p.upnl_pct != null
+            ? " · " +
+              (Number(p.upnl_pct) >= 0 ? "+" : "") +
+              Number(p.upnl_pct).toFixed(1) +
+              "%"
+            : ""
+        }${
+          p.position_side === "short"
+            ? " · short"
+            : p.position_side === "long"
+              ? " · long"
+              : ""
+        }${p.leverage != null ? " · " + p.leverage + "x" : ""}`
+      : `${entry != null ? fmtPx(entry) : "—"} → ${
+          exit_ != null ? fmtPx(exit_) : "—"
+        }`;
+
+    const freeBanner = p.free_coins
+      ? `<div class="pos-free-banner">Free bag · ${
+          held != null ? _usd(held, false) : "—"
+        } mark · scale out on the way up${
+          cashBanked != null ? " · cash banked " + _usd(cashBanked, true) : ""
+        }</div>`
+      : p.free_coins_status === "near_free"
+        ? `<div class="pos-free-banner near">Near free · principal almost back</div>`
+        : "";
+
     return `<details class="pos-card ${isOpen ? "is-open" : "is-closed"} outcome-${
-      (p.outcome || "flat").toLowerCase()
-    }${p.free_coins ? " is-free" : ""}" data-pos-id="${String(posId).replace(
-      /"/g,
-      ""
-    )}">
+      (p.outcome || (isOpen ? "open" : "flat")).toLowerCase()
+    }${p.free_coins ? " is-free" : ""}${
+      p.free_coins_status === "near_free" ? " is-near" : ""
+    }" data-pos-id="${String(posId).replace(/"/g, "")}">
       <summary class="pos-sum">
-        <span class="pos-sym">${p.symbol}</span>
+        <div class="pos-id"><span class="pos-sym">${escHtml(
+          String(p.symbol || "")
+        )}</span></div>
         ${posOutcomeBadge(p)}
-        ${freeBadge}
-        <span class="pos-pnl">${pnlS}${usd ? " " + usd : ""}${
-      realU && isOpen ? " · real " + realU : ""
-    }</span>
-        <span class="pos-when">${when}</span>
-        <span class="pos-size">${sizeBit}</span>
-        ${posMarketPill(p.market)}
-        ${exchBadge}
+        <div class="pos-pnl-block">
+          <span class="pos-pnl-main ${heroCls}">${heroMain}</span>
+          ${heroSub ? `<span class="pos-pnl-sub">${heroSub}</span>` : ""}
+        </div>
+        <div class="pos-flow">
+          <div class="pos-flow-cell"><span class="pos-flow-k">In</span><span class="pos-flow-v">${
+            bought != null ? _usd(bought, false) : "—"
+          }</span></div>
+          <div class="pos-flow-cell"><span class="pos-flow-k">Out</span><span class="pos-flow-v">${
+            sold != null ? _usd(sold, false) : "—"
+          }</span></div>
+          <div class="pos-flow-cell"><span class="pos-flow-k">${flow3k}</span><span class="pos-flow-v">${flow3v}</span></div>
+        </div>
+        <div class="pos-meta">${when}${layers ? " · " + layers : ""}</div>
+        <div class="pos-tags">${posMarketPill(p.market)}${truth}</div>
         <span class="pos-chev" aria-hidden="true">▾</span>
       </summary>
       <div class="pos-detail">
-        <div class="learn-card-meta">${priceDetail}${sideBit}${
-      p.leverage != null ? " · " + p.leverage + "x" : ""
-    } · ${isOpen ? "opened" : "cycle"} ${fmtTime(p.opened_at)}${
-      p.closed_at ? " → " + fmtTime(p.closed_at) : ""
-    }</div>
-        <div class="learn-card-meta">${
-          p.exchange_history
-            ? "Exchange realised $" +
-              (p.realized_pnl_usd != null
-                ? Number(p.realized_pnl_usd).toFixed(2)
-                : "—") +
-              (p.fee != null ? " · fee " + p.fee : "")
-            : `$ bought ${
-                p.bought_usd != null ? Number(p.bought_usd).toFixed(0) : "—"
-              } · $ sold ${
-                p.sold_usd != null ? Number(p.sold_usd).toFixed(0) : "—"
-              } · residual cost $${
-                p.remaining_cost_usd != null
-                  ? Number(p.remaining_cost_usd).toFixed(0)
-                  : "—"
-              }${
-                p.principal_recovered
-                  ? " · principal recovered"
-                  : ""
-              } · qty bought ${p.size_qty ?? "—"} / sold ${p.size_sold ?? "—"}`
+        <div class="pos-g">Capital</div>
+        <div class="pos-cash">
+          <div class="pos-cash-cell"><span class="pos-cash-k">In</span><span class="pos-cash-v">${
+            bought != null ? _usd(bought, false) : "—"
+          }</span></div>
+          <div class="pos-cash-cell"><span class="pos-cash-k">Out</span><span class="pos-cash-v">${
+            sold != null ? _usd(sold, false) : "—"
+          }</span></div>
+          <div class="pos-cash-cell"><span class="pos-cash-k">Cost left</span><span class="pos-cash-v">${
+            p.remaining_cost_usd != null
+              ? _usd(p.remaining_cost_usd, false)
+              : isOpen
+                ? "—"
+                : "$0"
+          }</span></div>
+          <div class="pos-cash-cell"><span class="pos-cash-k">${
+            isOpen ? "Bag" : "Real"
+          }</span><span class="pos-cash-v">${
+      isOpen
+        ? held != null
+          ? _usd(held, false)
+          : "—"
+        : real != null
+          ? _usd(real, true)
+          : "—"
+    }</span></div>
+        </div>
+        <div class="pos-g">Realized</div>
+        <div class="pos-price-line">${
+          real != null
+            ? "Real " +
+              _usd(real, true) +
+              (isOpen ? " (basis on sold)" : "") +
+              (p.realized_pnl_pct != null
+                ? " · " +
+                  (Number(p.realized_pnl_pct) >= 0 ? "+" : "") +
+                  Number(p.realized_pnl_pct).toFixed(1) +
+                  "%"
+                : "")
+            : "No realized yet"
+        }${
+          cashBanked != null && isOpen
+            ? " · cash path " + _usd(cashBanked, true)
+            : ""
+        }${p.principal_recovered ? " · principal back" : ""}${
+          p.fee != null ? " · fee " + p.fee : ""
         }</div>
         ${
-          p.free_coins
-            ? `<div class="learn-card-meta pos-free-note">Free coins · bag mark $${
-                p.remaining_mark_usd != null
-                  ? Number(p.remaining_mark_usd).toFixed(0)
-                  : "—"
-              } · scale out in layers on the way up</div>`
-            : ""
+          isOpen && (p.market || "").toLowerCase() === "spot"
+            ? `<div class="pos-g">Free bag</div>${freeBanner}${freeBtns}`
+            : freeBanner
         }
-        ${freeBtns}
-        <div class="learn-card-meta">Notes: ${(p.notes || "—").slice(0, 120)}</div>
-        <div class="pos-fills-h">Buy layers (${p.n_buys || 0})</div>
-        ${
-          buys ||
-          "<div class='mute'>No buy deals in window — wait for fill sync</div>"
-        }
-        <div class="pos-fills-h">Sell layers (${p.n_sells || 0})</div>
+        <div class="pos-g">Mark</div>
+        <div class="pos-price-line">${markLine} · ${
+      isOpen ? "opened" : "cycle"
+    } ${fmtTime(p.opened_at)}${
+      p.closed_at ? " → " + fmtTime(p.closed_at) : ""
+    }</div>
+        <div class="pos-g">Layers</div>
+        <div class="pos-fills-h">Buys (${p.n_buys || 0})</div>
+        ${buys || "<div class='mute'>No buys yet</div>"}
+        <div class="pos-fills-h">Sells (${p.n_sells || 0})</div>
         ${
           sells ||
           (isOpen
-            ? "<div class='mute'>No sell deals yet (or not synced)</div>"
-            : "<div class='mute'>No sell deals recorded</div>")
+            ? "<div class='mute'>No sells yet</div>"
+            : "<div class='mute'>No sells recorded</div>")
         }
+        <div class="pos-g">Meta</div>
+        <div class="pos-notes">Notes: ${escHtml(
+          String((p.notes || "—").slice(0, 160))
+        )}</div>
         ${
-          canCloseJournal
-            ? `<div class="row-gap mt">
-          <button type="button" class="btn soft sm" data-close="${p.journal_id}">Close journal</button>
-        </div>`
+          isOpen && p.journal_id != null && Number(p.journal_id) > 0
+            ? `<div class="row-gap mt"><button type="button" class="btn soft sm" data-close="${p.journal_id}">Close journal</button></div>`
             : ""
         }
       </div>
@@ -756,8 +795,14 @@
   function renderPositionsList(positions) {
     const host = $("#posTable");
     if (!host) return;
-    const opens = positions.filter((p) => p.status === "open" || p.is_open);
+    let opens = positions.filter((p) => p.status === "open" || p.is_open);
     const closed = positions.filter((p) => !(p.status === "open" || p.is_open));
+    // FREE first, then NEAR, then other opens (newest already from API)
+    opens = opens.slice().sort((a, b) => {
+      const ra = a.free_coins ? 0 : a.free_coins_status === "near_free" ? 1 : 2;
+      const rb = b.free_coins ? 0 : b.free_coins_status === "near_free" ? 1 : 2;
+      return ra - rb;
+    });
     const head = $("#posListHead");
     if (head) {
       head.textContent = `${opens.length} open · ${closed.length} closed`;
@@ -767,7 +812,8 @@
       let openMark = 0,
         freeMark = 0,
         freeN = 0,
-        openReal = 0;
+        openReal = 0,
+        cashBanked = 0;
       opens.forEach((p) => {
         if (p.remaining_mark_usd != null) openMark += Number(p.remaining_mark_usd);
         if (p.free_coins) {
@@ -775,12 +821,29 @@
           if (p.remaining_mark_usd != null) freeMark += Number(p.remaining_mark_usd);
         }
         if (p.realized_pnl_usd != null) openReal += Number(p.realized_pnl_usd);
+        if (
+          p.principal_recovered &&
+          p.bought_usd != null &&
+          p.sold_usd != null
+        ) {
+          cashBanked += Number(p.sold_usd) - Number(p.bought_usd);
+        }
       });
-      br.textContent = `Open mark $${openMark.toFixed(0)} · free bags ${freeN} ($${freeMark.toFixed(
+      const atRisk = Math.max(0, openMark - freeMark);
+      br.innerHTML = `<div class="pos-strip">
+        <div class="pos-strip-cell"><span class="pos-strip-k">At risk</span><span class="pos-strip-v">$${atRisk.toFixed(
+          0
+        )}</span></div>
+        <div class="pos-strip-cell is-free"><span class="pos-strip-k">Free bags</span><span class="pos-strip-v">${freeN} · $${freeMark.toFixed(
         0
-      )}) · partial realized on opens ${
-        openReal >= 0 ? "+" : ""
-      }$${openReal.toFixed(0)} · figures $ not shares`;
+      )}</span></div>
+        <div class="pos-strip-cell"><span class="pos-strip-k">Partial real</span><span class="pos-strip-v ${
+          openReal >= 0 ? "up" : "dn"
+        }">${openReal >= 0 ? "+" : ""}$${openReal.toFixed(0)}</span></div>
+      </div>
+      <div class="pos-strip-foot mute">Open mark $${openMark.toFixed(
+        0
+      )}${cashBanked ? " · cash banked on free " + (cashBanked >= 0 ? "+$" : "−$") + Math.abs(cashBanked).toFixed(0) : ""}</div>`;
     }
     let html = "";
     if (opens.length) {
@@ -790,7 +853,7 @@
       html += `<div class="pos-band-h mute">No open risk</div>`;
     }
     if (closed.length) {
-      html += `<div class="pos-band-h closed">Closed outcomes <span class="pos-band-n">${closed.length}</span></div>`;
+      html += `<div class="pos-band-h closed">Closed <span class="pos-band-n">${closed.length}</span></div>`;
       html += closed.map(posCardHtml).join("");
     }
     host.innerHTML = html;
@@ -871,79 +934,71 @@
     const host = $("#pnlBody");
     if (!host) return;
     try {
-      const d = await api(`/api/pnl?window=${encodeURIComponent(state.pnlWindow || "30d")}`);
+      const d = await api(
+        `/api/pnl?window=${encodeURIComponent(state.pnlWindow || "30d")}`
+      );
       const b = d.bankroll || {};
       const r = d.realized || {};
       const free = d.free_bags || [];
       const book = d.open_book || [];
+      const atRisk = Number(b.at_risk_mark_usd != null ? b.at_risk_mark_usd : 0);
+      const freeMark = Number(b.free_mark_usd || 0);
+      const openMark = Number(b.open_mark_usd || 0);
+      const score = Number(r.pnl_usd || 0);
       host.innerHTML = `
-        <div class="pnl-grid">
-          <div class="pnl-card">
-            <div class="pnl-k">Bankroll</div>
-            <div class="pnl-v">Open mark $${Number(b.open_mark_usd || 0).toFixed(0)}</div>
-            <div class="mute">uPnL $${Number(b.open_upnl_usd || 0).toFixed(0)} · residual cost $${Number(
-        b.open_cost_usd || 0
-      ).toFixed(0)}</div>
-            <div class="mute">Free bags ${b.free_bags_n || 0} · $${Number(
-        b.free_mark_usd || 0
-      ).toFixed(0)}</div>
-          </div>
-          <div class="pnl-card">
-            <div class="pnl-k">Realized (${escHtml(d.window || "")})</div>
-            <div class="pnl-v ${Number(r.pnl_usd || 0) >= 0 ? "up" : "dn"}">${
-              Number(r.pnl_usd || 0) >= 0 ? "+" : ""
-            }$${Number(r.pnl_usd || 0).toFixed(0)}</div>
-            <div class="mute">W ${r.win_n || 0} ($${Number(r.win_usd || 0).toFixed(
+        <div class="pnl-hero">
+          <div class="pnl-hero-card primary">
+            <div class="pnl-k">Score · ${escHtml(d.window || "")}</div>
+            <div class="pnl-v ${score >= 0 ? "up" : "dn"}">${
+              score >= 0 ? "+" : ""
+            }$${score.toFixed(0)}</div>
+            <div class="pnl-sub">W ${r.win_n || 0} ($${Number(
+        r.win_usd || 0
+      ).toFixed(0)}) · L ${r.miss_n || 0} ($${Number(r.miss_usd || 0).toFixed(
         0
-      )}) · L ${r.miss_n || 0} ($${Number(r.miss_usd || 0).toFixed(0)}) · flat ${
-        r.flat_n || 0
-      }</div>
-            <div class="mute">Best ${
-              r.best
-                ? escHtml(r.best.symbol) +
-                  " $" +
-                  Number(r.best.realized_pnl_usd).toFixed(0)
-                : "—"
-            } · Worst ${
-              r.worst
-                ? escHtml(r.worst.symbol) +
-                  " $" +
-                  Number(r.worst.realized_pnl_usd).toFixed(0)
-                : "—"
-            }</div>
+      )}) · flat ${r.flat_n || 0}</div>
           </div>
-          <div class="pnl-card">
-            <div class="pnl-k">By book</div>
-            <div class="mute">Spot $${Number(
-              (d.by_book && d.by_book.spot_realized_usd) || 0
-            ).toFixed(0)}</div>
-            <div class="mute">Futures $${Number(
-              (d.by_book && d.by_book.futures_realized_usd) || 0
-            ).toFixed(0)}</div>
+          <div class="pnl-hero-card">
+            <div class="pnl-k">Bankroll</div>
+            <div class="pnl-v">$${openMark.toFixed(0)}</div>
+            <div class="pnl-sub">At risk $${atRisk.toFixed(
+              0
+            )} · free $${freeMark.toFixed(0)} · open ${b.open_n || 0}</div>
+          </div>
+          <div class="pnl-hero-card free">
+            <div class="pnl-k">Free capital</div>
+            <div class="pnl-v">${b.free_bags_n || 0} · $${freeMark.toFixed(0)}</div>
+            <div class="pnl-sub">Principal back · bag left as inventory</div>
           </div>
         </div>
-        <h4 class="pnl-sec">Open book ($)</h4>
+        <h4 class="pnl-sec">Open book</h4>
         ${
           book.length
-            ? `<div class="scroll">${table(
-                ["Sym", "In $", "Out $", "Real $", "Held $", "Free"],
+            ? `<div class="scroll pnl-book-wrap">${table(
+                ["Sym", "In", "Out", "Real", "Held", "Free"],
                 book
-                  .map(
-                    (p) =>
-                      `<tr><td>${escHtml(p.symbol)}</td><td>${
-                        p.bought_usd != null ? Number(p.bought_usd).toFixed(0) : "—"
-                      }</td><td>${
-                        p.sold_usd != null ? Number(p.sold_usd).toFixed(0) : "—"
-                      }</td><td>${
-                        p.realized_pnl_usd != null
-                          ? Number(p.realized_pnl_usd).toFixed(0)
-                          : "—"
-                      }</td><td>${
-                        p.remaining_mark_usd != null
-                          ? Number(p.remaining_mark_usd).toFixed(0)
-                          : "—"
-                      }</td><td>${p.free_coins ? "FREE" : "—"}</td></tr>`
-                  )
+                  .map((p) => {
+                    const fr = p.free_coins
+                      ? `<span class="pnl-free-cell">FREE</span>`
+                      : "—";
+                    return `<tr class="${
+                      p.free_coins ? "pnl-row-free" : ""
+                    }"><td>${escHtml(p.symbol)}</td><td>${
+                      p.bought_usd != null
+                        ? Number(p.bought_usd).toFixed(0)
+                        : "—"
+                    }</td><td>${
+                      p.sold_usd != null ? Number(p.sold_usd).toFixed(0) : "—"
+                    }</td><td>${
+                      p.realized_pnl_usd != null
+                        ? Number(p.realized_pnl_usd).toFixed(0)
+                        : "—"
+                    }</td><td>${
+                      p.remaining_mark_usd != null
+                        ? Number(p.remaining_mark_usd).toFixed(0)
+                        : "—"
+                    }</td><td>${fr}</td></tr>`;
+                  })
                   .join("")
               )}</div>`
             : rankEmpty("No open positions")
@@ -951,24 +1006,66 @@
         <h4 class="pnl-sec">Free bags</h4>
         ${
           free.length
-            ? free
-                .map(
-                  (f) =>
-                    `<div class="learn-card-meta">${escHtml(f.symbol)} · held $${
+            ? `<div class="pnl-bags">${free
+                .map((f) => {
+                  const cash =
+                    f.bought_usd != null && f.sold_usd != null
+                      ? Number(f.sold_usd) - Number(f.bought_usd)
+                      : null;
+                  return `<div class="pnl-bag">
+                    <div class="pnl-bag-h"><span>${escHtml(
+                      f.symbol
+                    )}</span><span class="pos-free">FREE</span></div>
+                    <div class="pnl-bag-row"><span>Bag</span><b>$${
                       f.remaining_mark_usd != null
                         ? Number(f.remaining_mark_usd).toFixed(0)
                         : "—"
-                    } · sold $${
+                    }</b></div>
+                    <div class="pnl-bag-row"><span>Out / In</span><b>$${
                       f.sold_usd != null ? Number(f.sold_usd).toFixed(0) : "—"
-                    } · real $${
-                      f.realized_pnl_usd != null
-                        ? Number(f.realized_pnl_usd).toFixed(0)
+                    } / $${
+                      f.bought_usd != null ? Number(f.bought_usd).toFixed(0) : "—"
+                    }</b></div>
+                    <div class="pnl-bag-row"><span>Cash path</span><b>${
+                      cash != null
+                        ? (cash >= 0 ? "+$" : "−$") + Math.abs(cash).toFixed(0)
                         : "—"
-                    }</div>`
-                )
-                .join("")
-            : `<div class="mute">No free bags yet — mark when principal is back (e.g. SYN).</div>`
+                    }</b></div>
+                  </div>`;
+                })
+                .join("")}</div>`
+            : `<div class="mute">No free bags</div>`
         }
+        <h4 class="pnl-sec">By book · extremes</h4>
+        <div class="pnl-grid">
+          <div class="pnl-card">
+            <div class="pnl-k">Spot / Futures</div>
+            <div class="pnl-sub">Spot $${Number(
+              (d.by_book && d.by_book.spot_realized_usd) || 0
+            ).toFixed(0)}</div>
+            <div class="pnl-sub">Futures $${Number(
+              (d.by_book && d.by_book.futures_realized_usd) || 0
+            ).toFixed(0)}</div>
+          </div>
+          <div class="pnl-card">
+            <div class="pnl-k">Best</div>
+            <div class="pnl-sub">${
+              r.best
+                ? escHtml(r.best.symbol) +
+                  " +$" +
+                  Number(r.best.realized_pnl_usd).toFixed(0)
+                : "—"
+            }</div>
+            <div class="pnl-k mt">Worst</div>
+            <div class="pnl-sub">${
+              r.worst
+                ? escHtml(r.worst.symbol) +
+                  " $" +
+                  Number(r.worst.realized_pnl_usd).toFixed(0)
+                : "—"
+            }</div>
+          </div>
+        </div>
       `;
     } catch (e) {
       host.innerHTML = rankEmpty(e.message || "PnL failed");

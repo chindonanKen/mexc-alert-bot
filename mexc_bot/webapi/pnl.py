@@ -53,6 +53,7 @@ def build_pnl_summary(
     open_upnl = sum(_f(e.get("upnl_usd_est")) or 0 for e in opens)
     free_bags = [e for e in opens if e.get("free_coins")]
     free_mark = sum(_f(e.get("remaining_mark_usd")) or 0 for e in free_bags)
+    at_risk_mark = max(0.0, open_mark - free_mark)
 
     realized = 0.0
     win_n = miss_n = flat_n = 0
@@ -119,6 +120,7 @@ def build_pnl_summary(
         "window": window,
         "bankroll": {
             "open_mark_usd": round(open_mark, 2),
+            "at_risk_mark_usd": round(at_risk_mark, 2),
             "open_cost_usd": round(open_cost, 2),
             "open_upnl_usd": round(open_upnl, 2),
             "free_bags_n": len(free_bags),
