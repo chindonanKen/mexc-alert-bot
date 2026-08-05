@@ -6,6 +6,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    # Host network so MEXC/CEX announcement fetches aren't 403'd on Docker bridge NAT
+    network_mode: host
     volumes:
       # Persist alerts across container restarts/updates
       - ./data:/app/data
