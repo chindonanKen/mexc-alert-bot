@@ -979,3 +979,111 @@ def delete_lesson(lesson_id: int, *, user_id: Optional[int] = None) -> Dict[str,
     uid = int(user_id or uid_or_raise())
     ok = event_store().delete_lesson(uid, int(lesson_id))
     return {"ok": ok, "lesson_id": int(lesson_id), "deleted": bool(ok)}
+
+
+def update_lesson(
+    lesson_id: int,
+    *,
+    text: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    behaviors: Optional[List[str]] = None,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Manual edit of any lesson on the desk (text + process/AD chips)."""
+    uid = int(user_id or uid_or_raise())
+    store = event_store()
+    existing = store.get_lesson(uid, int(lesson_id))
+    if not existing:
+        return {"ok": False, "error": "not_found"}
+
+    from ..learning.integrity import ALLOWED_BEHAVIOR
+
+    allowed_beh = {b for b in ALLOWED_BEHAVIOR if b}
+    allowed_ad = {"ad_met", "ad_missed"}
+
+    # Merge tags: keep structured sym:/mkt:/ek:/ctx:/ev:/case: unless full tags replace
+    old_tags: List[str] = []
+    try:
+        old_tags = json.loads(existing.get("tags_json") or "[]")
+    except Exception:
+        old_tags = []
+
+    structured = [
+        t
+        for t in old_tags
+        if isinstance(t, str)
+        and (":" in t)
+        and not str(t).lower().split(":")[0]
+        in {b for b in list(allowed_beh) + list(allowed_ad)}
+    ]
+
+    if tags is not None:
+        # Full replace of free tags, keep structured from old + any new structured
+        tag_list: List[str] = []
+        for t in tags:
+            ts = str(t or "").strip()
+            if not ts:
+                continue
+            if ts not in tag_list:
+                tag_list.append(ts)
+        # Ensure structured from original if not re-supplied
+        for s in structured:
+            if s not in tag_list:
+                tag_list.append(s)
+    elif behaviors is not None:
+        tag_list = list(structured)
+        for b in behaviors:
+            s = str(b or "").strip().lower().replace(" ", "_")
+            if s in allowed_beh or s in allowed_ad:
+                if s not in tag_list:
+                    tag_list.append(s)
+    else:
+        tag_list = None  # leave tags unchanged
+
+    body = text
+    if body is not None:
+        body = str(body).strip()
+        if not body:
+            return {"ok": False, "error": "empty"}
+
+    try:
+        row = store.update_lesson(
+            uid,
+            int(lesson_id),
+            text=body,
+            tags=tag_list,
+        )
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    if not row:
+        return {"ok": False, "error": "update_failed"}
+
+    # Keep linked setup case note/chips in sync when edited
+    if body is not None or tag_list is not None:
+        try:
+            chips = [
+                x
+                for x in (tag_list if tag_list is not None else old_tags)
+                if isinstance(x, str)
+                and ":" not in x
+                and (x in allowed_beh or x in allowed_ad)
+            ]
+            note = body if body is not None else None
+            conn = store._get_conn()  # type: ignore[attr-defined]
+            with store._lock:  # type: ignore[attr-defined]
+                if note is not None:
+                    conn.execute(
+                        "UPDATE agent_setup_cases SET note = ?, chips_json = ?, "
+                        "source = 'edit' WHERE user_id = ? AND lesson_id = ?",
+                        (note, json.dumps(chips), uid, int(lesson_id)),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE agent_setup_cases SET chips_json = ?, source = 'edit' "
+                        "WHERE user_id = ? AND lesson_id = ?",
+                        (json.dumps(chips), uid, int(lesson_id)),
+                    )
+        except Exception as e:
+            logger.debug("case note sync on lesson edit: %s", e)
+
+    return {"ok": True, "lesson": row, "lesson_id": int(lesson_id)}

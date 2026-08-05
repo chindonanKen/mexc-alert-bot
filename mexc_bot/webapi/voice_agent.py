@@ -44,6 +44,7 @@ Positions: list_positions (exchange money truth when available)
 Learning (primary for teach/recall):
   what_have_you_learned — lessons + stats + teach_ok trade cites
   teach — durable lesson from his words (always pass symbol when about a trade)
+  edit_lesson — change text/chips on an existing lesson by lesson_id
   delete_lesson — remove a lesson by lesson_id (unteach)
   list_pending_questions / answer_question — max 1–2 open questions
   list_fires / list_trade_reviews (teach_ok only for $ claims)

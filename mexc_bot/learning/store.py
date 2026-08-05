@@ -930,6 +930,77 @@ class EventStore:
         """Permanently remove a lesson (owner unteach)."""
         return self.approve_lesson(user_id, lesson_id, dismiss=True)
 
+    def get_lesson(self, user_id: int, lesson_id: int) -> Optional[dict]:
+        with self._lock:
+            row = self._get_conn().execute(
+                "SELECT * FROM learning_lessons WHERE id = ? AND user_id = ?",
+                (int(lesson_id), int(user_id)),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def update_lesson(
+        self,
+        user_id: int,
+        lesson_id: int,
+        *,
+        text: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        weight: Optional[float] = None,
+    ) -> Optional[dict]:
+        """Owner edit of a durable lesson (text and/or tags). Returns updated row or None."""
+        try:
+            with self._lock:
+                conn = self._get_conn()
+                row = conn.execute(
+                    "SELECT * FROM learning_lessons WHERE id = ? AND user_id = ?",
+                    (int(lesson_id), int(user_id)),
+                ).fetchone()
+                if not row:
+                    return None
+                new_text = (text if text is not None else row["text"]) or ""
+                new_text = str(new_text).strip()
+                if not new_text:
+                    raise ValueError("Lesson text cannot be empty")
+                if tags is not None:
+                    tags_json = json.dumps(list(tags))
+                else:
+                    tags_json = row["tags_json"]
+                new_weight = float(weight) if weight is not None else float(row["weight"] or 1.0)
+                # Optional updated_at column (additive)
+                cols = {
+                    str(r[1])
+                    for r in conn.execute("PRAGMA table_info(learning_lessons)").fetchall()
+                }
+                if "updated_at" not in cols:
+                    conn.execute(
+                        "ALTER TABLE learning_lessons ADD COLUMN updated_at REAL"
+                    )
+                conn.execute(
+                    """
+                    UPDATE learning_lessons
+                    SET text = ?, tags_json = ?, weight = ?, updated_at = ?
+                    WHERE id = ? AND user_id = ?
+                    """,
+                    (
+                        new_text,
+                        tags_json,
+                        new_weight,
+                        time.time(),
+                        int(lesson_id),
+                        int(user_id),
+                    ),
+                )
+                out = conn.execute(
+                    "SELECT * FROM learning_lessons WHERE id = ? AND user_id = ?",
+                    (int(lesson_id), int(user_id)),
+                ).fetchone()
+                return dict(out) if out else None
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.error("update_lesson failed: %s", e)
+            return None
+
     def learning_stats(self, user_id: int) -> Dict[str, Any]:
         """Aggregate stats for coach/desk — store-backed only."""
         with self._lock:

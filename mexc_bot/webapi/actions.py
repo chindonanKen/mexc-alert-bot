@@ -646,6 +646,20 @@ TOOL_DEFS = [
         ["text"],
     ),
     _tool(
+        "edit_lesson",
+        "Edit an existing durable lesson by lesson_id (text and/or process chips/behaviors)",
+        {
+            "lesson_id": {"type": "integer"},
+            "text": {"type": "string"},
+            "behaviors": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Process/AD chips e.g. plan_ok, ad_missed",
+            },
+        },
+        ["lesson_id"],
+    ),
+    _tool(
         "delete_lesson",
         "Permanently delete a durable lesson by lesson_id (unteach the agent)",
         {"lesson_id": {"type": "integer"}},
@@ -891,6 +905,15 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 event_id=args.get("event_id"),
                 behaviors=args.get("behaviors"),
                 context_type=args.get("context_type"),
+            )
+        if name == "edit_lesson":
+            from .learning_api import update_lesson
+
+            return update_lesson(
+                int(args["lesson_id"]),
+                text=args.get("text"),
+                tags=args.get("tags"),
+                behaviors=args.get("behaviors"),
             )
         if name == "delete_lesson":
             from .learning_api import delete_lesson

@@ -978,6 +978,36 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(400, str(e))
 
+    class LessonEditBody(BaseModel):
+        text: Optional[str] = None
+        tags: Optional[List[str]] = None
+        behaviors: Optional[List[str]] = None
+
+    @app.patch("/api/learning/lessons/{lesson_id}")
+    def learning_edit_lesson(
+        lesson_id: int, body: LessonEditBody, _: bool = Depends(require_auth)
+    ):
+        """Owner can manually edit any lesson text / chips on the desk."""
+        from .learning_api import update_lesson
+
+        try:
+            out = update_lesson(
+                int(lesson_id),
+                text=body.text,
+                tags=body.tags,
+                behaviors=body.behaviors,
+            )
+            if not out.get("ok"):
+                err = out.get("error") or "update failed"
+                if err == "not_found":
+                    raise HTTPException(404, "Lesson not found")
+                raise HTTPException(400, err)
+            return out
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
     @app.delete("/api/learning/lessons/{lesson_id}")
     def learning_delete_lesson(lesson_id: int, _: bool = Depends(require_auth)):
         from .learning_api import delete_lesson

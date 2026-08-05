@@ -326,14 +326,49 @@ body::before {
   margin-right: 0.4rem;
 }
 .learn-lesson {
+  display: block;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.learn-lesson-view {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.65rem;
-  padding: 0.45rem 0;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 .learn-lesson-main { flex: 1; min-width: 0; font-size: 0.82rem; line-height: 1.4; }
+.learn-lesson-text { display: block; white-space: pre-wrap; word-break: break-word; }
+.learn-lesson-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+.learn-lesson-edit {
+  margin-top: 0.45rem;
+  padding: 0.5rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  background: rgba(0, 0, 0, 0.22);
+}
+.learn-edit-text {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(0,0,0,0.3);
+  color: inherit;
+  margin-bottom: 0.4rem;
+}
+.learn-edit-chips { margin-bottom: 0.45rem; }
+.learn-edit-chips .chip.sm {
+  font-size: 0.68rem;
+  padding: 0.2rem 0.45rem;
+}
 .learn-del { flex-shrink: 0; opacity: 0.75; }
 .learn-del:hover { opacity: 1; }
 .learn-v1-grid {

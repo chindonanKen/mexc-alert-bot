@@ -1407,6 +1407,18 @@
     }
 
     // 4 Lessons with about context + delete
+    const PROCESS_CHIPS = [
+      "plan_ok",
+      "greed",
+      "fomo",
+      "hesitant",
+      "pride",
+      "rule_break",
+      "process_skip",
+      "false_panic",
+    ];
+    const AD_CHIPS = ["ad_met", "ad_missed"];
+
     const lesEl = $("#learnLessons");
     if (lesEl) {
       lesEl.innerHTML = lessons.length
@@ -1443,26 +1455,130 @@
                     })
                     .join("")}</div>`
                 : "";
-              return `<div class="learn-lesson">
-                <div class="learn-lesson-main">
-                  <span class="learn-about">${escHtml(about)}</span>
-                  ${escHtml((l.text || "").slice(0, 220))}
-                  ${tagHtml}
+              const fullText = l.text || "";
+              const chipBtns = [...PROCESS_CHIPS, ...AD_CHIPS]
+                .map((c) => {
+                  const on = chipTags.includes(c) ? " on" : "";
+                  const ad = AD_CHIPS.includes(c) ? " chip-ad" : "";
+                  return `<button type="button" class="chip sm${ad}${on}" data-edit-chip="${c}" data-lid="${
+                    l.id
+                  }">${c}</button>`;
+                })
+                .join("");
+              return `<div class="learn-lesson" data-lesson-id="${l.id}">
+                <div class="learn-lesson-view">
+                  <div class="learn-lesson-main">
+                    <span class="learn-about">${escHtml(about)}</span>
+                    <span class="learn-lesson-text">${escHtml(fullText)}</span>
+                    ${tagHtml}
+                  </div>
+                  <div class="learn-lesson-actions">
+                    <button type="button" class="btn soft sm" data-edit-lesson="${
+                      l.id
+                    }" title="Edit this lesson">Edit</button>
+                    <button type="button" class="btn soft sm learn-del" data-del-lesson="${
+                      l.id
+                    }" title="Remove this lesson">Delete</button>
+                  </div>
                 </div>
-                <button type="button" class="btn soft sm learn-del" data-del-lesson="${
-                  l.id
-                }" title="Remove this lesson">Delete</button>
+                <div class="learn-lesson-edit" hidden data-edit-panel="${l.id}">
+                  <p class="learn-panel-hint mute">Edit text and chips · agent will use the updated lesson.</p>
+                  <textarea class="learn-edit-text" data-edit-text="${
+                    l.id
+                  }" rows="4">${escHtml(fullText)}</textarea>
+                  <div class="learn-chips learn-edit-chips" data-edit-chips="${
+                    l.id
+                  }">${chipBtns}</div>
+                  <div class="row-gap">
+                    <button type="button" class="btn sm" data-save-lesson="${
+                      l.id
+                    }">Save changes</button>
+                    <button type="button" class="btn soft sm" data-cancel-edit="${
+                      l.id
+                    }">Cancel</button>
+                  </div>
+                </div>
               </div>`;
             })
             .join("")
         : rankEmpty(
             "No cases yet. Pick a trade or fire → snapshot → chips + note → Save."
           );
+
+      const openEdit = (id) => {
+        const row = lesEl.querySelector(`[data-lesson-id="${id}"]`);
+        if (!row) return;
+        const view = row.querySelector(".learn-lesson-view");
+        const edit = row.querySelector(`[data-edit-panel="${id}"]`);
+        if (view) view.hidden = true;
+        if (edit) edit.hidden = false;
+      };
+      const closeEdit = (id) => {
+        const row = lesEl.querySelector(`[data-lesson-id="${id}"]`);
+        if (!row) return;
+        const view = row.querySelector(".learn-lesson-view");
+        const edit = row.querySelector(`[data-edit-panel="${id}"]`);
+        if (view) view.hidden = false;
+        if (edit) edit.hidden = true;
+      };
+
+      $$("[data-edit-lesson]", lesEl).forEach((b) =>
+        b.addEventListener("click", () => openEdit(+b.dataset.editLesson))
+      );
+      $$("[data-cancel-edit]", lesEl).forEach((b) =>
+        b.addEventListener("click", () => {
+          closeEdit(+b.dataset.cancelEdit);
+          loadMemory();
+        })
+      );
+      $$("[data-edit-chip]", lesEl).forEach((b) =>
+        b.addEventListener("click", () => {
+          const code = b.dataset.editChip;
+          if (code === "ad_met" || code === "ad_missed") {
+            const panel = b.closest("[data-edit-chips]");
+            $$(".chip-ad", panel).forEach((c) => {
+              if (c !== b) c.classList.remove("on");
+            });
+          }
+          b.classList.toggle("on");
+        })
+      );
+      $$("[data-save-lesson]", lesEl).forEach((b) =>
+        b.addEventListener("click", async () => {
+          const id = +b.dataset.saveLesson;
+          const ta = lesEl.querySelector(`[data-edit-text="${id}"]`);
+          const chipRoot = lesEl.querySelector(`[data-edit-chips="${id}"]`);
+          const text = (ta && ta.value.trim()) || "";
+          if (!text) {
+            toast("Lesson text cannot be empty");
+            return;
+          }
+          const behaviors = $$(".chip.on", chipRoot).map(
+            (c) => c.dataset.editChip
+          );
+          try {
+            b.disabled = true;
+            await api(`/api/learning/lessons/${id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ text, behaviors }),
+            });
+            toast("Lesson updated");
+            loadMemory();
+          } catch (err) {
+            toast(err.message);
+            b.disabled = false;
+          }
+        })
+      );
       $$("[data-del-lesson]", lesEl).forEach((b) =>
         b.addEventListener("click", async () => {
           const id = +b.dataset.delLesson;
           if (!id) return;
-          if (!confirm("Delete this lesson? The agent will no longer recall it."))
+          if (
+            !confirm(
+              "Delete this lesson? The agent will no longer use it in memory."
+            )
+          )
             return;
           try {
             await api(`/api/learning/lessons/${id}`, { method: "DELETE" });
