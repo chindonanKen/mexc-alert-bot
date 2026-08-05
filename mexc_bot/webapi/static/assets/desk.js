@@ -1940,7 +1940,7 @@
         };
         audio.addEventListener("ended", done);
         audio.addEventListener("error", done);
-        setTimeout(done, 90000);
+        setTimeout(done, 300000); // long teaches → STT can take a few minutes
       });
     } catch (_) {
       /* autoplay */
@@ -2293,8 +2293,15 @@
             // Pre-roll: include last ~0.45s so first words aren't cut
             pcmChunks = pcmPreRoll.map((c) => new Float32Array(c));
             pcmPreRoll = [];
-            $("#voiceStatus").textContent = "Hearing you… pause when done";
+            $("#voiceStatus").textContent =
+              "Hearing you… pause ~4s when finished (take your time)";
             updateMicUi();
+          } else if (state.speakingHeard) {
+            // Still talking — show elapsed so long teaches feel intentional
+            const sec = Math.round((now - (speechStartedAt || now)) / 1000);
+            if (sec >= 5 && sec % 15 < 1) {
+              $("#voiceStatus").textContent = `Hearing you… ${sec}s (pause ~4s when done)`;
+            }
           }
         } else {
           speechArmedMs = 0;
@@ -2307,16 +2314,19 @@
           state.speakingHeard && speechTotalMs >= VAD.minSpeechMs;
         const silenceDone = state.silenceMs >= VAD.endSilenceMs;
 
+        // Natural end: you stopped talking long enough
         if (spokenLongEnough && silenceDone) {
           clearVad();
           finishTurn();
           return;
         }
 
+        // Safety only: absurdly long continuous speech (not a short hard cut)
+        const speechOrigin = speechStartedAt || turnStartedAt;
         if (
           state.speakingHeard &&
           spokenLongEnough &&
-          now - turnStartedAt >= VAD.maxTurnMs
+          now - speechOrigin >= VAD.maxSpeechMs
         ) {
           clearVad();
           finishTurn();

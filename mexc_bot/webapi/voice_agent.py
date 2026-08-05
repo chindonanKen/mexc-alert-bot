@@ -95,13 +95,15 @@ def _stt_post_wav(wav_bytes: bytes) -> Tuple[Optional[str], Optional[str]]:
     files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
     data = {"model": model}
 
+    # Long voice teaches: scale STT timeout with payload (min 90s, max 5 min)
+    stt_timeout = max(90, min(300, 60 + len(wav_bytes) // 8000))
     try:
         r = requests.post(
             url,
             headers={"Authorization": f"Bearer {key}"},
             files=files,
             data=data,
-            timeout=90,
+            timeout=stt_timeout,
             verify=_CA,
         )
     except Exception as e:
@@ -128,7 +130,7 @@ def _stt_post_wav(wav_bytes: bytes) -> Tuple[Optional[str], Optional[str]]:
             headers={"Authorization": f"Bearer {key}"},
             files={"file": ("audio.wav", wav_bytes, "audio/wav")},
             data={"model": os.getenv("VOICE_STT_MODEL", "whisper-1")},
-            timeout=90,
+            timeout=stt_timeout,
             verify=_CA,
         )
         if r2.status_code == 200:
