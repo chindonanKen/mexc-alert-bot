@@ -29,8 +29,9 @@ REKT_RSS_URLS = (
     "https://rekt.news/feed",
 )
 
-# MEXC announcement listing surfaces (section + general)
+# MEXC announcement listing surfaces (section + general + delist hub)
 MEXC_LIST_URLS = (
+    "https://www.mexc.com/announcements/delistings",
     "https://www.mexc.com/support/sections/360000254192",  # delisting notices
     "https://www.mexc.com/announcements",
     "https://www.mexc.com/support/announcement",
@@ -189,6 +190,40 @@ def _enrich_mexc_article(
     return {"body": (body or "")[:2000], "bases": bases}
 
 
+def _items_from_delistings_hub(html: str, list_url: str) -> List[Dict[str, Any]]:
+    """Parse announcements/delistings hub — often embeds full body with all tickers."""
+    plain = html_lib.unescape(html)
+    out: List[Dict[str, Any]] = []
+    # Split on heading-like titles
+    for m in re.finditer(
+        r"(?:##\s*|title=\"|>)(MEXC to Delist[^<#]{10,160}|Delisting of[^<#]{10,160})",
+        plain,
+        re.I,
+    ):
+        title = re.sub(r"\s+", " ", m.group(1)).strip().rstrip("\"")
+        # window after title for body
+        window = plain[m.end() : m.end() + 900]
+        bases = extract_delist_bases(title, window)
+        if not bases and not _DELIST_TITLE.search(title):
+            continue
+        display = title
+        if bases and re.search(r"and\s+\d+\s+other", title, re.I):
+            display = f"{title} · full: {', '.join(bases)}"
+        out.append(
+            {
+                "title": display[:500],
+                "list_title": title[:500],
+                "url": list_url,
+                "ts": time.time(),
+                "source": "mexc-announcements",
+                "source_trust": "official",
+                "body": window[:1500],
+                "bases": bases,
+            }
+        )
+    return out[:40]
+
+
 def fetch_mexc_announcements(timeout: float = 18.0) -> List[Dict[str, Any]]:
     """Pull MEXC announcement titles; for delists, open article and list ALL tickers."""
     out: List[Dict[str, Any]] = []
@@ -198,7 +233,13 @@ def fetch_mexc_announcements(timeout: float = 18.0) -> List[Dict[str, Any]]:
         try:
             resp = sess.get(list_url, timeout=timeout)
             if resp.status_code != 200:
+                logger.warning("MEXC list HTTP %s %s", resp.status_code, list_url)
                 continue
+            # Prefer hub pages that embed full delist copy (all tickers)
+            if "delistings" in list_url:
+                hub_items = _items_from_delistings_hub(resp.text, list_url)
+                if hub_items:
+                    return hub_items
             links.extend(_list_mexc_article_links(resp.text, list_url))
             if links:
                 break
