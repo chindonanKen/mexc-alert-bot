@@ -172,9 +172,78 @@ class InvestigatorStore:
         with self._lock:
             rows = self._get_conn().execute(
                 "SELECT * FROM delist_cache ORDER BY ts DESC LIMIT ?",
-                (max(1, min(limit, 100)),),
+                (max(1, min(limit, 200)),),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def list_delist_announcements(self, *, limit: int = 40) -> List[dict]:
+        """Group delist_cache by (exchange, title) so all tickers on one notice are visible.
+
+        DB stores one row per base; the desk/intel UI must present the full set.
+        """
+        limit = max(1, min(int(limit), 80))
+        with self._lock:
+            # Pull enough rows to form complete announcement groups
+            rows = self._get_conn().execute(
+                "SELECT * FROM delist_cache ORDER BY ts DESC LIMIT ?",
+                (min(500, limit * 12),),
+            ).fetchall()
+        groups: Dict[str, dict] = {}
+        order: List[str] = []
+        for r in rows:
+            d = dict(r)
+            title = (d.get("title") or "").strip()
+            exchange = (d.get("exchange") or "").strip().lower()
+            key = f"{exchange}|{title}"
+            base = (d.get("base") or "").strip().upper() or None
+            if key not in groups:
+                groups[key] = {
+                    "exchange": exchange,
+                    "title": title,
+                    "kind": d.get("kind") or "delist",
+                    "url": d.get("url"),
+                    "ts": float(d.get("ts") or 0),
+                    "bases": [],
+                    "n_bases": 0,
+                }
+                order.append(key)
+            g = groups[key]
+            if base and base not in g["bases"]:
+                g["bases"].append(base)
+            # keep newest ts
+            try:
+                g["ts"] = max(float(g["ts"] or 0), float(d.get("ts") or 0))
+            except (TypeError, ValueError):
+                pass
+            if d.get("url") and not g.get("url"):
+                g["url"] = d.get("url")
+        out = []
+        for key in order:
+            g = groups[key]
+            g["bases"] = sorted(g["bases"])
+            g["n_bases"] = len(g["bases"])
+            g["bases_text"] = ", ".join(g["bases"]) if g["bases"] else "—"
+            out.append(g)
+            if len(out) >= limit:
+                break
+        return out
+
+    def bases_for_delist_title(
+        self, exchange: str, title: str, *, limit: int = 40
+    ) -> List[str]:
+        """All bases stored for the same announcement title."""
+        with self._lock:
+            rows = self._get_conn().execute(
+                """
+                SELECT DISTINCT base FROM delist_cache
+                WHERE LOWER(exchange) = LOWER(?) AND title = ?
+                  AND base IS NOT NULL AND TRIM(base) != ''
+                ORDER BY base ASC LIMIT ?
+                """,
+                (exchange or "", title or "", max(1, min(int(limit), 80)),
+                ),
+            ).fetchall()
+            return [str(r["base"]).upper() for r in rows if r["base"]]
 
     def save_investigation(
         self,

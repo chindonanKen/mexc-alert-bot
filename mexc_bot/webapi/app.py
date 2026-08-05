@@ -804,14 +804,30 @@ def create_app() -> FastAPI:
         return {"investigations": inv, "sources": sources}
 
     @app.get("/api/news")
-    def news(limit: int = Query(40, ge=1, le=100), _: bool = Depends(require_auth)):
+    def news(limit: int = Query(50, ge=1, le=150), _: bool = Depends(require_auth)):
+        """Fatal news + delist radar. Delists are grouped so all tickers on one notice show."""
+        from pathlib import Path
+
+        from ..investigators.store import InvestigatorStore
+
+        delist_rows = db.fetch_all(
+            "SELECT * FROM delist_cache ORDER BY ts DESC LIMIT ?",
+            (min(500, int(limit) * 12),),
+        )
+        announcements: list = []
+        try:
+            inv = InvestigatorStore(Path(db.db_path()))
+            announcements = inv.list_delist_announcements(limit=int(limit))
+        except Exception:
+            # Fallback: one row per base (legacy shape)
+            announcements = []
         return {
             "news": db.fetch_all(
                 "SELECT * FROM news_events ORDER BY ts DESC LIMIT ?", (limit,)
             ),
-            "delist_cache": db.fetch_all(
-                "SELECT * FROM delist_cache ORDER BY ts DESC LIMIT ?", (limit,)
-            ),
+            # Flat rows still available for debug; UI prefers announcements
+            "delist_cache": delist_rows[: max(40, int(limit))],
+            "delist_announcements": announcements,
         }
 
     @app.get("/api/prices")

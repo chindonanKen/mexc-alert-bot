@@ -1533,3 +1533,63 @@ table.data tr:hover td { background: rgba(56,189,248,.04); }
   color: var(--mint);
   border-color: rgba(52, 211, 153, 0.25);
 }
+
+/* Intel — full delist ticker lists */
+.intel-lede { margin: 0 0 0.65rem; }
+.intel-delist-scroll {
+  max-height: min(70vh, 36rem);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.15rem 0;
+}
+.intel-delist-card {
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid rgba(125, 211, 252, 0.14);
+  background: rgba(0, 0, 0, 0.22);
+}
+.intel-delist-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.65rem;
+  margin-bottom: 0.3rem;
+  font-size: 0.75rem;
+}
+.intel-cex {
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--sky, #22d3ee);
+}
+.intel-delist-title {
+  font-size: 0.88rem;
+  line-height: 1.35;
+  margin-bottom: 0.35rem;
+  color: rgba(232, 244, 255, 0.92);
+}
+.intel-delist-bases {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.intel-delist-bases span {
+  display: inline-block;
+  margin-right: 0.4rem;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.intel-delist-bases strong {
+  color: var(--mint, #34d399);
+  font-weight: 600;
+}
+.intel-link {
+  color: var(--sky);
+  text-decoration: none;
+  font-size: 0.72rem;
+}
+.intel-link:hover { text-decoration: underline; }

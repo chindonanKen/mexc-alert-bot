@@ -1722,7 +1722,7 @@
 
   async function loadIntel() {
     const [news, inv] = await Promise.all([
-      api("/api/news"),
+      api("/api/news?limit=60"),
       api("/api/investigations"),
     ]);
     $("#newsTable").innerHTML = table(
@@ -1730,25 +1730,101 @@
       (news.news || [])
         .map(
           (n) =>
-            `<tr><td>${n.class || ""}</td><td>${n.symbol || "—"}</td><td>${(n.title || "").slice(0, 70)}</td><td>${n.source || ""}</td><td>${fmtTime(n.ts)}</td></tr>`
+            `<tr><td>${escHtml(n.class || "")}</td><td>${escHtml(
+              n.symbol || "—"
+            )}</td><td title="${escHtml(n.title || "")}">${escHtml(
+              (n.title || "").slice(0, 90)
+            )}</td><td>${escHtml(n.source || "")}</td><td>${fmtTime(
+              n.ts
+            )}</td></tr>`
         )
         .join("")
     );
-    $("#delistTable").innerHTML = table(
-      ["CEX", "Base", "Kind", "Title", "When"],
-      (news.delist_cache || [])
-        .map(
-          (d) =>
-            `<tr><td>${d.exchange}</td><td>${d.base || "—"}</td><td>${d.kind}</td><td>${(d.title || "").slice(0, 60)}</td><td>${fmtTime(d.ts)}</td></tr>`
-        )
-        .join("")
-    );
+
+    // Prefer grouped announcements so every ticker on a notice is visible
+    let anns = news.delist_announcements || [];
+    if (!anns.length && (news.delist_cache || []).length) {
+      // Client-side group fallback
+      const map = {};
+      const order = [];
+      (news.delist_cache || []).forEach((d) => {
+        const key = `${d.exchange || ""}|${d.title || ""}`;
+        if (!map[key]) {
+          map[key] = {
+            exchange: d.exchange,
+            title: d.title,
+            kind: d.kind,
+            ts: d.ts,
+            url: d.url,
+            bases: [],
+          };
+          order.push(key);
+        }
+        const b = (d.base || "").toString().toUpperCase();
+        if (b && !map[key].bases.includes(b)) map[key].bases.push(b);
+        if (d.ts && (!map[key].ts || d.ts > map[key].ts)) map[key].ts = d.ts;
+      });
+      anns = order.map((k) => {
+        const g = map[k];
+        g.bases.sort();
+        g.bases_text = g.bases.join(", ") || "—";
+        g.n_bases = g.bases.length;
+        return g;
+      });
+    }
+    const badge = $("#delistBadge");
+    if (badge) {
+      badge.textContent = `${anns.length} notices`;
+    }
+    const delistHost = $("#delistTable");
+    if (delistHost) {
+      if (!anns.length) {
+        delistHost.innerHTML = rankEmpty(
+          "No delist notices in cache yet — radar polls CEX announcements."
+        );
+      } else {
+        delistHost.innerHTML = anns
+          .map((a) => {
+            const bases = a.bases_text || (a.bases || []).join(", ") || "—";
+            const n = a.n_bases != null ? a.n_bases : (a.bases || []).length;
+            const title = a.title || "";
+            const url = a.url
+              ? `<a class="intel-link" href="${escHtml(
+                  a.url
+                )}" target="_blank" rel="noopener">open</a>`
+              : "";
+            return `<article class="intel-delist-card">
+              <div class="intel-delist-h">
+                <span class="intel-cex">${escHtml(
+                  (a.exchange || "").toString().toUpperCase()
+                )}</span>
+                <span class="badge quiet">${escHtml(
+                  a.kind || "delist"
+                )} · ${n} ticker${n === 1 ? "" : "s"}</span>
+                <span class="mute mono">${fmtTime(a.ts)}</span>
+                ${url}
+              </div>
+              <div class="intel-delist-title">${escHtml(title)}</div>
+              <div class="intel-delist-bases" title="${escHtml(bases)}">
+                <span class="mute">Tickers</span>
+                <strong>${escHtml(bases)}</strong>
+              </div>
+            </article>`;
+          })
+          .join("");
+      }
+    }
+
     $("#sourcesTable").innerHTML = table(
       ["Source", "Kind", "W", "Hits", "Conf", "False"],
       (inv.sources || [])
         .map(
           (s) =>
-            `<tr><td>${s.source}</td><td>${s.kind}</td><td>${Number(s.weight).toFixed(2)}</td><td>${s.hits}</td><td>${s.confirmed_moves}</td><td>${s.false_alarms}</td></tr>`
+            `<tr><td>${escHtml(s.source)}</td><td>${escHtml(
+              s.kind
+            )}</td><td>${Number(s.weight).toFixed(2)}</td><td>${
+              s.hits
+            }</td><td>${s.confirmed_moves}</td><td>${s.false_alarms}</td></tr>`
         )
         .join("")
     );

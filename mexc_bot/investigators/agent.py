@@ -139,18 +139,31 @@ class IsolatedDumpAgent:
         base = _base_from_symbol(job.symbol)
         evidence: List[dict] = []
 
-        # 1) Cache lookup multi-CEX delists
+        # 1) Cache lookup multi-CEX delists — include ALL tickers on same notice
+        seen_titles = set()
         for row in self.store.find_delists_for_base(base, within_seconds=21 * 86400):
-            w = self.store.get_source_weight(row["exchange"], row["kind"])
+            title = row.get("title") or ""
+            exchange = row.get("exchange") or ""
+            tkey = f"{exchange}|{title}"
+            if tkey in seen_titles:
+                continue
+            seen_titles.add(tkey)
+            w = self.store.get_source_weight(exchange, row["kind"])
+            all_bases = self.store.bases_for_delist_title(exchange, title)
+            if not all_bases and row.get("base"):
+                all_bases = [str(row["base"]).upper()]
             evidence.append(
                 {
-                    "source": row["exchange"],
+                    "source": exchange,
                     "kind": row["kind"],
-                    "title": row["title"],
+                    "title": title,
                     "url": row.get("url"),
                     "weight": w,
                     "tier": "cex_delist",
                     "ts": row.get("ts"),
+                    "base": row.get("base"),
+                    "bases": all_bases,
+                    "bases_text": ", ".join(all_bases) if all_bases else "",
                 }
             )
 
@@ -255,9 +268,15 @@ class IsolatedDumpAgent:
             for ev in evidence[:5]:
                 src = _html.escape(str(ev.get("source")))
                 kind = _html.escape(str(ev.get("kind")))
-                title = _html.escape(str(ev.get("title") or "")[:120])
+                title = _html.escape(str(ev.get("title") or "")[:160])
                 w = float(ev.get("weight") or 1.0)
+                bases = ev.get("bases_text") or ev.get("bases") or ""
+                if isinstance(bases, list):
+                    bases = ", ".join(str(b) for b in bases)
+                bases = _html.escape(str(bases)[:200]) if bases else ""
                 lines.append(f"  · [{src}/{kind} w={w:.2f}] {title}")
+                if bases:
+                    lines.append(f"    Tickers: <b>{bases}</b>")
             if verdict in ("NEWS_RELATED", "LIKELY_NEWS"):
                 lines.append(
                     "<i>Strategy: likely idiosyncratic (Rule 6). "
