@@ -23,17 +23,18 @@
     silenceMs: 0,
   };
 
-  // Calmer VAD: only commit a turn after sustained real speech + silence.
-  // Avoids spam on ambient noise / empty STT loops.
+  // VAD: commit after real speech + sustained silence.
+  // Long teaches allowed — no hard 60s cut mid-sentence.
   const VAD = {
-    speakRms: 0.038, // slightly more sensitive so it arms faster on your voice
+    speakRms: 0.038,
     silenceRms: 0.02,
-    endSilenceMs: 2000, // allow thinking pauses without cutting you off
+    endSilenceMs: 4500, // pause to think without ending the turn
     minSpeechMs: 550,
-    speechHoldMs: 180, // arm "hearing you" sooner
-    maxTurnMs: 60000,
+    speechHoldMs: 180,
+    // Cap from when *speech* started (not mic open). Safety only.
+    maxSpeechMs: 15 * 60 * 1000, // 15 minutes if needed
     pollMs: 70,
-    postReplyCooldownMs: 1200, // longer ignore after TTS (less echo false-turns)
+    postReplyDataMs: 1200,
     emptyBackoffMs: 1000,
   };
 
