@@ -64,10 +64,20 @@ def list_position_entities(
         for s in segs:
             if not include_closed and s.get("status") != "open":
                 continue
-            s["money_truth"] = "fill_recon_unverified"
-            s["verified"] = False
-            s["teach_ok"] = False
+            is_open = s.get("status") == "open" or s.get("is_open")
+            n_sells = int(s.get("n_sells") or 0)
+            rem = float(s.get("size_remaining") or 0)
+            # Complete flat cycle from fills = teachable closed trade (spot)
+            if not is_open and n_sells > 0 and rem <= 1e-8:
+                s["money_truth"] = "fill_cycle"
+                s["verified"] = False  # not exchange history; still process+fill $
+                s["teach_ok"] = True
+            else:
+                s["money_truth"] = "fill_recon_unverified"
+                s["verified"] = False
+                s["teach_ok"] = False
             s["source"] = "fill_recon"
+            s["recon_from_fills"] = True
             entities.append(s)
 
     entities = _reconcile_spot_with_balances(

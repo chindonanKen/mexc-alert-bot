@@ -91,7 +91,11 @@ def learning_home_v1(user_id: Optional[int] = None) -> Dict[str, Any]:
     pending = pending_all[:2]  # hard cap display 2
 
     learned = what_have_you_learned(uid)
-    trades = list_money_reviews(uid, limit=15, teach_only=True, store=store)
+    # Learning picker: all listable cycles (open + closed), newest first.
+    # Includes complete spot fill closes (fill_cycle) — not only futures EXCH.
+    trades = list_money_reviews(
+        uid, limit=40, listable_only=True, teach_only=False, store=store
+    )
     # recent fires + any frozen case (P1)
     fires = []
     try:

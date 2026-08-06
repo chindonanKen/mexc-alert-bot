@@ -1618,35 +1618,68 @@
 
     const tradeList = $("#learnTradeList");
     if (tradeList) {
-      const list = trades || [];
+      // Opens first, then closed by recency (API already newest-first overall)
+      const list = (trades || []).slice().sort((a, b) => {
+        const ao = a.status === "open" ? 0 : 1;
+        const bo = b.status === "open" ? 0 : 1;
+        if (ao !== bo) return ao - bo;
+        const ta = Number(a.closed_at || a.opened_at || 0);
+        const tb = Number(b.closed_at || b.opened_at || 0);
+        return tb - ta;
+      });
       tradeList.innerHTML = list.length
         ? list
             .map((t, i) => {
-              const pnl = t.pnl_pct;
-              const pnlS =
-                pnl != null
-                  ? `<span class="${pnl >= 0 ? "up" : "dn"}">${
-                      pnl >= 0 ? "+" : ""
-                    }${Number(pnl).toFixed(1)}%</span>`
-                  : t.status || "—";
+              const pnl =
+                t.pnl_usd != null
+                  ? `<span class="${Number(t.pnl_usd) >= 0 ? "up" : "dn"}">${
+                      Number(t.pnl_usd) >= 0 ? "+$" : "−$"
+                    }${Math.abs(Number(t.pnl_usd)).toFixed(0)}</span>`
+                  : t.pnl_pct != null
+                    ? `<span class="${Number(t.pnl_pct) >= 0 ? "up" : "dn"}">${
+                        Number(t.pnl_pct) >= 0 ? "+" : ""
+                      }${Number(t.pnl_pct).toFixed(1)}%</span>`
+                    : t.status || "—";
               const ek = t.entity_key || t.id || `t${i}`;
               const layers = `B${t.n_buys || 0}/S${t.n_sells || 0}`;
+              const mt = (t.money_truth || "").toString();
+              const mtShort =
+                mt === "exchange"
+                  ? "EXCH"
+                  : mt === "fill_cycle"
+                    ? "FILLS"
+                    : mt === "fill_recon_unverified"
+                      ? "FILL?"
+                      : mt.slice(0, 6) || "—";
+              const free = t.free_coins
+                ? ` · <span class="pos-free">FREE</span>`
+                : "";
               const sel =
                 state.learnSel &&
                 state.learnSel.entity_key === String(ek)
                   ? " selected"
+                  : "";
+              const inOut =
+                t.bought_usd != null || t.sold_usd != null
+                  ? ` · in $${
+                      t.bought_usd != null
+                        ? Number(t.bought_usd).toFixed(0)
+                        : "—"
+                    } / out $${
+                      t.sold_usd != null ? Number(t.sold_usd).toFixed(0) : "—"
+                    }`
                   : "";
               return `<div class="learn-card rich learn-pick${sel}" data-pick-trade="${escHtml(
                 String(ek)
               )}" data-i="${i}">
                 <div class="learn-card-h">${escHtml(t.symbol)} · ${escHtml(
                 (t.market || "?").toString().slice(0, 1).toUpperCase()
-              )} · ${pnlS}</div>
+              )} · ${pnl}${free}</div>
                 <div class="learn-card-meta">${escHtml(
-                  t.status || ""
-                )} · ${layers} · ${escHtml(
-                t.money_truth || ""
-              )} · ${fmtTime(t.closed_at || t.opened_at)}</div>
+                  (t.status || "").toString().toUpperCase()
+                )} · ${layers} · ${escHtml(mtShort)}${inOut} · ${fmtTime(
+                t.closed_at || t.opened_at
+              )}</div>
                 <div class="row-gap mt">
                   <button type="button" class="btn sm" data-pick-trade-btn="${escHtml(
                     String(ek)
@@ -1655,18 +1688,23 @@
               </div>`;
             })
             .join("")
-        : rankEmpty("No teach_ok trades yet — Positions feed this list");
+        : rankEmpty(
+            "No trades yet — open/closed from Positions (fill cycles + exchange)"
+          );
       const pickTrade = (i) => {
         const t = list[i];
         if (!t) return;
         const pnl = t.pnl_pct;
         const detail = [
           t.status,
+          t.bought_usd != null ? "in $" + Number(t.bought_usd).toFixed(0) : "",
+          t.sold_usd != null ? "out $" + Number(t.sold_usd).toFixed(0) : "",
           t.entry_avg != null ? "entry " + t.entry_avg : "",
           t.exit_avg != null ? "exit " + t.exit_avg : "",
-          t.pnl_usd != null ? "$" + t.pnl_usd : "",
+          t.pnl_usd != null ? "PnL $" + t.pnl_usd : "",
           `layers B${t.n_buys || 0}/S${t.n_sells || 0}`,
           t.money_truth || "",
+          t.free_coins ? "FREE bag" : "",
         ]
           .filter(Boolean)
           .join(" · ");
@@ -1679,7 +1717,12 @@
           status: t.status,
           label: `${t.symbol} ${(t.market || "").toString()} · ${
             t.status
-          } · ${pnl != null ? (pnl >= 0 ? "+" : "") + Number(pnl).toFixed(1) + "%" : "—"}`,
+          } · ${
+            t.pnl_usd != null
+              ? (Number(t.pnl_usd) >= 0 ? "+$" : "−$") +
+                Math.abs(Number(t.pnl_usd)).toFixed(0)
+              : "—"
+          }`,
           detail,
           tradeSnap: t,
         });

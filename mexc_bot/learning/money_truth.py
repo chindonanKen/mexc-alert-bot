@@ -82,16 +82,44 @@ def in_teach_window(
 
 
 def money_truth_label(entity: dict) -> str:
-    """exchange | fill_recon_unverified | journal_manual."""
+    """exchange | fill_cycle | fill_recon_unverified | journal_manual.
+
+    fill_cycle = completed flat from fill walk (spot closed with buys+sells).
+    That is the normal path for newly closed spot — still teachable process + fill $.
+    """
+    is_open = entity.get("status") == "open" or entity.get("is_open")
+    n_sells = int(entity.get("n_sells") or 0)
+    rem = float(entity.get("size_remaining") or 0)
+    # Complete closed fill cycle (newest spot closes land here, not history_positions)
+    if (
+        not is_open
+        and (entity.get("recon_from_fills") or entity.get("money_truth") in (
+            "fill_recon_unverified",
+            "fill_cycle",
+            None,
+            "",
+        ))
+        and n_sells > 0
+        and rem <= 1e-8
+        and not entity.get("exchange_history")
+    ):
+        return "fill_cycle"
     if entity.get("money_truth") in (
         "exchange",
+        "fill_cycle",
         "fill_recon_unverified",
         "journal_manual",
     ):
-        return str(entity["money_truth"])
+        # Don't let stale fill_recon_unverified win over complete cycle detection above
+        mt = str(entity["money_truth"])
+        if mt == "fill_recon_unverified" and not is_open and n_sells > 0 and rem <= 1e-8:
+            return "fill_cycle"
+        return mt
     if entity.get("exchange_history") or entity.get("exchange_hold"):
         return "exchange"
     if entity.get("recon_from_fills"):
+        if not is_open and n_sells > 0 and rem <= 1e-8:
+            return "fill_cycle"
         return "fill_recon_unverified"
     if entity.get("journal_id") or entity.get("notes"):
         return "journal_manual"
@@ -118,8 +146,18 @@ def entity_to_review(
     )
     eid = entity.get("entity_key") or entity.get("id")
     in_window = in_teach_window(entity, since=teach_since)
-    # Teach only exchange-quality data inside the AD Desk registration window
-    teach_ok = mt == "exchange" and in_window
+    # $ + process training: exchange-backed OR complete fill cycles in desk era
+    # (spot closes never appear in futures history_positions)
+    teach_ok = in_window and mt in ("exchange", "fill_cycle")
+    # Always listable for Learning picker when we have a real position cycle
+    listable = in_window and mt in (
+        "exchange",
+        "fill_cycle",
+        "fill_recon_unverified",
+    )
+    if is_open and mt == "exchange":
+        listable = True
+        teach_ok = teach_ok or in_window
     review = {
         "id": eid,
         "entity_key": entity.get("entity_key") or str(eid),
@@ -136,6 +174,13 @@ def entity_to_review(
         "hold_hours": entity.get("hold_hours"),
         "pnl_pct": round(float(pnl_pct), 3) if pnl_pct is not None else None,
         "pnl_usd": round(float(pnl_usd), 4) if pnl_usd is not None else None,
+        "bought_usd": entity.get("bought_usd"),
+        "sold_usd": entity.get("sold_usd"),
+        "remaining_mark_usd": entity.get("remaining_mark_usd"),
+        "remaining_cost_usd": entity.get("remaining_cost_usd"),
+        "principal_recovered": entity.get("principal_recovered"),
+        "free_coins": entity.get("free_coins"),
+        "free_coins_status": entity.get("free_coins_status"),
         "outcome": entity.get("outcome"),
         "size_remaining": entity.get("size_remaining"),
         "size_qty": entity.get("size_qty"),
@@ -157,6 +202,7 @@ def entity_to_review(
         "in_teach_window": in_window,
         "teach_since": teach_since if teach_since > 0 else None,
         "teach_ok": teach_ok,
+        "listable_for_teach": listable or teach_ok,
         "source": (
             "mexc_history_positions"
             if entity.get("exchange_history")
@@ -229,14 +275,19 @@ def list_money_reviews(
     symbol: Optional[str] = None,
     limit: int = 40,
     teach_only: bool = False,
+    listable_only: bool = False,
     store: Optional[EventStore] = None,
 ) -> List[dict]:
-    """Reviews from exchange-backed position entities (same as Positions desk)."""
+    """Reviews from position entities (same source as Positions desk).
+
+    teach_only: exchange + complete fill_cycle (agent $ training).
+    listable_only: Learning picker — includes fill_recon opens/partials too.
+    """
     from ..webapi.positions_enrich import list_position_entities
 
     include_closed = not open_only
     entities = list_position_entities(
-        user_id, include_closed=include_closed, closed_limit=max(limit, 40)
+        user_id, include_closed=include_closed, closed_limit=max(limit, 60)
     )
     events: List[dict] = []
     if store is not None:
@@ -257,6 +308,10 @@ def list_money_reviews(
             continue
         r = entity_to_review(e, events=events, teach_since=since)
         if teach_only and not r.get("teach_ok"):
+            continue
+        if listable_only and not (
+            r.get("listable_for_teach") or r.get("teach_ok")
+        ):
             continue
         reviews.append(r)
 
