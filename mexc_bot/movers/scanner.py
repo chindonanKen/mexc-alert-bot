@@ -222,14 +222,20 @@ class MoverScanner:
         return panic, fast
 
     def _breadth_pct_for_user(self, user_threshold_percent: float) -> float:
+        """Min |drawdown| % to count as dumping for panic-board breadth.
+
+        Tied to the user's mover threshold so 7% movers don't board on 3–4% grinds.
+        Override with MOVER_HEAT_BREADTH_PCT for an absolute floor.
+        """
         raw = getattr(self.settings, "mover_heat_breadth_pct", None)
         if raw is not None and str(raw).strip() != "":
             try:
                 return abs(float(raw))
             except (TypeError, ValueError):
                 pass
-        # Default: slightly earlier than full MOVER fire (60% of user threshold)
-        return max(0.5, abs(float(user_threshold_percent)) * 0.6)
+        thr = abs(float(user_threshold_percent) or 5.0)
+        # Default: 85% of user mover % (7% movers → count dumping from ~6%)
+        return max(3.0, thr * 0.85)
 
     def _volume_line(self, market: str, symbol: str) -> str:
         if not getattr(self.settings, "mover_enrich_volume", True):
@@ -273,12 +279,22 @@ class MoverScanner:
         if not watchlist:
             return
 
-        breadth_min = int(getattr(self.settings, "mover_heat_breadth_min", 3))
+        breadth_min = int(getattr(self.settings, "mover_heat_breadth_min", 5))
         top_n = int(getattr(self.settings, "mover_heat_top_n", 5))
-        min_gap = float(getattr(self.settings, "mover_heat_min_gap_seconds", 45))
-        refresh = float(getattr(self.settings, "mover_heat_refresh_seconds", 90))
+        min_gap = float(getattr(self.settings, "mover_heat_min_gap_seconds", 120))
+        refresh = float(getattr(self.settings, "mover_heat_refresh_seconds", 300))
         panic_v, fast_v = self._velocity_thresholds()
+        thr = abs(float(threshold_percent) or 5.0)
         breadth_pct = self._breadth_pct_for_user(threshold_percent)
+        # Top name must be meaningfully deep vs user threshold (not mild GRIND board)
+        top_min_pct = float(
+            getattr(self.settings, "mover_heat_top_min_pct", None)
+            or max(4.0, thr * 0.75)
+        )
+        # Large watchlists: need a bit more breadth than a flat min of 3
+        wl_n = len(watchlist)
+        dyn_min = max(breadth_min, int((wl_n * 0.12) + 0.999))  # ceil 12% of list
+        dyn_min = min(dyn_min, max(breadth_min, 8))  # cap so huge lists still work
 
         board = heat_snapshot(
             self.history,
@@ -289,16 +305,31 @@ class MoverScanner:
             fast_per_min=fast_v,
             breadth_pct=breadth_pct,
         )
-        if not is_widespread_panic(board, breadth_min):
+        if not is_widespread_panic(board, dyn_min):
             return
 
-        fp = board_fingerprint(board.ranked, top_n)
+        # Quality: worst dump must be near mover territory
+        if not board.ranked or board.ranked[0].dd_pct > -abs(top_min_pct):
+            return
+
+        # Message only shows names that clear breadth (no −1% clutter)
+        significant = [r for r in board.ranked if r.dd_pct <= -abs(breadth_pct)]
+        if len(significant) < dyn_min:
+            return
+        board_for_msg = board
+        # Shallow copy ranked for display filter without mutating history ranking logic
+        from dataclasses import replace
+
+        board_for_msg = replace(board, ranked=significant)
+
+        fp = board_fingerprint(significant, top_n)
         mono = time.monotonic()
         last_m = self._last_heat_mono.get(user_id)
         last_fp = self._last_heat_fp.get(user_id)
 
         # Anti-spam: first board free; later only if min-gap passed and
         # (fingerprint changed + refresh elapsed) OR leader changed after min-gap.
+        # Refresh default is long so GRIND churn does not spam every minute.
         allow = False
         if last_m is None:
             allow = True
@@ -313,13 +344,16 @@ class MoverScanner:
                     return (row[0], row[1]) if len(row) >= 2 else row
 
                 leader_changed = _leader_id(last_fp) != _leader_id(fp)
-                if elapsed >= refresh or leader_changed:
+                # Leader change alone still needs full refresh window (less intrusive)
+                if elapsed >= refresh:
+                    allow = True
+                elif leader_changed and elapsed >= max(min_gap, refresh * 0.5):
                     allow = True
 
         if not allow:
             return
 
-        msg = format_heat_board_html(board, top_n=top_n)
+        msg = format_heat_board_html(board_for_msg, top_n=top_n)
         try:
             self.notifier(user_id, msg, parse_mode="HTML")
             self._last_heat_mono[user_id] = mono
@@ -383,9 +417,9 @@ class MoverScanner:
             heat_dumping_count = None
             watchlist_count = len(watchlist)
             try:
-                breadth_pct = float(scan["threshold_percent"]) * 0.6
-                if getattr(self.settings, "mover_heat_breadth_pct", None) is not None:
-                    breadth_pct = float(self.settings.mover_heat_breadth_pct)
+                breadth_pct = self._breadth_pct_for_user(
+                    float(scan["threshold_percent"])
+                )
                 board = heat_snapshot(
                     self.history,
                     watchlist,

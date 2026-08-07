@@ -79,7 +79,7 @@ class Settings:
     mover_heat_auto: bool
     mover_heat_on_mw: bool
     mover_heat_breadth_min: int
-    mover_heat_breadth_pct: Optional[float]  # None → 0.6 × user threshold
+    mover_heat_breadth_pct: Optional[float]  # None → 0.85 × user threshold
     mover_heat_top_n: int
     mover_heat_min_gap_seconds: float
     mover_heat_refresh_seconds: float
@@ -190,11 +190,12 @@ def load_settings() -> Settings:
         mover_velocity_fast=float(os.getenv("MOVER_VELOCITY_FAST", "0.8")),
         mover_heat_auto=_env_bool("MOVER_HEAT_AUTO", True),
         mover_heat_on_mw=_env_bool("MOVER_HEAT_ON_MW", True),
-        mover_heat_breadth_min=int(os.getenv("MOVER_HEAT_BREADTH_MIN", "3")),
+        # Calmer defaults: board when market dumps near your mover %, not mild grinds
+        mover_heat_breadth_min=int(os.getenv("MOVER_HEAT_BREADTH_MIN", "5")),
         mover_heat_breadth_pct=_env_optional_float("MOVER_HEAT_BREADTH_PCT"),
         mover_heat_top_n=int(os.getenv("MOVER_HEAT_TOP_N", "5")),
-        mover_heat_min_gap_seconds=float(os.getenv("MOVER_HEAT_MIN_GAP_SECONDS", "45")),
-        mover_heat_refresh_seconds=float(os.getenv("MOVER_HEAT_REFRESH_SECONDS", "90")),
+        mover_heat_min_gap_seconds=float(os.getenv("MOVER_HEAT_MIN_GAP_SECONDS", "120")),
+        mover_heat_refresh_seconds=float(os.getenv("MOVER_HEAT_REFRESH_SECONDS", "300")),
         feature_learning=_env_bool("FEATURE_LEARNING", False),
         learning_outcome_horizons_seconds=_env_int_tuple(
             "LEARNING_OUTCOME_HORIZONS_SECONDS", "900,3600,14400"
