@@ -115,6 +115,18 @@ class PositionClose(BaseModel):
     notes: Optional[str] = None
 
 
+class PositionFlagBody(BaseModel):
+    """Flags on Positions: free coins + long-term hold book (exclude AD learning)."""
+
+    entity_key: str
+    symbol: str
+    market: str = "spot"
+    free_coins_override: Optional[str] = None  # on | off | null
+    free_mark_usd: Optional[float] = None
+    book: Optional[str] = None  # hold | ad
+    notes: Optional[str] = None
+
+
 class AgentBody(BaseModel):
     message: str
     history: Optional[List[dict]] = None
@@ -728,15 +740,6 @@ def create_app() -> FastAPI:
             )
         except Exception as e:
             raise HTTPException(400, str(e))
-
-    class PositionFlagBody(BaseModel):
-        entity_key: str
-        symbol: str
-        market: str = "spot"
-        free_coins_override: Optional[str] = None  # on | off | null
-        free_mark_usd: Optional[float] = None
-        book: Optional[str] = None  # hold | ad
-        notes: Optional[str] = None
 
     @app.post("/api/positions/flags")
     def post_position_flag(body: PositionFlagBody, _: bool = Depends(require_auth)):
