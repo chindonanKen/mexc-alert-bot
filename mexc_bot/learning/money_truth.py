@@ -146,16 +146,22 @@ def entity_to_review(
     )
     eid = entity.get("entity_key") or entity.get("id")
     in_window = in_teach_window(entity, since=teach_since)
+    # Long-term invest (hold book): never AD teach / bulk learn
+    is_hold = (
+        (entity.get("position_book") or "").lower() == "hold"
+        or entity.get("is_hold") is True
+        or entity.get("ad_learning") is False
+    )
     # $ + process training: exchange-backed OR complete fill cycles in desk era
     # (spot closes never appear in futures history_positions)
-    teach_ok = in_window and mt in ("exchange", "fill_cycle")
-    # Always listable for Learning picker when we have a real position cycle
-    listable = in_window and mt in (
+    teach_ok = (not is_hold) and in_window and mt in ("exchange", "fill_cycle")
+    # Always listable for Learning picker when we have a real AD position cycle
+    listable = (not is_hold) and in_window and mt in (
         "exchange",
         "fill_cycle",
         "fill_recon_unverified",
     )
-    if is_open and mt == "exchange":
+    if is_open and mt == "exchange" and not is_hold:
         listable = True
         teach_ok = teach_ok or in_window
     review = {
@@ -181,6 +187,9 @@ def entity_to_review(
         "principal_recovered": entity.get("principal_recovered"),
         "free_coins": entity.get("free_coins"),
         "free_coins_status": entity.get("free_coins_status"),
+        "position_book": "hold" if is_hold else (entity.get("position_book") or "ad"),
+        "is_hold": is_hold,
+        "ad_learning": not is_hold,
         "outcome": entity.get("outcome"),
         "size_remaining": entity.get("size_remaining"),
         "size_qty": entity.get("size_qty"),

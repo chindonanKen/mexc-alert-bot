@@ -241,6 +241,8 @@ class EventStore:
             )
             """
         )
+        # book: 'ad' (default AD desk learning) | 'hold' (long-term invest — exclude from AD teach)
+        self._ensure_column(conn, "position_flags", "book", "TEXT")
 
     @staticmethod
     def _ensure_column(
@@ -928,16 +930,16 @@ class EventStore:
         market: str = "spot",
         free_coins_override: Optional[str] = None,
         free_mark_usd: Optional[float] = None,
+        book: Optional[str] = None,
         notes: Optional[str] = None,
+        update_free: bool = False,
+        update_book: bool = False,
     ) -> dict:
-        """free_coins_override: 'on' | 'off' | None (clear)."""
-        ov = free_coins_override
-        if ov is not None:
-            ov = str(ov).lower().strip()
-            if ov in ("", "null", "none", "clear"):
-                ov = None
-            elif ov not in ("on", "off"):
-                raise ValueError("free_coins_override must be on|off|null")
+        """Update position flags.
+
+        free_coins_override: 'on' | 'off' | None (clear) when update_free.
+        book: 'hold' (long-term invest) | 'ad' (default AD learning) when update_book.
+        """
         now = time.time()
         with self._lock:
             conn = self._get_conn()
@@ -945,33 +947,57 @@ class EventStore:
                 "SELECT * FROM position_flags WHERE user_id = ? AND entity_key = ?",
                 (int(user_id), str(entity_key)),
             ).fetchone()
-            free_since = None
-            mark = free_mark_usd
-            if ov == "on":
-                free_since = (
-                    float(existing["free_since_ts"])
-                    if existing and existing["free_since_ts"]
-                    else now
-                )
-                if mark is None and existing and existing["free_mark_usd"] is not None:
-                    mark = float(existing["free_mark_usd"])
-            elif existing and ov is None:
-                # clearing override
-                pass
+            ex = dict(existing) if existing else {}
+
+            ov = ex.get("free_coins_override")
+            free_since = ex.get("free_since_ts")
+            mark = ex.get("free_mark_usd")
+            if update_free:
+                ov = free_coins_override
+                if ov is not None:
+                    ov = str(ov).lower().strip()
+                    if ov in ("", "null", "none", "clear"):
+                        ov = None
+                    elif ov not in ("on", "off"):
+                        raise ValueError("free_coins_override must be on|off|null")
+                if ov == "on":
+                    free_since = float(free_since) if free_since else now
+                    if free_mark_usd is not None:
+                        mark = free_mark_usd
+                    elif mark is None and free_mark_usd is None:
+                        mark = None
+                else:
+                    free_since = None
+                    if free_mark_usd is not None:
+                        mark = free_mark_usd
+
+            book_val = ex.get("book") or "ad"
+            if update_book:
+                b = (book or "ad").lower().strip()
+                if b in ("", "null", "none", "clear", "ad", "default"):
+                    book_val = "ad"
+                elif b in ("hold", "invest", "long", "long_term", "lt"):
+                    book_val = "hold"
+                else:
+                    raise ValueError("book must be hold|ad")
+
+            note_val = notes if notes is not None else ex.get("notes")
+
             conn.execute(
                 """
                 INSERT INTO position_flags (
                     user_id, entity_key, symbol, market, free_coins_override,
-                    free_since_ts, free_mark_usd, notes, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    free_since_ts, free_mark_usd, notes, updated_at, book
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id, entity_key) DO UPDATE SET
                     symbol = excluded.symbol,
                     market = excluded.market,
                     free_coins_override = excluded.free_coins_override,
                     free_since_ts = excluded.free_since_ts,
                     free_mark_usd = excluded.free_mark_usd,
-                    notes = COALESCE(excluded.notes, position_flags.notes),
-                    updated_at = excluded.updated_at
+                    notes = excluded.notes,
+                    updated_at = excluded.updated_at,
+                    book = excluded.book
                 """,
                 (
                     int(user_id),
@@ -981,10 +1007,45 @@ class EventStore:
                     ov,
                     free_since,
                     mark,
-                    notes,
+                    note_val,
                     now,
+                    book_val,
                 ),
             )
+            # Mirror hold flag on stable sopen:SYMBOL for spot so entity_key churn keeps it
+            if update_book and str(market or "").lower() == "spot":
+                alt = f"sopen:{str(symbol).upper().replace('_', '')}"
+                if not alt.endswith("USDT") and "USDT" not in str(symbol).upper():
+                    alt = f"sopen:{str(symbol).upper()}USDT"
+                # Prefer compact spot form without underscore
+                base = str(symbol).upper().replace("_", "").replace("-", "")
+                alt = f"sopen:{base if base.endswith('USDT') else base + 'USDT'}"
+                if alt != str(entity_key):
+                    conn.execute(
+                        """
+                        INSERT INTO position_flags (
+                            user_id, entity_key, symbol, market, free_coins_override,
+                            free_since_ts, free_mark_usd, notes, updated_at, book
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(user_id, entity_key) DO UPDATE SET
+                            symbol = excluded.symbol,
+                            book = excluded.book,
+                            notes = excluded.notes,
+                            updated_at = excluded.updated_at
+                        """,
+                        (
+                            int(user_id),
+                            alt,
+                            str(symbol).upper(),
+                            "spot",
+                            ov,
+                            free_since,
+                            mark,
+                            note_val,
+                            now,
+                            book_val,
+                        ),
+                    )
             row = conn.execute(
                 "SELECT * FROM position_flags WHERE user_id = ? AND entity_key = ?",
                 (int(user_id), str(entity_key)),

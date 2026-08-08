@@ -1962,3 +1962,55 @@ tr.pnl-row-free td { background: rgba(52, 211, 153, 0.06); }
   .pos-flow-cell { align-items: flex-start; }
   .pos-meta { text-align: left; grid-column: 1 / 2; }
 }
+
+/* Long-term hold basket */
+.pos-outcome.hold {
+  color: #c4b5fd;
+  border-color: rgba(196, 181, 253, 0.45);
+  background: rgba(167, 139, 250, 0.12);
+}
+.pos-card.is-hold {
+  border-left: 3px solid rgba(167, 139, 250, 0.65);
+  background: rgba(167, 139, 250, 0.06);
+  border-color: rgba(167, 139, 250, 0.22);
+}
+.pos-band-h.hold { color: #c4b5fd; }
+.pos-band-h.free { color: var(--mint); }
+.pos-band-hint { font-size: 0.72rem; margin: 0 0 0.4rem; }
+.pos-strip-cell.is-hold { border-color: rgba(167, 139, 250, 0.3); }
+.pos-strip-cell.is-hold .pos-strip-v { color: #c4b5fd; }
+.pos-hold-banner {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  margin: 0.25rem 0 0.35rem;
+  border-radius: 8px;
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  background: rgba(167, 139, 250, 0.08);
+  color: #c4b5fd;
+}
+.pos-flag-actions { margin: 0.35rem 0 0.5rem; }
+.pos-flag-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.25rem 0;
+}
+.pos-flag-label {
+  font-size: 0.68rem;
+  min-width: 4.5rem;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pos-flag-row .btn.on {
+  border-color: var(--sky);
+  color: var(--sky);
+}
+.pos-flag-row .btn.on[data-book-hold],
+.pos-flag-row .btn.on[data-book-hold].on {
+  border-color: #c4b5fd;
+  color: #c4b5fd;
+}
+.pos-flag-note { font-size: 0.72rem; margin: 0.25rem 0; }

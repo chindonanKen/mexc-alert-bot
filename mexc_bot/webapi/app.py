@@ -735,11 +735,12 @@ def create_app() -> FastAPI:
         market: str = "spot"
         free_coins_override: Optional[str] = None  # on | off | null
         free_mark_usd: Optional[float] = None
+        book: Optional[str] = None  # hold | ad
         notes: Optional[str] = None
 
     @app.post("/api/positions/flags")
     def post_position_flag(body: PositionFlagBody, _: bool = Depends(require_auth)):
-        """Mark / unmark free coins on an open position (manual override)."""
+        """Mark free coins and/or long-term hold (exclude from AD learning)."""
         from ..learning.store import EventStore
 
         try:
@@ -747,6 +748,15 @@ def create_app() -> FastAPI:
             if not uid:
                 raise HTTPException(400, "DESK_USER_ID not set")
             store = EventStore(db.db_path())
+            dump = (
+                body.model_dump(exclude_unset=True)
+                if hasattr(body, "model_dump")
+                else body.dict(exclude_unset=True)
+            )
+            update_free = "free_coins_override" in dump or "free_mark_usd" in dump
+            update_book = "book" in dump
+            if not update_free and not update_book:
+                raise ValueError("Provide free_coins_override and/or book")
             row = store.set_position_flag(
                 int(uid),
                 body.entity_key,
@@ -754,7 +764,10 @@ def create_app() -> FastAPI:
                 market=body.market,
                 free_coins_override=body.free_coins_override,
                 free_mark_usd=body.free_mark_usd,
+                book=body.book,
                 notes=body.notes,
+                update_free=update_free,
+                update_book=update_book,
             )
             return {"ok": True, "flag": row}
         except ValueError as e:

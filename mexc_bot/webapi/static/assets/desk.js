@@ -471,6 +471,9 @@
   function posOutcomeBadge(p) {
     const isOpen = p.status === "open" || p.is_open;
     if (isOpen) {
+      if (p.is_hold || p.position_book === "hold") {
+        return `<span class="pos-outcome hold" title="Long-term invest — excluded from AD learning">HOLD</span>`;
+      }
       if (p.free_coins) {
         const src = p.free_coins_source === "manual" ? " · manual" : "";
         return `<span class="pos-outcome free" title="Principal recovered — free inventory${src}">FREE</span>`;
@@ -623,19 +626,41 @@
       )
       .join("");
 
-    const freeBtns =
-      isOpen && (p.market || "").toLowerCase() === "spot"
-        ? `<div class="row-gap pos-free-actions">
-            <button type="button" class="btn soft sm" data-free-on="${escHtml(
-              String(posId)
-            )}" data-sym="${escHtml(p.symbol || "")}" data-mkt="spot" data-mark="${
-              p.remaining_mark_usd != null ? p.remaining_mark_usd : ""
-            }">Mark free</button>
-            <button type="button" class="btn soft sm" data-free-off="${escHtml(
-              String(posId)
-            )}" data-sym="${escHtml(p.symbol || "")}" data-mkt="spot">Not free</button>
+    const isHold = !!(p.is_hold || p.position_book === "hold");
+    const freeBtns = isOpen
+      ? `<div class="pos-flag-actions">
+            <div class="pos-flag-row">
+              <span class="pos-flag-label mute">Book</span>
+              <button type="button" class="btn soft sm ${isHold ? "" : "on"}" data-book-ad="${escHtml(
+                String(posId)
+              )}" data-sym="${escHtml(p.symbol || "")}" data-mkt="${escHtml(
+                (p.market || "spot").toString()
+              )}" title="AD / panic trading — used for agent learning">AD desk</button>
+              <button type="button" class="btn soft sm ${isHold ? "on" : ""}" data-book-hold="${escHtml(
+                String(posId)
+              )}" data-sym="${escHtml(p.symbol || "")}" data-mkt="${escHtml(
+                (p.market || "spot").toString()
+              )}" title="Long-term invest — excluded from AD learning">Long-term</button>
+            </div>
+            ${
+              !isHold && (p.market || "").toLowerCase() === "spot"
+                ? `<div class="pos-flag-row">
+              <span class="pos-flag-label mute">Free coins</span>
+              <button type="button" class="btn soft sm" data-free-on="${escHtml(
+                String(posId)
+              )}" data-sym="${escHtml(p.symbol || "")}" data-mkt="spot" data-mark="${
+                  p.remaining_mark_usd != null ? p.remaining_mark_usd : ""
+                }">Mark free</button>
+              <button type="button" class="btn soft sm" data-free-off="${escHtml(
+                String(posId)
+              )}" data-sym="${escHtml(p.symbol || "")}" data-mkt="spot">Not free</button>
+            </div>`
+                : isHold
+                  ? `<div class="pos-flag-note mute">Long-term invest — not used for AD bulk teach / agent cases.</div>`
+                  : ""
+            }
           </div>`
-        : "";
+      : "";
 
     const markLine = isOpen
       ? `Avg ${entry != null ? fmtPx(entry) : "—"} · Mark ${
@@ -670,9 +695,9 @@
 
     return `<details class="pos-card ${isOpen ? "is-open" : "is-closed"} outcome-${
       (p.outcome || (isOpen ? "open" : "flat")).toLowerCase()
-    }${p.free_coins ? " is-free" : ""}${
-      p.free_coins_status === "near_free" ? " is-near" : ""
-    }" data-pos-id="${String(posId).replace(/"/g, "")}">
+    }${p.free_coins && !isHold ? " is-free" : ""}${
+      p.free_coins_status === "near_free" && !isHold ? " is-near" : ""
+    }${isHold ? " is-hold" : ""}" data-pos-id="${String(posId).replace(/"/g, "")}">
       <summary class="pos-sum">
         <div class="pos-id"><span class="pos-sym">${escHtml(
           String(p.symbol || "")
@@ -744,8 +769,8 @@
           p.fee != null ? " · fee " + p.fee : ""
         }</div>
         ${
-          isOpen && (p.market || "").toLowerCase() === "spot"
-            ? `<div class="pos-g">Free bag</div>${freeBanner}${freeBtns}`
+          isOpen
+            ? `${!isHold && (p.market || "").toLowerCase() === "spot" ? `<div class="pos-g">Free bag</div>${freeBanner}` : ""}${!isHold && freeBanner && (p.market || "").toLowerCase() !== "spot" ? freeBanner : ""}${isHold ? `<div class="pos-g">Book</div><div class="pos-hold-banner">Long-term invest · excluded from AD learning</div>` : ""}<div class="pos-g">Flags</div>${freeBtns}`
             : freeBanner
         }
         <div class="pos-g">Mark</div>
@@ -797,28 +822,44 @@
     if (!host) return;
     let opens = positions.filter((p) => p.status === "open" || p.is_open);
     const closed = positions.filter((p) => !(p.status === "open" || p.is_open));
-    // FREE first, then NEAR, then other opens (newest already from API)
-    opens = opens.slice().sort((a, b) => {
+    const isHoldP = (p) => !!(p.is_hold || p.position_book === "hold");
+    const holdOpens = opens.filter(isHoldP);
+    const adOpens = opens.filter((p) => !isHoldP(p));
+    // AD opens: FREE first, then NEAR, then rest
+    adOpens.sort((a, b) => {
       const ra = a.free_coins ? 0 : a.free_coins_status === "near_free" ? 1 : 2;
       const rb = b.free_coins ? 0 : b.free_coins_status === "near_free" ? 1 : 2;
       return ra - rb;
     });
+    const freeOpens = adOpens.filter((p) => p.free_coins);
+    const riskOpens = adOpens.filter((p) => !p.free_coins);
+
     const head = $("#posListHead");
     if (head) {
-      head.textContent = `${opens.length} open · ${closed.length} closed`;
+      head.textContent = `${riskOpens.length} AD · ${freeOpens.length} free · ${holdOpens.length} hold · ${closed.length} closed`;
     }
     const br = $("#posBankroll");
     if (br) {
-      let openMark = 0,
+      let adMark = 0,
         freeMark = 0,
         freeN = 0,
+        holdMark = 0,
+        holdN = 0,
         openReal = 0,
         cashBanked = 0;
       opens.forEach((p) => {
-        if (p.remaining_mark_usd != null) openMark += Number(p.remaining_mark_usd);
+        const m =
+          p.remaining_mark_usd != null ? Number(p.remaining_mark_usd) : 0;
+        if (isHoldP(p)) {
+          holdN += 1;
+          holdMark += m;
+          return;
+        }
         if (p.free_coins) {
           freeN += 1;
-          if (p.remaining_mark_usd != null) freeMark += Number(p.remaining_mark_usd);
+          freeMark += m;
+        } else {
+          adMark += m;
         }
         if (p.realized_pnl_usd != null) openReal += Number(p.realized_pnl_usd);
         if (
@@ -829,28 +870,42 @@
           cashBanked += Number(p.sold_usd) - Number(p.bought_usd);
         }
       });
-      const atRisk = Math.max(0, openMark - freeMark);
       br.innerHTML = `<div class="pos-strip">
-        <div class="pos-strip-cell"><span class="pos-strip-k">At risk</span><span class="pos-strip-v">$${atRisk.toFixed(
+        <div class="pos-strip-cell"><span class="pos-strip-k">AD risk</span><span class="pos-strip-v">$${adMark.toFixed(
           0
         )}</span></div>
         <div class="pos-strip-cell is-free"><span class="pos-strip-k">Free bags</span><span class="pos-strip-v">${freeN} · $${freeMark.toFixed(
         0
       )}</span></div>
-        <div class="pos-strip-cell"><span class="pos-strip-k">Partial real</span><span class="pos-strip-v ${
-          openReal >= 0 ? "up" : "dn"
-        }">${openReal >= 0 ? "+" : ""}$${openReal.toFixed(0)}</span></div>
-      </div>
-      <div class="pos-strip-foot mute">Open mark $${openMark.toFixed(
+        <div class="pos-strip-cell is-hold"><span class="pos-strip-k">Long-term</span><span class="pos-strip-v">${holdN} · $${holdMark.toFixed(
         0
-      )}${cashBanked ? " · cash banked on free " + (cashBanked >= 0 ? "+$" : "−$") + Math.abs(cashBanked).toFixed(0) : ""}</div>`;
+      )}</span></div>
+      </div>
+      <div class="pos-strip-foot mute">Partial AD real ${
+        openReal >= 0 ? "+" : ""
+      }$${openReal.toFixed(0)}${
+        cashBanked
+          ? " · free cash " +
+            (cashBanked >= 0 ? "+$" : "−$") +
+            Math.abs(cashBanked).toFixed(0)
+          : ""
+      } · hold bags excluded from AD learning</div>`;
     }
     let html = "";
-    if (opens.length) {
-      html += `<div class="pos-band-h">Open risk <span class="pos-band-n">${opens.length}</span></div>`;
-      html += opens.map(posCardHtml).join("");
+    if (riskOpens.length) {
+      html += `<div class="pos-band-h">AD open risk <span class="pos-band-n">${riskOpens.length}</span></div>`;
+      html += riskOpens.map(posCardHtml).join("");
     } else {
-      html += `<div class="pos-band-h mute">No open risk</div>`;
+      html += `<div class="pos-band-h mute">No AD open risk</div>`;
+    }
+    if (freeOpens.length) {
+      html += `<div class="pos-band-h free">Free coins <span class="pos-band-n">${freeOpens.length}</span></div>`;
+      html += freeOpens.map(posCardHtml).join("");
+    }
+    if (holdOpens.length) {
+      html += `<div class="pos-band-h hold">Long-term hold <span class="pos-band-n">${holdOpens.length}</span></div>`;
+      html += `<p class="pos-band-hint mute">Invest bags — not used for AD bulk teach / agent cases.</p>`;
+      html += holdOpens.map(posCardHtml).join("");
     }
     if (closed.length) {
       html += `<div class="pos-band-h closed">Closed <span class="pos-band-n">${closed.length}</span></div>`;
@@ -869,6 +924,46 @@
     host.addEventListener("scroll", bump, { passive: true });
     host.addEventListener("pointerdown", bump);
     host.addEventListener("click", async (ev) => {
+      const bookHold = ev.target.closest("[data-book-hold]");
+      if (bookHold && host.contains(bookHold)) {
+        ev.preventDefault();
+        try {
+          await api("/api/positions/flags", {
+            method: "POST",
+            body: JSON.stringify({
+              entity_key: bookHold.dataset.bookHold,
+              symbol: bookHold.dataset.sym,
+              market: bookHold.dataset.mkt || "spot",
+              book: "hold",
+            }),
+          });
+          toast("Marked long-term hold — out of AD learning");
+          loadPositions({ force: true });
+        } catch (e) {
+          toast(e.message);
+        }
+        return;
+      }
+      const bookAd = ev.target.closest("[data-book-ad]");
+      if (bookAd && host.contains(bookAd)) {
+        ev.preventDefault();
+        try {
+          await api("/api/positions/flags", {
+            method: "POST",
+            body: JSON.stringify({
+              entity_key: bookAd.dataset.bookAd,
+              symbol: bookAd.dataset.sym,
+              market: bookAd.dataset.mkt || "spot",
+              book: "ad",
+            }),
+          });
+          toast("Back on AD desk book");
+          loadPositions({ force: true });
+        } catch (e) {
+          toast(e.message);
+        }
+        return;
+      }
       const freeOn = ev.target.closest("[data-free-on]");
       if (freeOn && host.contains(freeOn)) {
         ev.preventDefault();

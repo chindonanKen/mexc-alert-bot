@@ -269,10 +269,34 @@ def list_position_entities(
     return entities
 
 
+def _flag_for_entity(flags: Dict[str, dict], d: dict) -> dict:
+    """Match flags by entity_key, sopen:BASEUSDT, or same-symbol hold row."""
+    ek = str(d.get("entity_key") or "")
+    sym = str(d.get("symbol") or "").upper().replace("_", "").replace("-", "")
+    if sym and not sym.endswith("USDT") and not sym.endswith("USDC"):
+        sym_u = sym + "USDT"
+    else:
+        sym_u = sym
+    alt = f"sopen:{sym_u}" if sym_u else ""
+    fl = flags.get(ek) or (flags.get(alt) if alt else None)
+    if fl:
+        return fl
+    # Symbol-level hold: any flag with book=hold matching base
+    for f in flags.values():
+        if (f.get("book") or "").lower() != "hold":
+            continue
+        fs = str(f.get("symbol") or "").upper().replace("_", "").replace("-", "")
+        if not fs:
+            continue
+        if fs == sym or fs == sym_u or fs + "USDT" == sym_u or sym + "USDT" == fs:
+            return f
+    return {}
+
+
 def _apply_free_coins(
     entities: List[dict], *, user_id: int, store: Any
 ) -> None:
-    """Spot open bags: principal recovered → free coins (auto) + manual override."""
+    """Apply free-coins + long-term hold (book) flags from position_flags."""
     flags: Dict[str, dict] = {}
     try:
         if store is not None and hasattr(store, "list_position_flags"):
@@ -282,10 +306,22 @@ def _apply_free_coins(
         flags = {}
 
     for d in entities:
-        ek = str(d.get("entity_key") or "")
-        # stable key for spot open by symbol
-        alt = f"sopen:{(d.get('symbol') or '').upper()}"
-        fl = flags.get(ek) or flags.get(alt) or {}
+        fl = _flag_for_entity(flags, d)
+        book = (fl.get("book") or "ad").lower().strip()
+        if book not in ("hold", "ad"):
+            book = "ad"
+        d["position_book"] = book  # ad | hold
+        d["ad_learning"] = book != "hold"
+        d["is_hold"] = book == "hold"
+
+        # Long-term invest basket: never auto free-coin as AD leftover
+        if book == "hold":
+            d["free_coins_status"] = "none"
+            d["free_coins_source"] = "none"
+            d["free_coins"] = False
+            d["free_coins_override"] = None
+            continue
+
         override = (fl.get("free_coins_override") or "").lower() or None
 
         bought = float(d.get("bought_usd") or 0)
