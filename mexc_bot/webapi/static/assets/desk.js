@@ -75,7 +75,19 @@
     if (!res.ok) {
       let msg = await res.text();
       try {
-        msg = JSON.parse(msg).detail || msg;
+        const j = JSON.parse(msg);
+        const d = j.detail != null ? j.detail : j;
+        if (typeof d === "string") msg = d;
+        else if (Array.isArray(d))
+          msg = d
+            .map((x) =>
+              typeof x === "string"
+                ? x
+                : x.msg || x.message || JSON.stringify(x)
+            )
+            .join("; ");
+        else if (d && typeof d === "object") msg = JSON.stringify(d);
+        else msg = String(d);
       } catch (_) {}
       throw new Error(msg || res.statusText);
     }
@@ -805,6 +817,8 @@
   let _posFingerprint = "";
   let _posLastInteract = 0;
   let _posWired = false;
+  /** Last positions payload (for optimistic flag updates without waiting on MEXC). */
+  let _posCache = [];
 
   function posFingerprint(positions) {
     return (positions || [])
@@ -812,9 +826,65 @@
         (p) =>
           `${p.entity_key || p.symbol}:${p.status}:${p.realized_pnl_usd ?? ""}:${
             p.upnl_pct ?? ""
-          }:${p.size_remaining ?? ""}:${p.outcome || ""}`
+          }:${p.size_remaining ?? ""}:${p.outcome || ""}:${
+            p.position_book || ""
+          }:${p.is_hold ? 1 : 0}:${p.free_coins ? 1 : 0}:${
+            p.free_coins_override || ""
+          }`
       )
       .join("|");
+  }
+
+  async function postPositionFlag(payload) {
+    return api("/api/positions/flags", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  function applyFlagLocally(entityKey, patch) {
+    const key = String(entityKey || "");
+    let hit = false;
+    _posCache = (_posCache || []).map((p) => {
+      const ek = String(p.entity_key || "");
+      const sym = String(p.symbol || "").toUpperCase();
+      const match =
+        ek === key ||
+        (key && ek && ek.startsWith(key)) ||
+        (patch.symbol &&
+          sym === String(patch.symbol).toUpperCase() &&
+          (p.status === "open" || p.is_open));
+      if (!match) return p;
+      hit = true;
+      const next = { ...p };
+      if (patch.book != null) {
+        const book = String(patch.book).toLowerCase() === "hold" ? "hold" : "ad";
+        next.position_book = book;
+        next.is_hold = book === "hold";
+        next.ad_learning = book !== "hold";
+        if (book === "hold") {
+          next.free_coins = false;
+          next.free_coins_status = "none";
+        }
+      }
+      if (patch.free_coins_override === "on") {
+        next.free_coins = true;
+        next.free_coins_override = "on";
+        next.free_coins_source = "manual";
+        next.free_coins_status = "free";
+      } else if (patch.free_coins_override === "off") {
+        next.free_coins = false;
+        next.free_coins_override = "off";
+        next.free_coins_source = "manual";
+        next.free_coins_status = "none";
+      }
+      return next;
+    });
+    if (hit) {
+      renderPositionsList(_posCache);
+      _posFingerprint = posFingerprint(_posCache);
+    }
+    return hit;
   }
 
   function renderPositionsList(positions) {
@@ -923,104 +993,148 @@
     };
     host.addEventListener("scroll", bump, { passive: true });
     host.addEventListener("pointerdown", bump);
-    host.addEventListener("click", async (ev) => {
-      const bookHold = ev.target.closest("[data-book-hold]");
-      if (bookHold && host.contains(bookHold)) {
-        ev.preventDefault();
-        try {
-          await api("/api/positions/flags", {
-            method: "POST",
-            body: JSON.stringify({
-              entity_key: bookHold.dataset.bookHold,
-              symbol: bookHold.dataset.sym,
-              market: bookHold.dataset.mkt || "spot",
-              book: "hold",
-            }),
-          });
-          toast("Marked long-term hold — out of AD learning");
-          loadPositions({ force: true });
-        } catch (e) {
-          toast(e.message);
-        }
-        return;
-      }
-      const bookAd = ev.target.closest("[data-book-ad]");
-      if (bookAd && host.contains(bookAd)) {
-        ev.preventDefault();
-        try {
-          await api("/api/positions/flags", {
-            method: "POST",
-            body: JSON.stringify({
-              entity_key: bookAd.dataset.bookAd,
-              symbol: bookAd.dataset.sym,
-              market: bookAd.dataset.mkt || "spot",
-              book: "ad",
-            }),
-          });
-          toast("Back on AD desk book");
-          loadPositions({ force: true });
-        } catch (e) {
-          toast(e.message);
-        }
-        return;
-      }
-      const freeOn = ev.target.closest("[data-free-on]");
-      if (freeOn && host.contains(freeOn)) {
-        ev.preventDefault();
-        try {
-          await api("/api/positions/flags", {
-            method: "POST",
-            body: JSON.stringify({
-              entity_key: freeOn.dataset.freeOn,
-              symbol: freeOn.dataset.sym,
-              market: freeOn.dataset.mkt || "spot",
-              free_coins_override: "on",
-              free_mark_usd: freeOn.dataset.mark
-                ? +freeOn.dataset.mark
-                : null,
-            }),
-          });
-          toast("Marked free coins");
-          loadPositions({ force: true });
-        } catch (e) {
-          toast(e.message);
-        }
-        return;
-      }
-      const freeOff = ev.target.closest("[data-free-off]");
-      if (freeOff && host.contains(freeOff)) {
-        ev.preventDefault();
-        try {
-          await api("/api/positions/flags", {
-            method: "POST",
-            body: JSON.stringify({
-              entity_key: freeOff.dataset.freeOff,
-              symbol: freeOff.dataset.sym,
-              market: freeOff.dataset.mkt || "spot",
-              free_coins_override: "off",
-            }),
-          });
-          toast("Unmarked free coins");
-          loadPositions({ force: true });
-        } catch (e) {
-          toast(e.message);
-        }
-        return;
-      }
-      const b = ev.target.closest("[data-close]");
-      if (!b || !host.contains(b)) return;
-      ev.preventDefault();
+
+    async function runFlagClick(btn, payload, okMsg) {
+      if (!btn || btn.disabled) return;
+      const prev = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "…";
       try {
-        await api("/api/positions/close", {
-          method: "POST",
-          body: JSON.stringify({ trade_id: +b.dataset.close }),
-        });
-        toast("Position closed");
-        loadPositions({ force: true });
+        await postPositionFlag(payload);
+        applyFlagLocally(payload.entity_key, payload);
+        toast(okMsg);
+        // Background reconcile with exchange (slow) — UI already updated
+        loadPositions({ force: true }).catch(() => {});
       } catch (e) {
-        toast(e.message);
+        const msg =
+          e && e.message
+            ? typeof e.message === "string"
+              ? e.message
+              : JSON.stringify(e.message)
+            : String(e);
+        toast(msg);
+        console.error("position flag failed", e);
+      } finally {
+        if (btn.isConnected) {
+          btn.disabled = false;
+          btn.textContent = prev;
+        }
       }
-    });
+    }
+
+    // Capture phase so we always see the click even if something else stops bubble
+    host.addEventListener(
+      "click",
+      (ev) => {
+        const t = ev.target;
+        if (!t || !t.closest) return;
+        const bookHold = t.closest("[data-book-hold]");
+        if (bookHold && host.contains(bookHold)) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const ek =
+            bookHold.getAttribute("data-book-hold") ||
+            bookHold.dataset.bookHold;
+          runFlagClick(
+            bookHold,
+            {
+              entity_key: ek,
+              symbol: bookHold.getAttribute("data-sym") || bookHold.dataset.sym,
+              market:
+                bookHold.getAttribute("data-mkt") ||
+                bookHold.dataset.mkt ||
+                "spot",
+              book: "hold",
+            },
+            "Long-term hold — out of AD learning"
+          );
+          return;
+        }
+        const bookAd = t.closest("[data-book-ad]");
+        if (bookAd && host.contains(bookAd)) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const ek =
+            bookAd.getAttribute("data-book-ad") || bookAd.dataset.bookAd;
+          runFlagClick(
+            bookAd,
+            {
+              entity_key: ek,
+              symbol: bookAd.getAttribute("data-sym") || bookAd.dataset.sym,
+              market:
+                bookAd.getAttribute("data-mkt") ||
+                bookAd.dataset.mkt ||
+                "spot",
+              book: "ad",
+            },
+            "Back on AD desk book"
+          );
+          return;
+        }
+        const freeOn = t.closest("[data-free-on]");
+        if (freeOn && host.contains(freeOn)) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const ek =
+            freeOn.getAttribute("data-free-on") || freeOn.dataset.freeOn;
+          const markRaw =
+            freeOn.getAttribute("data-mark") || freeOn.dataset.mark || "";
+          runFlagClick(
+            freeOn,
+            {
+              entity_key: ek,
+              symbol: freeOn.getAttribute("data-sym") || freeOn.dataset.sym,
+              market:
+                freeOn.getAttribute("data-mkt") ||
+                freeOn.dataset.mkt ||
+                "spot",
+              free_coins_override: "on",
+              free_mark_usd: markRaw !== "" ? +markRaw : null,
+            },
+            "Marked free coins"
+          );
+          return;
+        }
+        const freeOff = t.closest("[data-free-off]");
+        if (freeOff && host.contains(freeOff)) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const ek =
+            freeOff.getAttribute("data-free-off") || freeOff.dataset.freeOff;
+          runFlagClick(
+            freeOff,
+            {
+              entity_key: ek,
+              symbol: freeOff.getAttribute("data-sym") || freeOff.dataset.sym,
+              market:
+                freeOff.getAttribute("data-mkt") ||
+                freeOff.dataset.mkt ||
+                "spot",
+              free_coins_override: "off",
+            },
+            "Unmarked free coins"
+          );
+          return;
+        }
+        const b = t.closest("[data-close]");
+        if (!b || !host.contains(b)) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        (async () => {
+          try {
+            await api("/api/positions/close", {
+              method: "POST",
+              body: JSON.stringify({ trade_id: +b.dataset.close }),
+            });
+            toast("Position closed");
+            loadPositions({ force: true });
+          } catch (e) {
+            toast(e.message || String(e));
+          }
+        })();
+      },
+      true
+    );
   }
 
   state.pnlWindow = "30d";
@@ -1210,6 +1324,7 @@
       _posFingerprint = fp;
       return;
     }
+    _posCache = positions;
     renderPositionsList(positions);
     _posFingerprint = fp;
 

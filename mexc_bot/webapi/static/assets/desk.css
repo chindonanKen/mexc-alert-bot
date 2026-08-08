@@ -1342,10 +1342,16 @@ table.data tr:hover td { background: rgba(56,189,248,.04); }
 .mod .d { font-size: 0.78rem; color: var(--mute); margin-top: 0.25rem; }
 
 .toast {
-  position: fixed; bottom: 1.2rem; right: 1.2rem; z-index: 40;
+  position: fixed; bottom: 1.2rem; right: 1.2rem; z-index: 200;
   padding: 0.75rem 1rem; border-radius: 12px;
   background: #0f172a; border: 1px solid var(--line-hot); color: var(--sky);
   font-size: 0.86rem; box-shadow: 0 16px 40px rgba(0,0,0,.45);
+  max-width: min(22rem, 90vw);
+  pointer-events: none;
+}
+.pos-flag-row .btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 @media (max-width: 980px) {
