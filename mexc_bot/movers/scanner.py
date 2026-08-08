@@ -439,6 +439,11 @@ class MoverScanner:
                 if market not in prices_by_market:
                     continue
                 book = prices_by_market[market]
+                # Spot desk adds sometimes stored bare base (OXT) — live book is OXTUSDT
+                if symbol not in book and market == "spot" and not symbol.endswith("USDT"):
+                    alt = symbol.replace("_", "") + "USDT"
+                    if alt in book:
+                        symbol = alt
                 if symbol not in book:
                     self._missing_symbol_logs += 1
                     if self._missing_symbol_logs <= 20 or self._missing_symbol_logs % 50 == 0:

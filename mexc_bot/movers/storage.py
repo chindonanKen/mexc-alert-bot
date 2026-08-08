@@ -102,6 +102,66 @@ class MoverStore:
         )
         self._migrate_legacy_to_sets(conn)
         self._migrate_watchlist_pk(conn)
+        self._migrate_spot_bare_bases(conn)
+
+    def _migrate_spot_bare_bases(self, conn: sqlite3.Connection) -> None:
+        """Spot book ids are BASEUSDT. Fix rows stored as bare bases (OXT → OXTUSDT)."""
+        try:
+            rows = conn.execute(
+                "SELECT user_id, symbol, market, set_id FROM mover_watchlist "
+                "WHERE lower(market) = 'spot'"
+            ).fetchall()
+            for r in rows:
+                sym = str(r["symbol"] or "").upper().strip()
+                if not sym or sym.endswith("USDT") or sym.endswith("USDC"):
+                    continue
+                # Skip if already pair-like with underscore non-usdt (rare)
+                if "_" in sym:
+                    continue
+                new_sym = sym + "USDT"
+                set_id = r["set_id"]
+                uid = int(r["user_id"])
+                # Avoid unique conflict if both bare and full exist
+                if set_id is None:
+                    exists = conn.execute(
+                        "SELECT 1 FROM mover_watchlist WHERE user_id = ? AND symbol = ? "
+                        "AND market = 'spot' AND set_id IS NULL",
+                        (uid, new_sym),
+                    ).fetchone()
+                    if exists:
+                        conn.execute(
+                            "DELETE FROM mover_watchlist WHERE user_id = ? AND symbol = ? "
+                            "AND market = 'spot' AND set_id IS NULL",
+                            (uid, sym),
+                        )
+                    else:
+                        conn.execute(
+                            "UPDATE mover_watchlist SET symbol = ? "
+                            "WHERE user_id = ? AND symbol = ? AND market = 'spot' "
+                            "AND set_id IS NULL",
+                            (new_sym, uid, sym),
+                        )
+                else:
+                    exists = conn.execute(
+                        "SELECT 1 FROM mover_watchlist WHERE user_id = ? AND symbol = ? "
+                        "AND market = 'spot' AND set_id = ?",
+                        (uid, new_sym, int(set_id)),
+                    ).fetchone()
+                    if exists:
+                        conn.execute(
+                            "DELETE FROM mover_watchlist WHERE user_id = ? AND symbol = ? "
+                            "AND market = 'spot' AND set_id = ?",
+                            (uid, sym, int(set_id)),
+                        )
+                    else:
+                        conn.execute(
+                            "UPDATE mover_watchlist SET symbol = ? "
+                            "WHERE user_id = ? AND symbol = ? AND market = 'spot' "
+                            "AND set_id = ?",
+                            (new_sym, uid, sym, int(set_id)),
+                        )
+        except Exception as e:
+            logger.warning("spot bare base migration: %s", e)
 
     def _migrate_watchlist_pk(self, conn: sqlite3.Connection) -> None:
         """Allow the same symbol in multiple sets: PK (set_id, symbol, market)."""

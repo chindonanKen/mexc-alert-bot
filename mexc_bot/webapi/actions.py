@@ -196,15 +196,23 @@ def add_watch(
     user_id: Optional[int] = None,
     set_id: Optional[int] = None,
 ) -> dict:
+    """Add mover watchlist row. Spot uses OXTUSDT; futures use BASE_USDT."""
+    from ..exchange import normalize_futures_symbol, normalize_spot_symbol
+
     uid = _uid(user_id)
     mkt = (market or "futures").lower()
     if mkt not in ("spot", "futures"):
         mkt = "futures"
-    sym = symbol.upper().strip().replace("-", "_")
-    if mkt == "futures" and "_" not in sym and not sym.endswith("USDT"):
-        sym = f"{sym}_USDT"
-    elif mkt == "futures" and sym.endswith("USDT") and "_" not in sym:
-        pass
+    raw = (symbol or "").strip()
+    if mkt == "spot":
+        # Bare bases (OXT, BTW) must become OXTUSDT for spot book keys
+        sym = normalize_spot_symbol(raw)
+        if not sym:
+            raise ValueError("Invalid spot symbol")
+    else:
+        sym = normalize_futures_symbol(raw) or raw.upper().strip().replace("-", "_")
+        if "_" not in sym and not sym.endswith("USDT"):
+            sym = f"{sym}_USDT"
     _mover_store().add_watchlist(uid, sym, mkt, set_id=set_id)
     return {"ok": True, "symbol": sym, "market": mkt, "set_id": set_id}
 
