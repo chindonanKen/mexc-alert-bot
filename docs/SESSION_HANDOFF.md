@@ -1,6 +1,6 @@
 # Session handoff — pick up here
 
-**Last updated:** 2026-08-04 (AD Agent plan locked — full focus P1 case factory)  
+**Last updated:** 2026-08-09 (mandatory `desk-qa` after every AD Desk iteration)  
 **GitHub:** `chindonanKen/mexc-alert-bot` · branch `main`  
 **Primary guides:** [START_HERE.md](../START_HERE.md) · [AGENTS.md](../AGENTS.md) · **[AD_AGENT_PLAN.md](AD_AGENT_PLAN.md)** · [TRADING_STRATEGY.md](TRADING_STRATEGY.md)
 
@@ -47,6 +47,18 @@ Key rules:
 - Chips include **`ad_met` / `ad_missed`** + process set  
 - Module: `mexc_bot/webapi/learning_v1.py`  
 - Roadmap API: `GET /api/roadmap` (desk UI)
+
+---
+
+## Mandatory desk QA (2026-08-09)
+
+After **any** AD Desk code change (`webapi` / `learning` / desk static):
+
+1. `/workflow desk-qa` (or `workflow` tool `name: desk-qa`) with a one-line `focus`
+2. Fix blockers
+3. `python3 scripts/desk_qa_gate.py pass --note "…"`
+
+Stop hook blocks unfinished desk waves until pass. Trust project hooks: `/hooks-trust`. See `AGENTS.md` + `.grok/rules/00-desk-qa-mandatory.md`.
 
 ---
 

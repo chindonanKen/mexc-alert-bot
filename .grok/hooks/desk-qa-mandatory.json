@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "search_replace|Write|write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); cd \"$ROOT\" && python3 scripts/desk_qa_gate.py'",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); cd \"$ROOT\" && python3 scripts/desk_qa_gate.py'",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

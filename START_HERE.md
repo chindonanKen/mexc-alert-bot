@@ -11,6 +11,7 @@ Grok sessions **do not** sync between Mac mini and MacBook — only **git (GitHu
 | **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** | **How Kenneth trades** — required before coach/learning agents |
 | **[docs/V4_TRADING_ASSISTANT.md](docs/V4_TRADING_ASSISTANT.md)** | Learning / coach / news design |
 | **[docs/VERIFY_BUILD.md](docs/VERIFY_BUILD.md)** | Post-change verify gate + **agent prompt** |
+| **`.grok/workflows/desk-qa.rhai`** | **Mandatory** multi-agent QA after every AD Desk edit (see AGENTS.md) |
 | **[docs/STAGING.md](docs/STAGING.md)** | Test new builds while **prod keeps running** |
 | **[docs/DROPLET_OPS.md](docs/DROPLET_OPS.md)** | **Droplet-first ops** — Grok on server, fewer handoffs |
 | **[docs/ASSISTANT_UX.md](docs/ASSISTANT_UX.md)** | Buttons / desk / plain language — not command encyclopedia |

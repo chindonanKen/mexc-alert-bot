@@ -67,3 +67,7 @@ logs/
 # Misc
 *.bak
 *.tmp
+
+# desk-qa gate state (session local)
+.grok/state/
+

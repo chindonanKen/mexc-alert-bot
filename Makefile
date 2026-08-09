@@ -1,4 +1,4 @@
-.PHONY: run install test docker-build docker-up docker-down docker-logs docker-staging clean
+.PHONY: run install test docker-build docker-up docker-down docker-logs docker-staging clean desk-qa
 
 install:
 	python -m venv .venv
@@ -24,6 +24,16 @@ test:
 
 verify:
 	bash scripts/verify_build.sh
+
+# Mandatory after AD Desk edits: multi-agent panel + mark pass (see AGENTS.md)
+desk-qa:
+	@echo "=== AD Desk QA (mandatory after webapi/learning/static changes) ==="
+	@echo "1) Run in Grok: /workflow desk-qa   OR  workflow tool name=desk-qa"
+	@echo "   args: {\"focus\": \"<one-line description of this change>\"}"
+	@echo "2) Fix blockers if FAIL"
+	@echo "3) Mark pass:  python3 scripts/desk_qa_gate.py pass --note 'desk-qa PASS: …'"
+	@echo ""
+	@python3 scripts/desk_qa_gate.py status
 
 stress:
 	bash scripts/stress_staging.sh

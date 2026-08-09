@@ -19,6 +19,26 @@ Guide for humans and coding agents. **Read this before changing production behav
 
 **Long-term:** multi-device target/mover alarms come **from the desk**, not Telegram. Until desk push ships, the bot keeps alarms; desk owns teach/memory. Shared SQLite for sensor events is plumbing, not “desk depends on Telegram UX.”
 
+### Mandatory QA after every AD Desk iteration (owner 2026-08-09)
+
+Fine-tuning the desk burns tokens on silent regressions. **Do not end a Desk change without `desk-qa`.**
+
+| Step | Action |
+|------|--------|
+| 1 | Touch desk code (`mexc_bot/webapi/**`, `mexc_bot/learning/**`, desk static) |
+| 2 | Run workflow **`desk-qa`** (`workflow` tool `name: desk-qa` or `/workflow desk-qa`) with `focus` = one-line change summary |
+| 3 | Fix **blockers**; re-run if FAIL |
+| 4 | `python3 scripts/desk_qa_gate.py pass --note "desk-qa PASS: …"` |
+| 5 | Only then claim done / deploy narrative |
+
+- Workflow: [`.grok/workflows/desk-qa.rhai`](.grok/workflows/desk-qa.rhai) — 3 agents: **new functions · UI/UX · regressions**  
+- Hook gate: [`.grok/hooks/desk-qa-mandatory.json`](.grok/hooks/desk-qa-mandatory.json) — **Stop blocked** while desk edits are dirty/unpassed  
+- Rules: [`.grok/rules/00-desk-qa-mandatory.md`](.grok/rules/00-desk-qa-mandatory.md)  
+- **Trust once:** `/hooks-trust` so project hooks run on this machine  
+- Status: `python3 scripts/desk_qa_gate.py status` · `make desk-qa`  
+
+**Do not** mark pass without running the panel. Docs-only / pure Telegram bot work (no desk paths) is exempt.
+
 Full vision: **[docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md)** · strategy: **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** · handoff: **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)**.  
 **Autonomy roadmap (canonical):** **[docs/AD_AGENT_PLAN.md](docs/AD_AGENT_PLAN.md)** — P0 shipped → **P1 case factory next** → … → P7 gated live. Full focus = build this agent; desk UI only small edits.
 
