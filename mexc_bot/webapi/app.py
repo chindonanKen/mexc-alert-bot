@@ -161,6 +161,41 @@ class AnswerBody(BaseModel):
     dismiss: bool = False
 
 
+# Nested-in-create_app models break body parsing under `from __future__ import annotations`
+# (FastAPI treats them as query params → 422). Keep POST/PATCH bodies at module level.
+class JudgeBody(BaseModel):
+    event_id: Optional[int] = None
+    symbol: Optional[str] = None
+
+
+class ChartReadBody(BaseModel):
+    symbol: str
+    market: Optional[str] = None
+    refresh: bool = True
+
+
+class CorrectBody(BaseModel):
+    correct_verdict: str
+    reason: str
+    event_id: Optional[int] = None
+    case_id: Optional[int] = None
+    symbol: Optional[str] = None
+
+
+class LessonEditBody(BaseModel):
+    """PATCH /api/learning/lessons/{id} — text + process/AD chips."""
+
+    text: Optional[str] = None
+    tags: Optional[List[str]] = None
+    behaviors: Optional[List[str]] = None
+
+
+class TagTradeBody(BaseModel):
+    trade_id: str
+    behavior: Optional[str] = None
+    notes: Optional[str] = None
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="AD Desk", version="2.1.0-beta")
 
@@ -1011,10 +1046,6 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(400, str(e))
 
-    class JudgeBody(BaseModel):
-        event_id: Optional[int] = None
-        symbol: Optional[str] = None
-
     @app.post("/api/learning/judge_body")
     def learning_judge_body(body: JudgeBody, _: bool = Depends(require_auth)):
         from .learning_api import judge_fire
@@ -1025,11 +1056,6 @@ def create_app() -> FastAPI:
             )
         except Exception as e:
             raise HTTPException(400, str(e))
-
-    class ChartReadBody(BaseModel):
-        symbol: str
-        market: Optional[str] = None
-        refresh: bool = True
 
     @app.post("/api/learning/chart")
     def learning_chart(body: ChartReadBody, _: bool = Depends(require_auth)):
@@ -1050,13 +1076,6 @@ def create_app() -> FastAPI:
             return refresh_book_charts()
         except Exception as e:
             raise HTTPException(400, str(e))
-
-    class CorrectBody(BaseModel):
-        correct_verdict: str
-        reason: str
-        event_id: Optional[int] = None
-        case_id: Optional[int] = None
-        symbol: Optional[str] = None
 
     @app.post("/api/learning/correct")
     def learning_correct(body: CorrectBody, _: bool = Depends(require_auth)):
@@ -1125,11 +1144,6 @@ def create_app() -> FastAPI:
             return approve_draft(body.lesson_id, dismiss=bool(body.dismiss))
         except Exception as e:
             raise HTTPException(400, str(e))
-
-    class LessonEditBody(BaseModel):
-        text: Optional[str] = None
-        tags: Optional[List[str]] = None
-        behaviors: Optional[List[str]] = None
 
     @app.patch("/api/learning/lessons/{lesson_id}")
     def learning_edit_lesson(
@@ -1215,11 +1229,6 @@ def create_app() -> FastAPI:
             return trade_api(trade_id)
         except Exception as e:
             raise HTTPException(400, str(e))
-
-    class TagTradeBody(BaseModel):
-        trade_id: str
-        behavior: Optional[str] = None
-        notes: Optional[str] = None
 
     @app.post("/api/learning/trades/tag")
     def learning_trade_tag(body: TagTradeBody, _: bool = Depends(require_auth)):
