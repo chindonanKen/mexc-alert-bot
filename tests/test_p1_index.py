@@ -8,7 +8,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from mexc_bot.learning.buckets import CASE_BUCKETS, infer_case_bucket, normalize_bucket
+from mexc_bot.learning.chip_honesty import (
+    OWNER_LESSON_CHIPS,
+    sanitize_process_chips,
+)
 from mexc_bot.learning.cases import freeze_case
 from mexc_bot.learning.incident import build_incident, enrich_lesson_row, incident_tags
 from mexc_bot.learning.store import EventStore
@@ -40,25 +43,15 @@ class TestSymbols(unittest.TestCase):
         self.assertNotIn("sym:HFT_USDT", tags)
 
 
-class TestBuckets(unittest.TestCase):
-    def test_four_only(self):
-        self.assertEqual(len(CASE_BUCKETS), 4)
+class TestChipHonesty(unittest.TestCase):
+    def test_no_dual_ad(self):
+        chips = sanitize_process_chips(["plan_ok", "ad_met", "ad_missed"])
+        self.assertIn("ad_missed", chips)
+        self.assertNotIn("ad_met", chips)
 
-    def test_infer(self):
-        self.assertEqual(
-            infer_case_bucket(chips=["ad_met", "plan_ok"]), "ad_take"
-        )
-        self.assertEqual(
-            infer_case_bucket(chips=["ad_met", "hesitant"], note="press size under AD"),
-            "ad_press",
-        )
-        self.assertEqual(
-            infer_case_bucket(chips=["false_panic", "ad_missed"]), "ad_wait"
-        )
-        self.assertEqual(
-            infer_case_bucket(chips=["fomo", "ad_missed"]), "ad_skip"
-        )
-        self.assertEqual(normalize_bucket("late_vol_aggressive"), "ad_press")
+    def test_owner_map_covers_first_lessons(self):
+        self.assertIn(22, OWNER_LESSON_CHIPS)
+        self.assertIn("ad_met", OWNER_LESSON_CHIPS[22])
 
 
 class TestIncidentAndFreeze(unittest.TestCase):
@@ -118,14 +111,14 @@ class TestIncidentAndFreeze(unittest.TestCase):
         self.assertEqual(view.get("base"), "HFT")
         self.assertEqual(view.get("incident_ts"), 1700000100.0)
         self.assertEqual(view.get("incident_price"), 0.02)
-        self.assertIn(view.get("bucket"), CASE_BUCKETS)
-        self.assertEqual(view.get("bucket"), "ad_take")
+        self.assertEqual(view.get("base"), "HFT")
+        self.assertEqual(view.get("incident_ts"), 1700000100.0)
 
     def test_normalize_index(self):
         lid = self.store.teach_lesson(
             1,
             "test",
-            tags=["sym:HFT_USDT", "mkt:spot", "plan_ok", "ad_met"],
+            tags=["sym:HFT_USDT", "mkt:spot", "plan_ok", "ad_met", "ad_missed"],
         )
         self.assertGreater(lid, 0)
         out = self.store.normalize_learning_index(1)
@@ -134,7 +127,10 @@ class TestIncidentAndFreeze(unittest.TestCase):
         en = enrich_lesson_row(row)
         self.assertEqual(en.get("symbol_norm"), "HFTUSDT")
         self.assertEqual(en.get("base"), "HFT")
-        self.assertIn(en.get("bucket"), CASE_BUCKETS)
+        self.assertIsNotNone(en.get("incident_ts"))
+        # honesty: not both ad chips
+        chips = [t for t in (en.get("tags") or []) if ":" not in str(t)]
+        self.assertFalse("ad_met" in chips and "ad_missed" in chips)
 
 
 if __name__ == "__main__":

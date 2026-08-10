@@ -716,7 +716,7 @@ def teach(
 
     from ..learning.integrity import ALLOWED_BEHAVIOR
 
-    from ..learning.buckets import ensure_bucket_in_chips_or_tags, infer_case_bucket
+    from ..learning.chip_honesty import sanitize_process_chips
     from ..learning.incident import build_incident, incident_tags
     from ..learning.symbols import (
         normalize_learning_symbol,
@@ -727,15 +727,13 @@ def teach(
     allowed_beh = {b for b in ALLOWED_BEHAVIOR if b}
     # AD context (not process — setup quality)
     allowed_ad = {"ad_met", "ad_missed"}
-    allowed_buckets = {"ad_take", "ad_press", "ad_wait", "ad_skip"}
     tag_list: List[str] = []
     beh_clean: List[str] = []
     ad_clean: List[str] = []
-    bucket_explicit: Optional[str] = None
     for b in behaviors or []:
         s = str(b or "").strip().lower().replace(" ", "_")
-        if s in allowed_buckets:
-            bucket_explicit = s
+        # Ignore P2 bucket chips on teach (P1 focus); do not store as process
+        if s in ("ad_take", "ad_press", "ad_wait", "ad_skip"):
             continue
         if s in allowed_beh and s not in beh_clean:
             beh_clean.append(s)
@@ -749,12 +747,13 @@ def teach(
         if not ts or ts in tag_list:
             continue
         low = ts.lower()
-        if low.startswith("bucket:"):
-            bucket_explicit = low.split(":", 1)[-1]
-            continue
-        if low in allowed_buckets:
-            bucket_explicit = low
-            continue
+        if low.startswith("bucket:") or low in (
+            "ad_take",
+            "ad_press",
+            "ad_wait",
+            "ad_skip",
+        ):
+            continue  # P2 — not stored on P1 teach path
         if low in allowed_beh or low in allowed_ad:
             if low not in tag_list:
                 tag_list.append(low)
@@ -815,16 +814,13 @@ def teach(
             drop_pct=drop_pct,
         )
     tag_list.extend(incident_tags(inc))
+    # Chip honesty: closed set, no dual ad_met/ad_missed
+    honest = sanitize_process_chips(beh_clean + ad_clean)
+    tag_list = [t for t in tag_list if ":" in str(t)]
+    tag_list.extend(honest)
     tag_list = rewrite_sym_tags(tag_list, mkt)
-    tag_list = ensure_bucket_in_chips_or_tags(
-        tag_list,
-        chips=beh_clean + ad_clean,
-        note=body,
-        explicit=bucket_explicit,
-    )
-    bucket = infer_case_bucket(
-        chips=beh_clean + ad_clean, note=body, explicit=bucket_explicit
-    )
+    beh_clean = [c for c in honest if c not in allowed_ad]
+    ad_clean = [c for c in honest if c in allowed_ad]
 
     # Prefix so recall always shows which trade/fire this is about
     about = ""
@@ -834,7 +830,7 @@ def teach(
             about += f" {mkt}"
         if context_type:
             about += f" · {context_type}"
-        bits = beh_clean + ad_clean + [bucket]
+        bits = honest
         if bits:
             about += f" · {','.join(bits)}"
         if inc.get("incident_ts"):
@@ -897,7 +893,7 @@ def teach(
         "entity_key": entity_key,
         "event_id": event_id,
         "text": full_text,
-        "bucket": bucket,
+        "chips": honest,
         "incident": inc,
         "case": case_view or None,
         "case_id": (case_view or {}).get("id"),
@@ -1078,7 +1074,7 @@ def update_lesson(
         in {b for b in list(allowed_beh) + list(allowed_ad)}
     ]
 
-    from ..learning.buckets import ensure_bucket_in_chips_or_tags
+    from ..learning.chip_honesty import merge_tags_with_honest_chips, sanitize_process_chips
     from ..learning.symbols import rewrite_sym_tags
 
     if tags is not None:
@@ -1090,24 +1086,24 @@ def update_lesson(
                 continue
             if ts not in tag_list:
                 tag_list.append(ts)
-        # Ensure structured from original if not re-supplied
         for s in structured:
             if s not in tag_list:
                 tag_list.append(s)
         tag_list = rewrite_sym_tags(tag_list)
-        tag_list = ensure_bucket_in_chips_or_tags(
-            tag_list, chips=[x for x in tag_list if ":" not in x], note=text
+        tag_list = merge_tags_with_honest_chips(
+            tag_list,
+            lesson_id=int(lesson_id),
+            chips_override=[x for x in tag_list if ":" not in x],
         )
     elif behaviors is not None:
         tag_list = list(structured)
-        for b in behaviors:
-            s = str(b or "").strip().lower().replace(" ", "_")
-            if s in allowed_beh or s in allowed_ad:
-                if s not in tag_list:
-                    tag_list.append(s)
+        honest = sanitize_process_chips(behaviors)
+        for s in honest:
+            if s not in tag_list:
+                tag_list.append(s)
         tag_list = rewrite_sym_tags(tag_list)
-        tag_list = ensure_bucket_in_chips_or_tags(
-            tag_list, chips=behaviors, note=text or existing.get("text")
+        tag_list = merge_tags_with_honest_chips(
+            tag_list, lesson_id=int(lesson_id), chips_override=honest
         )
     else:
         tag_list = None  # leave tags unchanged

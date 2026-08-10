@@ -1100,17 +1100,13 @@ class EventStore:
 
         Safe / additive. Does not delete lessons or cases.
         """
-        from .buckets import (
-            OWNER_LESSON_BUCKETS,
-            ensure_bucket_in_chips_or_tags,
-            infer_case_bucket,
-        )
+        from .chip_honesty import merge_tags_with_honest_chips
         from .incident import build_incident, incident_tags
         from .symbols import normalize_learning_symbol, rewrite_sym_tags
 
         n_les = 0
         n_case = 0
-        bucket_counts: Dict[str, int] = {}
+        n_px = 0
         try:
             with self._lock:
                 conn = self._get_conn()
@@ -1123,6 +1119,21 @@ class EventStore:
                         (int(user_id),),
                     ):
                         ev_by_id[int(er["id"])] = dict(er)
+                except Exception:
+                    pass
+                # case prices by lesson_id / event_id
+                case_by_lesson: Dict[int, dict] = {}
+                case_by_event: Dict[int, dict] = {}
+                try:
+                    for cr in conn.execute(
+                        "SELECT id, lesson_id, event_id, fire_ts, fire_price, symbol, market "
+                        "FROM agent_setup_cases WHERE user_id = ?",
+                        (int(user_id),),
+                    ):
+                        if cr["lesson_id"] is not None:
+                            case_by_lesson[int(cr["lesson_id"])] = dict(cr)
+                        if cr["event_id"] is not None:
+                            case_by_event[int(cr["event_id"])] = dict(cr)
                 except Exception:
                     pass
 
@@ -1157,25 +1168,24 @@ class EventStore:
                         except Exception:
                             pass
 
+                    lid = int(row["id"])
+                    # 1) symbol normalize
                     new_tags = rewrite_sym_tags(list(tags), mkt)
-                    # Drop old bucket tags; re-stamp
+                    # strip old incident tags + free chips; re-apply honesty
                     new_tags = [
                         t
                         for t in new_tags
-                        if not str(t).lower().startswith("bucket:")
+                        if ":" in str(t)
                         and not str(t).lower().startswith("ts:")
                         and not str(t).lower().startswith("px:")
+                        and not str(t).lower().startswith("bucket:")
                     ]
-                    chips = [t for t in new_tags if ":" not in str(t)]
-                    lid = int(row["id"])
-                    explicit = OWNER_LESSON_BUCKETS.get(lid)
-                    new_tags = ensure_bucket_in_chips_or_tags(
-                        new_tags,
-                        chips=chips,
-                        note=row["text"],
-                        explicit=explicit,
+                    # 3) chip honesty
+                    new_tags = merge_tags_with_honest_chips(
+                        new_tags, lesson_id=lid
                     )
-                    # Incident from linked fire when possible
+
+                    # 2) incident from fire → case → created_at
                     fire_ts = None
                     fire_px = None
                     if ev_id and ev_id in ev_by_id:
@@ -1189,8 +1199,16 @@ class EventStore:
                                 if not str(t).lower().startswith("mkt:")
                             ]
                             new_tags.append(f"mkt:{str(mkt).lower()}")
+                    if fire_px is None and lid in case_by_lesson:
+                        fire_px = case_by_lesson[lid].get("fire_price")
+                        fire_ts = fire_ts or case_by_lesson[lid].get("fire_ts")
+                    if fire_px is None and ev_id and ev_id in case_by_event:
+                        fire_px = case_by_event[ev_id].get("fire_price")
+                        fire_ts = fire_ts or case_by_event[ev_id].get("fire_ts")
                     if fire_ts is None:
                         fire_ts = row["created_at"]
+                    if fire_px is not None:
+                        n_px += 1
                     inc = build_incident(
                         incident_ts=fire_ts,
                         incident_price=fire_px,
@@ -1204,17 +1222,14 @@ class EventStore:
                         if t not in seen:
                             seen.add(t)
                             deduped.append(t)
-                    new_tags = deduped
-                    b = explicit or infer_case_bucket(
-                        chips=chips, note=row["text"], explicit=explicit
-                    )
-                    bucket_counts[b] = bucket_counts.get(b, 0) + 1
+                    new_tags = rewrite_sym_tags(deduped, mkt)
                     conn.execute(
                         "UPDATE learning_lessons SET tags_json = ? WHERE id = ?",
                         (json.dumps(new_tags), lid),
                     )
                     n_les += 1
 
+                # cases: symbol + incident only (no P2 bucket work)
                 cases = conn.execute(
                     "SELECT id, symbol, market, chips_json, note, features_json, "
                     "fire_ts, fire_price, event_id, lesson_id "
@@ -1234,19 +1249,20 @@ class EventStore:
                         feats = {}
                     if not isinstance(feats, dict):
                         feats = {}
-                    explicit = None
+                    # honesty on case chips when lesson linked
                     if row["lesson_id"] is not None:
-                        explicit = OWNER_LESSON_BUCKETS.get(int(row["lesson_id"]))
-                    bucket = infer_case_bucket(
-                        chips=chips,
-                        features=feats,
-                        note=row["note"],
-                        explicit=explicit,
-                    )
-                    feats["bucket"] = bucket
+                        from .chip_honesty import honest_chips_for_lesson
+
+                        chips = honest_chips_for_lesson(
+                            int(row["lesson_id"]), chips
+                        )
                     fire_ts = row["fire_ts"]
                     fire_px = row["fire_price"]
-                    if fire_ts is None and row["event_id"] and int(row["event_id"]) in ev_by_id:
+                    if (
+                        fire_ts is None
+                        and row["event_id"]
+                        and int(row["event_id"]) in ev_by_id
+                    ):
                         fire_ts = ev_by_id[int(row["event_id"])].get("ts")
                         fire_px = fire_px or ev_by_id[int(row["event_id"])].get(
                             "price"
@@ -1264,12 +1280,14 @@ class EventStore:
                         }
                     conn.execute(
                         "UPDATE agent_setup_cases SET symbol = ?, features_json = ?, "
+                        "chips_json = ?, "
                         "fire_ts = COALESCE(fire_ts, ?), "
                         "fire_price = COALESCE(fire_price, ?) "
                         "WHERE id = ?",
                         (
                             sym,
                             json.dumps(feats),
+                            json.dumps(chips),
                             fire_ts,
                             fire_px,
                             int(row["id"]),
@@ -1279,14 +1297,15 @@ class EventStore:
             return {
                 "lessons_rewritten": n_les,
                 "cases_touched": n_case,
-                "bucket_counts": bucket_counts,
+                "lessons_with_px": n_px,
+                "p1_only": True,
             }
         except Exception as e:
             logger.error("normalize_learning_index failed: %s", e)
             return {
                 "lessons_rewritten": n_les,
                 "cases_touched": n_case,
-                "bucket_counts": bucket_counts,
+                "lessons_with_px": n_px,
                 "error": str(e),
             }
 
