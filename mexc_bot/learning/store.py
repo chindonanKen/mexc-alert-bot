@@ -1100,16 +1100,35 @@ class EventStore:
 
         Safe / additive. Does not delete lessons or cases.
         """
-        from .buckets import ensure_bucket_in_chips_or_tags, infer_case_bucket
+        from .buckets import (
+            OWNER_LESSON_BUCKETS,
+            ensure_bucket_in_chips_or_tags,
+            infer_case_bucket,
+        )
+        from .incident import build_incident, incident_tags
         from .symbols import normalize_learning_symbol, rewrite_sym_tags
 
         n_les = 0
         n_case = 0
+        bucket_counts: Dict[str, int] = {}
         try:
             with self._lock:
                 conn = self._get_conn()
+                # event prices for incident backfill
+                ev_by_id: Dict[int, dict] = {}
+                try:
+                    for er in conn.execute(
+                        "SELECT id, ts, price, ref_price, symbol, market "
+                        "FROM learning_events WHERE user_id = ?",
+                        (int(user_id),),
+                    ):
+                        ev_by_id[int(er["id"])] = dict(er)
+                except Exception:
+                    pass
+
                 lessons = conn.execute(
-                    "SELECT id, tags_json, text FROM learning_lessons WHERE user_id = ?",
+                    "SELECT id, tags_json, text, evidence_event_ids_json, created_at "
+                    "FROM learning_lessons WHERE user_id = ?",
                     (int(user_id),),
                 ).fetchall()
                 for row in lessons:
@@ -1118,24 +1137,87 @@ class EventStore:
                     except Exception:
                         tags = []
                     mkt = None
+                    ev_id = None
                     for t in tags:
-                        if str(t).lower().startswith("mkt:"):
+                        tl = str(t).lower()
+                        if tl.startswith("mkt:"):
                             mkt = str(t).split(":", 1)[-1]
+                        if tl.startswith("ev:"):
+                            try:
+                                ev_id = int(str(t).split(":", 1)[-1])
+                            except ValueError:
+                                pass
+                    if ev_id is None:
+                        try:
+                            evid = json.loads(
+                                row["evidence_event_ids_json"] or "[]"
+                            )
+                            if evid:
+                                ev_id = int(evid[0])
+                        except Exception:
+                            pass
+
                     new_tags = rewrite_sym_tags(list(tags), mkt)
+                    # Drop old bucket tags; re-stamp
+                    new_tags = [
+                        t
+                        for t in new_tags
+                        if not str(t).lower().startswith("bucket:")
+                        and not str(t).lower().startswith("ts:")
+                        and not str(t).lower().startswith("px:")
+                    ]
                     chips = [t for t in new_tags if ":" not in str(t)]
+                    lid = int(row["id"])
+                    explicit = OWNER_LESSON_BUCKETS.get(lid)
                     new_tags = ensure_bucket_in_chips_or_tags(
-                        new_tags, chips=chips, note=row["text"]
+                        new_tags,
+                        chips=chips,
+                        note=row["text"],
+                        explicit=explicit,
                     )
-                    # Preserve existing ts:/px: if any
-                    if json.dumps(new_tags) != json.dumps(tags):
-                        conn.execute(
-                            "UPDATE learning_lessons SET tags_json = ? WHERE id = ?",
-                            (json.dumps(new_tags), int(row["id"])),
-                        )
-                        n_les += 1
+                    # Incident from linked fire when possible
+                    fire_ts = None
+                    fire_px = None
+                    if ev_id and ev_id in ev_by_id:
+                        fire_ts = ev_by_id[ev_id].get("ts")
+                        fire_px = ev_by_id[ev_id].get("price")
+                        if not mkt and ev_by_id[ev_id].get("market"):
+                            mkt = ev_by_id[ev_id]["market"]
+                            new_tags = [
+                                t
+                                for t in new_tags
+                                if not str(t).lower().startswith("mkt:")
+                            ]
+                            new_tags.append(f"mkt:{str(mkt).lower()}")
+                    if fire_ts is None:
+                        fire_ts = row["created_at"]
+                    inc = build_incident(
+                        incident_ts=fire_ts,
+                        incident_price=fire_px,
+                        event_id=ev_id,
+                    )
+                    new_tags.extend(incident_tags(inc))
+                    # de-dupe preserve order
+                    seen = set()
+                    deduped = []
+                    for t in new_tags:
+                        if t not in seen:
+                            seen.add(t)
+                            deduped.append(t)
+                    new_tags = deduped
+                    b = explicit or infer_case_bucket(
+                        chips=chips, note=row["text"], explicit=explicit
+                    )
+                    bucket_counts[b] = bucket_counts.get(b, 0) + 1
+                    conn.execute(
+                        "UPDATE learning_lessons SET tags_json = ? WHERE id = ?",
+                        (json.dumps(new_tags), lid),
+                    )
+                    n_les += 1
+
                 cases = conn.execute(
                     "SELECT id, symbol, market, chips_json, note, features_json, "
-                    "fire_ts, fire_price, event_id "
+                    "fire_ts, fire_price, event_id, lesson_id "
                     "FROM agent_setup_cases WHERE user_id = ?",
                     (int(user_id),),
                 ).fetchall()
@@ -1152,33 +1234,61 @@ class EventStore:
                         feats = {}
                     if not isinstance(feats, dict):
                         feats = {}
+                    explicit = None
+                    if row["lesson_id"] is not None:
+                        explicit = OWNER_LESSON_BUCKETS.get(int(row["lesson_id"]))
                     bucket = infer_case_bucket(
-                        chips=chips, features=feats, note=row["note"]
+                        chips=chips,
+                        features=feats,
+                        note=row["note"],
+                        explicit=explicit,
                     )
                     feats["bucket"] = bucket
-                    if row["fire_ts"] is not None:
-                        feats.setdefault("incident_ts", row["fire_ts"])
-                        feats.setdefault(
-                            "incident",
-                            {
-                                "ts": row["fire_ts"],
-                                "price": row["fire_price"],
-                                "event_id": row["event_id"],
-                                "chart_tfs": ["5m", "15m", "1h"],
-                                "chart_lookback_seconds": 6 * 3600,
-                                "anchor": "fire",
-                            },
+                    fire_ts = row["fire_ts"]
+                    fire_px = row["fire_price"]
+                    if fire_ts is None and row["event_id"] and int(row["event_id"]) in ev_by_id:
+                        fire_ts = ev_by_id[int(row["event_id"])].get("ts")
+                        fire_px = fire_px or ev_by_id[int(row["event_id"])].get(
+                            "price"
                         )
+                    if fire_ts is not None:
+                        feats["incident_ts"] = fire_ts
+                        feats["incident_price"] = fire_px
+                        feats["incident"] = {
+                            "ts": fire_ts,
+                            "price": fire_px,
+                            "event_id": row["event_id"],
+                            "chart_tfs": ["5m", "15m", "1h"],
+                            "chart_lookback_seconds": 6 * 3600,
+                            "anchor": "fire",
+                        }
                     conn.execute(
-                        "UPDATE agent_setup_cases SET symbol = ?, features_json = ? "
+                        "UPDATE agent_setup_cases SET symbol = ?, features_json = ?, "
+                        "fire_ts = COALESCE(fire_ts, ?), "
+                        "fire_price = COALESCE(fire_price, ?) "
                         "WHERE id = ?",
-                        (sym, json.dumps(feats), int(row["id"])),
+                        (
+                            sym,
+                            json.dumps(feats),
+                            fire_ts,
+                            fire_px,
+                            int(row["id"]),
+                        ),
                     )
                     n_case += 1
-            return {"lessons_rewritten": n_les, "cases_touched": n_case}
+            return {
+                "lessons_rewritten": n_les,
+                "cases_touched": n_case,
+                "bucket_counts": bucket_counts,
+            }
         except Exception as e:
             logger.error("normalize_learning_index failed: %s", e)
-            return {"lessons_rewritten": n_les, "cases_touched": n_case, "error": str(e)}
+            return {
+                "lessons_rewritten": n_les,
+                "cases_touched": n_case,
+                "bucket_counts": bucket_counts,
+                "error": str(e),
+            }
 
     def update_lesson(
         self,

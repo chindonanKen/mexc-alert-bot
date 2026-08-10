@@ -1641,6 +1641,9 @@
       c.classList.remove("on")
     );
     $$(".chip-ad", $("#learnAdChips")).forEach((c) => c.classList.remove("on"));
+    $$(".chip-bucket", $("#learnBucketChips")).forEach((c) =>
+      c.classList.remove("on")
+    );
     const bar = $("#learnContextBar");
     const det = $("#learnContextDetail");
     const sub = $("#teachSubmit");
@@ -2021,6 +2024,7 @@
       "free_tp_greed",
     ];
     const AD_CHIPS = ["ad_met", "ad_missed"];
+    const BUCKET_CHIPS = ["ad_take", "ad_press", "ad_wait", "ad_skip"];
 
     const lesEl = $("#learnLessons");
     if (lesEl) {
@@ -2101,11 +2105,18 @@
                     )}</span></div>`
                   : "";
               const fullText = l.text || "";
-              const chipBtns = [...PROCESS_CHIPS, ...AD_CHIPS]
+              const activeBucket = bucket || "";
+              const chipBtns = [
+                ...PROCESS_CHIPS,
+                ...AD_CHIPS,
+                ...BUCKET_CHIPS,
+              ]
                 .map((c) => {
-                  const on = chipTags.includes(c) ? " on" : "";
+                  const on =
+                    chipTags.includes(c) || c === activeBucket ? " on" : "";
                   const ad = AD_CHIPS.includes(c) ? " chip-ad" : "";
-                  return `<button type="button" class="chip sm${ad}${on}" data-edit-chip="${c}" data-lid="${
+                  const bk = BUCKET_CHIPS.includes(c) ? " chip-bucket" : "";
+                  return `<button type="button" class="chip sm${ad}${bk}${on}" data-edit-chip="${c}" data-lid="${
                     l.id
                   }">${c}</button>`;
                 })
@@ -2182,9 +2193,14 @@
       $$("[data-edit-chip]", lesEl).forEach((b) =>
         b.addEventListener("click", () => {
           const code = b.dataset.editChip;
+          const panel = b.closest("[data-edit-chips]");
           if (code === "ad_met" || code === "ad_missed") {
-            const panel = b.closest("[data-edit-chips]");
             $$(".chip-ad", panel).forEach((c) => {
+              if (c !== b) c.classList.remove("on");
+            });
+          }
+          if (BUCKET_CHIPS.includes(code)) {
+            $$(".chip-bucket", panel).forEach((c) => {
               if (c !== b) c.classList.remove("on");
             });
           }
@@ -2261,10 +2277,13 @@
       });
     });
 
-    // process + AD chips (same handler)
-    const chipRoots = [$("#learnBehaviorChips"), $("#learnAdChips")].filter(
-      Boolean
-    );
+    // process + AD + bucket chips
+    const BUCKET_SET = ["ad_take", "ad_press", "ad_wait", "ad_skip"];
+    const chipRoots = [
+      $("#learnBehaviorChips"),
+      $("#learnAdChips"),
+      $("#learnBucketChips"),
+    ].filter(Boolean);
     chipRoots.forEach((chips) => {
       if (chips.dataset.bound) return;
       chips.dataset.bound = "1";
@@ -2279,6 +2298,15 @@
           });
           state.learnBehaviors = state.learnBehaviors.filter(
             (x) => x !== "ad_met" && x !== "ad_missed"
+          );
+        }
+        // One case bucket only
+        if (BUCKET_SET.includes(code)) {
+          $$(".chip-bucket", $("#learnBucketChips")).forEach((c) => {
+            if (c !== b) c.classList.remove("on");
+          });
+          state.learnBehaviors = state.learnBehaviors.filter(
+            (x) => !BUCKET_SET.includes(x)
           );
         }
         b.classList.toggle("on");
@@ -2331,6 +2359,9 @@
             c.classList.remove("on")
           );
           $$(".chip-ad", $("#learnAdChips")).forEach((c) =>
+            c.classList.remove("on")
+          );
+          $$(".chip-bucket", $("#learnBucketChips")).forEach((c) =>
             c.classList.remove("on")
           );
           setLearnSelection(null);

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/desk.css?v=p1index1" />
+  <link rel="stylesheet" href="/assets/desk.css?v=p1bucket2" />
 </head>
 <body>
   <div class="bg-orb orb-a"></div>
@@ -253,7 +253,25 @@
                 <button type="button" class="chip chip-ad" data-beh="ad_met" title="Price entered your AD / buy zone">ad_met</button>
                 <button type="button" class="chip chip-ad" data-beh="ad_missed" title="Never hit your zone — often correct skip; note prices">ad_missed</button>
               </div>
-              <p class="learn-hint mute">If <code>ad_missed</code>: put zone prices in the note (wanted X–Y, low Z).</p>
+              <div class="learn-chip-row">
+                <p class="learn-chip-hint mute">Case bucket · P2 decision class (pick one)</p>
+                <details class="learn-guide learn-guide-chips">
+                  <summary class="learn-guide-sum">bucket meanings</summary>
+                  <ul class="learn-chip-glossary">
+                    <li><code>ad_take</code> — valid AD scale-in / hold plan</li>
+                    <li><code>ad_press</code> — late vol under AD → size up / add</li>
+                    <li><code>ad_wait</code> — first candles / false start / more reds needed</li>
+                    <li><code>ad_skip</code> — no AD, delist, FOMO, correct no-trade</li>
+                  </ul>
+                </details>
+              </div>
+              <div class="learn-chips" id="learnBucketChips" aria-label="Case bucket">
+                <button type="button" class="chip chip-bucket" data-beh="ad_take" title="Valid AD scale-in">ad_take</button>
+                <button type="button" class="chip chip-bucket" data-beh="ad_press" title="Late vol / under-AD — press size">ad_press</button>
+                <button type="button" class="chip chip-bucket" data-beh="ad_wait" title="Wait more structure / first candles">ad_wait</button>
+                <button type="button" class="chip chip-bucket" data-beh="ad_skip" title="Skip: no AD, delist, FOMO">ad_skip</button>
+              </div>
+              <p class="learn-hint mute">If <code>ad_missed</code>: put zone prices in the note (wanted X–Y, low Z). Bucket defaults from chips if you leave it off.</p>
               <textarea name="text" id="teachText" rows="3" placeholder="This case: e.g. wanted 13.0–13.2, only 13.73 — skipped. plan_ok + ad_missed." required></textarea>
               <div class="row-gap">
                 <button class="btn" type="submit" id="teachSubmit" disabled>Save case + lesson</button>
@@ -375,6 +393,6 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/assets/desk.js?v=p1index1"></script>
+  <script src="/assets/desk.js?v=p1bucket2"></script>
 </body>
 </html>

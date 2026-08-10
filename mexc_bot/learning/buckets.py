@@ -18,6 +18,30 @@ CASE_BUCKETS = (
     "ad_skip",
 )
 
+# Owner-curated map for the first 19 teach rows (prod lesson ids).
+# Used by normalize_learning_index so early memory is bucket-clean for P2.
+OWNER_LESSON_BUCKETS = {
+    2: "ad_skip",  # KORU — panic, AD not reached
+    5: "ad_take",  # SYN weekly/5d long AD
+    6: "ad_take",  # SYN still AD + RSI add
+    9: "ad_wait",  # AXTI fire — wait 3rd 15m into zone
+    10: "ad_take",  # AXTI trade — layered AD + scale-out
+    12: "ad_skip",  # ASTEROID — slept; structure note only
+    14: "ad_skip",  # 1000RATS — panic, no AD
+    15: "ad_take",  # SYN book — multi-TF AD
+    16: "ad_take",  # LAB — 3 red 15m + vol into zone
+    17: "ad_skip",  # SYN fut FOMO above AD
+    18: "ad_press",  # HFT — missed 2nd buy / size
+    19: "ad_take",  # HFT fire — good AD bounce chart
+    20: "ad_take",  # HFT free coins AD
+    21: "ad_wait",  # HFT — extreme 1st 15m; wait 3rd; failed AD
+    22: "ad_press",  # BTW late-vol AD; hesitant under-size
+    23: "ad_wait",  # BLUAI — first candles; wait 3+ reds
+    24: "ad_wait",  # BTW re-top — patience to deeper AD
+    25: "ad_skip",  # HFT delist intel ban
+    26: "ad_skip",  # BANANAS — no real panic / not in zone
+}
+
 BUCKET_HELP = {
     "ad_take": "Valid AD zone + structure — scale in / hold plan",
     "ad_press": "Late vol climax under AD — press size / add",
