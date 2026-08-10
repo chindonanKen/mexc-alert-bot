@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import time
 import unittest
@@ -131,6 +132,46 @@ class TestIncidentAndFreeze(unittest.TestCase):
         # honesty: not both ad chips
         chips = [t for t in (en.get("tags") or []) if ":" not in str(t)]
         self.assertFalse("ad_met" in chips and "ad_missed" in chips)
+
+
+class TestLessonBucketEdit(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = EventStore(Path(self.tmp.name) / "c.db")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_patch_behaviors_persists_bucket(self):
+        from mexc_bot.webapi import learning_api as la
+
+        lid = self.store.teach_lesson(
+            1,
+            "BTW late vol",
+            tags=["sym:BTWUSDT", "mkt:spot", "plan_ok", "ad_met", "base:BTW"],
+        )
+        # Point event_store + uid at this temp DB
+        la.event_store = lambda: self.store  # type: ignore
+        la.uid_or_raise = lambda: 1  # type: ignore
+        out = la.update_lesson(
+            lid,
+            text="BTW late vol — press size",
+            behaviors=["plan_ok", "ad_met", "hesitant", "ad_press"],
+        )
+        self.assertTrue(out.get("ok"))
+        row = self.store.get_lesson(1, lid)
+        tags = json.loads(row["tags_json"] or "[]")
+        self.assertIn("bucket:ad_press", tags)
+        self.assertIn("plan_ok", tags)
+        self.assertIn("ad_met", tags)
+        # change bucket
+        out2 = la.update_lesson(
+            lid, behaviors=["plan_ok", "ad_met", "ad_wait"]
+        )
+        self.assertTrue(out2.get("ok"))
+        tags2 = json.loads(self.store.get_lesson(1, lid)["tags_json"] or "[]")
+        self.assertIn("bucket:ad_wait", tags2)
+        self.assertNotIn("bucket:ad_press", tags2)
 
 
 if __name__ == "__main__":

@@ -730,10 +730,19 @@ def teach(
     tag_list: List[str] = []
     beh_clean: List[str] = []
     ad_clean: List[str] = []
+    from ..learning.buckets import ensure_bucket_in_chips_or_tags, normalize_bucket
+
+    bucket_explicit: Optional[str] = None
     for b in behaviors or []:
         s = str(b or "").strip().lower().replace(" ", "_")
-        # Ignore P2 bucket chips on teach (P1 focus); do not store as process
-        if s in ("ad_take", "ad_press", "ad_wait", "ad_skip"):
+        nb = normalize_bucket(s)
+        if s in ("ad_take", "ad_press", "ad_wait", "ad_skip") or nb in (
+            "ad_take",
+            "ad_press",
+            "ad_wait",
+            "ad_skip",
+        ):
+            bucket_explicit = nb or s
             continue
         if s in allowed_beh and s not in beh_clean:
             beh_clean.append(s)
@@ -747,13 +756,12 @@ def teach(
         if not ts or ts in tag_list:
             continue
         low = ts.lower()
-        if low.startswith("bucket:") or low in (
-            "ad_take",
-            "ad_press",
-            "ad_wait",
-            "ad_skip",
-        ):
-            continue  # P2 — not stored on P1 teach path
+        if low.startswith("bucket:"):
+            bucket_explicit = normalize_bucket(low.split(":", 1)[-1]) or bucket_explicit
+            continue
+        if low in ("ad_take", "ad_press", "ad_wait", "ad_skip"):
+            bucket_explicit = normalize_bucket(low) or bucket_explicit
+            continue
         if low in allowed_beh or low in allowed_ad:
             if low not in tag_list:
                 tag_list.append(low)
@@ -819,6 +827,10 @@ def teach(
     tag_list = [t for t in tag_list if ":" in str(t)]
     tag_list.extend(honest)
     tag_list = rewrite_sym_tags(tag_list, mkt)
+    if bucket_explicit:
+        tag_list = ensure_bucket_in_chips_or_tags(
+            tag_list, chips=honest, note=body, explicit=bucket_explicit
+        )
     beh_clean = [c for c in honest if c not in allowed_ad]
     ad_clean = [c for c in honest if c in allowed_ad]
 
@@ -1046,39 +1058,75 @@ def update_lesson(
     behaviors: Optional[List[str]] = None,
     user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Manual edit of any lesson on the desk (text + process/AD chips)."""
+    """Manual edit of any lesson on the desk (text + process/AD + bucket chips)."""
     uid = int(user_id or uid_or_raise())
     store = event_store()
     existing = store.get_lesson(uid, int(lesson_id))
     if not existing:
         return {"ok": False, "error": "not_found"}
 
+    from ..learning.buckets import (
+        CASE_BUCKETS,
+        ensure_bucket_in_chips_or_tags,
+        normalize_bucket,
+    )
+    from ..learning.chip_honesty import sanitize_process_chips
     from ..learning.integrity import ALLOWED_BEHAVIOR
+    from ..learning.symbols import rewrite_sym_tags
 
     allowed_beh = {b for b in ALLOWED_BEHAVIOR if b}
     allowed_ad = {"ad_met", "ad_missed"}
+    allowed_bucket = set(CASE_BUCKETS)
 
-    # Merge tags: keep structured sym:/mkt:/ek:/ctx:/ev:/case: unless full tags replace
     old_tags: List[str] = []
     try:
         old_tags = json.loads(existing.get("tags_json") or "[]")
     except Exception:
         old_tags = []
 
-    structured = [
-        t
-        for t in old_tags
-        if isinstance(t, str)
-        and (":" in t)
-        and not str(t).lower().split(":")[0]
-        in {b for b in list(allowed_beh) + list(allowed_ad)}
-    ]
+    # Keep structured tags; drop free chips and old bucket: (re-stamped below)
+    structured = []
+    for t in old_tags:
+        if not isinstance(t, str) or ":" not in t:
+            continue
+        low = t.lower()
+        key = low.split(":", 1)[0]
+        if key == "bucket":
+            continue
+        if key in allowed_beh or key in allowed_ad:
+            continue
+        structured.append(t)
 
-    from ..learning.chip_honesty import merge_tags_with_honest_chips, sanitize_process_chips
-    from ..learning.symbols import rewrite_sym_tags
+    def _apply_bucket(tag_list: List[str], bucket_ex: Optional[str], chips: List[str]) -> List[str]:
+        """Stamp or clear bucket: from explicit user selection."""
+        # strip any bucket left
+        out = [t for t in tag_list if not str(t).lower().startswith("bucket:")]
+        if bucket_ex:
+            out = ensure_bucket_in_chips_or_tags(
+                out, chips=chips, note=text or existing.get("text"), explicit=bucket_ex
+            )
+        return out
+
+    def _split_behaviors(
+        raw: Optional[List[str]],
+    ) -> tuple[List[str], Optional[str]]:
+        process: List[str] = []
+        bucket_ex: Optional[str] = None
+        for b in raw or []:
+            s = str(b or "").strip().lower().replace(" ", "_")
+            if not s:
+                continue
+            nb = normalize_bucket(s)
+            if s in allowed_bucket or (nb and nb in allowed_bucket):
+                bucket_ex = nb or s
+                continue
+            if s.startswith("bucket:"):
+                bucket_ex = normalize_bucket(s.split(":", 1)[-1])
+                continue
+            process.append(s)
+        return process, bucket_ex
 
     if tags is not None:
-        # Full replace of free tags, keep structured from old + any new structured
         tag_list: List[str] = []
         for t in tags:
             ts = str(t or "").strip()
@@ -1089,22 +1137,27 @@ def update_lesson(
         for s in structured:
             if s not in tag_list:
                 tag_list.append(s)
-        tag_list = rewrite_sym_tags(tag_list)
-        tag_list = merge_tags_with_honest_chips(
-            tag_list,
-            lesson_id=int(lesson_id),
-            chips_override=[x for x in tag_list if ":" not in x],
-        )
-    elif behaviors is not None:
-        tag_list = list(structured)
-        honest = sanitize_process_chips(behaviors)
-        for s in honest:
+        free = [x for x in tag_list if ":" not in x]
+        process, bucket_ex = _split_behaviors(free)
+        # also read bucket: from provided tags
+        for t in tag_list:
+            if str(t).lower().startswith("bucket:"):
+                bucket_ex = normalize_bucket(str(t).split(":", 1)[-1]) or bucket_ex
+        honest = sanitize_process_chips(process)
+        tag_list = [t for t in tag_list if ":" in str(t) and not str(t).lower().startswith("bucket:")]
+        for s in structured:
             if s not in tag_list:
                 tag_list.append(s)
+        tag_list.extend(honest)
         tag_list = rewrite_sym_tags(tag_list)
-        tag_list = merge_tags_with_honest_chips(
-            tag_list, lesson_id=int(lesson_id), chips_override=honest
-        )
+        tag_list = _apply_bucket(tag_list, bucket_ex, honest)
+    elif behaviors is not None:
+        # Manual desk edit: user selection wins (do not re-apply OWNER_LESSON_CHIPS)
+        process, bucket_ex = _split_behaviors(behaviors)
+        honest = sanitize_process_chips(process)
+        tag_list = list(structured) + honest
+        tag_list = rewrite_sym_tags(tag_list)
+        tag_list = _apply_bucket(tag_list, bucket_ex, honest)
     else:
         tag_list = None  # leave tags unchanged
 
@@ -1126,16 +1179,21 @@ def update_lesson(
     if not row:
         return {"ok": False, "error": "update_failed"}
 
-    # Keep linked setup case note/chips in sync when edited
+    # Keep linked setup case note/chips/bucket in sync when edited
     if body is not None or tag_list is not None:
         try:
+            final_tags = tag_list if tag_list is not None else old_tags
             chips = [
                 x
-                for x in (tag_list if tag_list is not None else old_tags)
+                for x in final_tags
                 if isinstance(x, str)
                 and ":" not in x
                 and (x in allowed_beh or x in allowed_ad)
             ]
+            bucket_val = None
+            for x in final_tags:
+                if isinstance(x, str) and x.lower().startswith("bucket:"):
+                    bucket_val = normalize_bucket(x.split(":", 1)[-1])
             note = body if body is not None else None
             conn = store._get_conn()  # type: ignore[attr-defined]
             with store._lock:  # type: ignore[attr-defined]
@@ -1151,7 +1209,38 @@ def update_lesson(
                         "WHERE user_id = ? AND lesson_id = ?",
                         (json.dumps(chips), uid, int(lesson_id)),
                     )
+                # Stamp features.bucket on linked cases
+                if bucket_val is not None:
+                    rows = conn.execute(
+                        "SELECT id, features_json FROM agent_setup_cases "
+                        "WHERE user_id = ? AND lesson_id = ?",
+                        (uid, int(lesson_id)),
+                    ).fetchall()
+                    for cr in rows:
+                        try:
+                            feats = json.loads(cr["features_json"] or "{}")
+                        except Exception:
+                            feats = {}
+                        if not isinstance(feats, dict):
+                            feats = {}
+                        feats["bucket"] = bucket_val
+                        conn.execute(
+                            "UPDATE agent_setup_cases SET features_json = ? WHERE id = ?",
+                            (json.dumps(feats), int(cr["id"])),
+                        )
         except Exception as e:
             logger.debug("case note sync on lesson edit: %s", e)
 
-    return {"ok": True, "lesson": row, "lesson_id": int(lesson_id)}
+    # Return enriched lesson so UI can show bucket without full reload races
+    try:
+        from ..learning.incident import enrich_lesson_row
+
+        row = enrich_lesson_row(dict(row))
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "lesson": row,
+        "lesson_id": int(lesson_id),
+        "bucket": (row or {}).get("bucket") if isinstance(row, dict) else None,
+    }
