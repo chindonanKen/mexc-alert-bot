@@ -1,0 +1,141 @@
+"""P1: symbol normalize, incident anchors, four case buckets."""
+
+from __future__ import annotations
+
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from mexc_bot.learning.buckets import CASE_BUCKETS, infer_case_bucket, normalize_bucket
+from mexc_bot.learning.cases import freeze_case
+from mexc_bot.learning.incident import build_incident, enrich_lesson_row, incident_tags
+from mexc_bot.learning.store import EventStore
+from mexc_bot.learning.symbols import (
+    learning_base,
+    normalize_learning_symbol,
+    rewrite_sym_tags,
+)
+
+
+class TestSymbols(unittest.TestCase):
+    def test_same_coin_collapses(self):
+        self.assertEqual(learning_base("HFTUSDT"), "HFT")
+        self.assertEqual(learning_base("HFT_USDT"), "HFT")
+        self.assertEqual(learning_base("HFT"), "HFT")
+        self.assertEqual(learning_base("HFI"), "HFT")
+        self.assertEqual(normalize_learning_symbol("HFT_USDT", "spot"), "HFTUSDT")
+        self.assertEqual(normalize_learning_symbol("HFTUSDT", "futures"), "HFT_USDT")
+        self.assertEqual(
+            normalize_learning_symbol("AXTISTOCK_USDT", "futures"), "AXTISTOCK_USDT"
+        )
+
+    def test_rewrite_sym_tags(self):
+        tags = rewrite_sym_tags(
+            ["plan_ok", "sym:HFT_USDT", "mkt:spot", "ev:1"], "spot"
+        )
+        self.assertIn("sym:HFTUSDT", tags)
+        self.assertIn("base:HFT", tags)
+        self.assertNotIn("sym:HFT_USDT", tags)
+
+
+class TestBuckets(unittest.TestCase):
+    def test_four_only(self):
+        self.assertEqual(len(CASE_BUCKETS), 4)
+
+    def test_infer(self):
+        self.assertEqual(
+            infer_case_bucket(chips=["ad_met", "plan_ok"]), "ad_take"
+        )
+        self.assertEqual(
+            infer_case_bucket(chips=["ad_met", "hesitant"], note="press size under AD"),
+            "ad_press",
+        )
+        self.assertEqual(
+            infer_case_bucket(chips=["false_panic", "ad_missed"]), "ad_wait"
+        )
+        self.assertEqual(
+            infer_case_bucket(chips=["fomo", "ad_missed"]), "ad_skip"
+        )
+        self.assertEqual(normalize_bucket("late_vol_aggressive"), "ad_press")
+
+
+class TestIncidentAndFreeze(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = EventStore(Path(self.tmp.name) / "c.db")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_incident_tags(self):
+        inc = build_incident(
+            incident_ts=1700000000.0, incident_price=0.023, event_id=9
+        )
+        tags = incident_tags(inc)
+        self.assertTrue(any(t.startswith("ts:") for t in tags))
+        self.assertTrue(any(t.startswith("px:") for t in tags))
+
+    def test_freeze_normalizes_and_buckets(self):
+        eid = self.store.log_event(
+            1,
+            "mover_peak",
+            "HFTUSDT",
+            "futures",
+            ts=1700000100.0,
+            price=0.02,
+            ref_price=0.03,
+            drop_pct=-33,
+            velocity_band="PANIC",
+        )
+        fake = {
+            "ok": True,
+            "band": "PANIC",
+            "dd_pct": 33,
+            "ad_zone": "at_ad",
+            "vol_flag": "surge",
+            "ad_ready": True,
+            "setup_prior": 0.8,
+        }
+        with patch(
+            "mexc_bot.learning.cases.build_features_for_event", return_value=fake
+        ):
+            view = freeze_case(
+                self.store,
+                1,
+                symbol="HFTUSDT",
+                market="futures",
+                event_id=eid,
+                fire_ts=1700000100.0,
+                fire_price=0.02,
+                ref_price=0.03,
+                chips=["plan_ok", "ad_met"],
+                note="good AD",
+                source="teach",
+            )
+        self.assertEqual(view.get("symbol"), "HFT_USDT")
+        self.assertEqual(view.get("base"), "HFT")
+        self.assertEqual(view.get("incident_ts"), 1700000100.0)
+        self.assertEqual(view.get("incident_price"), 0.02)
+        self.assertIn(view.get("bucket"), CASE_BUCKETS)
+        self.assertEqual(view.get("bucket"), "ad_take")
+
+    def test_normalize_index(self):
+        lid = self.store.teach_lesson(
+            1,
+            "test",
+            tags=["sym:HFT_USDT", "mkt:spot", "plan_ok", "ad_met"],
+        )
+        self.assertGreater(lid, 0)
+        out = self.store.normalize_learning_index(1)
+        self.assertGreaterEqual(out.get("lessons_rewritten", 0), 1)
+        row = self.store.get_lesson(1, lid)
+        en = enrich_lesson_row(row)
+        self.assertEqual(en.get("symbol_norm"), "HFTUSDT")
+        self.assertEqual(en.get("base"), "HFT")
+        self.assertIn(en.get("bucket"), CASE_BUCKETS)
+
+
+if __name__ == "__main__":
+    unittest.main()

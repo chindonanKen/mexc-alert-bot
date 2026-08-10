@@ -1136,6 +1136,18 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(400, str(e))
 
+    @app.post("/api/learning/normalize-index")
+    def learning_normalize_index(_: bool = Depends(require_auth)):
+        """One-shot: rewrite sym tags + case symbols; stamp buckets + incident anchors."""
+        from .learning_api import event_store, uid_or_raise
+
+        try:
+            uid = uid_or_raise()
+            out = event_store().normalize_learning_index(int(uid))
+            return {"ok": True, **out}
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
     @app.post("/api/learning/approve")
     def learning_approve(body: ApproveBody, _: bool = Depends(require_auth)):
         from .learning_api import approve_draft

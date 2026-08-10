@@ -30,7 +30,8 @@ Fires, positions, `teach_ok` money, teach on trades, chips (`ad_met`/`ad_missed`
 On **fire** (async freeze) + **teach** (re-snap + chips/note): table `agent_setup_cases`, module `learning/cases.py`, desk snapshot UI + howto.  
 Auto klines via `compute_fire_features`. Interactive charts still optional later.  
 Words **annotate**; **features index**.  
-**Exit (remaining):** richer nearest-case index for P2; backfill polish.
+**Exit (remaining):** nearest-case retrieve for P2 (buckets + incident + base key ready).  
+**Index shipped:** canonical `sym`/`base` tags · incident `ts`/`px` per lesson · four buckets `ad_take|ad_press|ad_wait|ad_skip` · `POST /api/learning/normalize-index`.
 
 ### P2 — Decide + log
 **Need:** Agent **thinks** on a dump.  

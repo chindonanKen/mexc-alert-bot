@@ -716,15 +716,27 @@ def teach(
 
     from ..learning.integrity import ALLOWED_BEHAVIOR
 
+    from ..learning.buckets import ensure_bucket_in_chips_or_tags, infer_case_bucket
+    from ..learning.incident import build_incident, incident_tags
+    from ..learning.symbols import (
+        normalize_learning_symbol,
+        rewrite_sym_tags,
+    )
+
     # Process chips only — closed set (voice often invents free tags)
     allowed_beh = {b for b in ALLOWED_BEHAVIOR if b}
     # AD context (not process — setup quality)
     allowed_ad = {"ad_met", "ad_missed"}
+    allowed_buckets = {"ad_take", "ad_press", "ad_wait", "ad_skip"}
     tag_list: List[str] = []
     beh_clean: List[str] = []
     ad_clean: List[str] = []
+    bucket_explicit: Optional[str] = None
     for b in behaviors or []:
         s = str(b or "").strip().lower().replace(" ", "_")
+        if s in allowed_buckets:
+            bucket_explicit = s
+            continue
         if s in allowed_beh and s not in beh_clean:
             beh_clean.append(s)
             tag_list.append(s)
@@ -737,6 +749,12 @@ def teach(
         if not ts or ts in tag_list:
             continue
         low = ts.lower()
+        if low.startswith("bucket:"):
+            bucket_explicit = low.split(":", 1)[-1]
+            continue
+        if low in allowed_buckets:
+            bucket_explicit = low
+            continue
         if low in allowed_beh or low in allowed_ad:
             if low not in tag_list:
                 tag_list.append(low)
@@ -745,10 +763,33 @@ def teach(
         if ":" in ts:  # structured ok
             tag_list.append(ts)
 
+    mkt = (market or "futures").lower() if market else None
+    store = event_store()
+    fire_price = None
+    fire_ts = None
+    ref_price = None
+    drop_pct = None
+    velocity_band = None
+    heat_breadth = None
+    if event_id:
+        for e in store.recent_events(uid, limit=120):
+            if int(e.get("id") or 0) == int(event_id):
+                fire_price = e.get("price")
+                fire_ts = e.get("ts")
+                ref_price = e.get("ref_price")
+                drop_pct = e.get("drop_pct")
+                velocity_band = e.get("velocity_band")
+                heat_breadth = e.get("heat_breadth")
+                mkt = (market or e.get("market") or mkt or "futures").lower()
+                if not symbol:
+                    symbol = e.get("symbol")
+                break
+
     if symbol:
-        tag_list.append(f"sym:{str(symbol).upper()}")
-    if market:
-        tag_list.append(f"mkt:{str(market).lower()}")
+        symbol = normalize_learning_symbol(str(symbol), mkt or "spot")
+        tag_list.append(f"sym:{symbol}")
+    if mkt:
+        tag_list.append(f"mkt:{mkt}")
     if entity_key:
         tag_list.append(f"ek:{entity_key}")
     if context_type:
@@ -756,17 +797,48 @@ def teach(
     if event_id:
         tag_list.append(f"ev:{int(event_id)}")
 
+    # Incident = fire/trade moment (not "now"), so multi-teaches on one coin stay distinct
+    inc = build_incident(
+        incident_ts=fire_ts,
+        incident_price=fire_price,
+        ref_price=ref_price,
+        event_id=int(event_id) if event_id else None,
+        trade_key=entity_key,
+        drop_pct=drop_pct,
+    )
+    if fire_ts is None and context_type == "trade":
+        # trade teach without fire: still stamp teach-time as weak anchor
+        inc = build_incident(
+            incident_ts=time.time(),
+            incident_price=fire_price,
+            trade_key=entity_key,
+            drop_pct=drop_pct,
+        )
+    tag_list.extend(incident_tags(inc))
+    tag_list = rewrite_sym_tags(tag_list, mkt)
+    tag_list = ensure_bucket_in_chips_or_tags(
+        tag_list,
+        chips=beh_clean + ad_clean,
+        note=body,
+        explicit=bucket_explicit,
+    )
+    bucket = infer_case_bucket(
+        chips=beh_clean + ad_clean, note=body, explicit=bucket_explicit
+    )
+
     # Prefix so recall always shows which trade/fire this is about
     about = ""
     if symbol:
-        about = f"[{str(symbol).upper()}"
-        if market:
-            about += f" {str(market).lower()}"
+        about = f"[{symbol}"
+        if mkt:
+            about += f" {mkt}"
         if context_type:
             about += f" · {context_type}"
-        bits = beh_clean + ad_clean
+        bits = beh_clean + ad_clean + [bucket]
         if bits:
             about += f" · {','.join(bits)}"
+        if inc.get("incident_ts"):
+            about += f" · t={int(float(inc['incident_ts']))}"
         about += "] "
     full_text = about + body
 
@@ -774,7 +846,7 @@ def teach(
     if event_id and int(event_id) not in evid:
         evid.append(int(event_id))
 
-    lid = event_store().teach_lesson(
+    lid = store.teach_lesson(
         uid,
         full_text,
         tags=tag_list,
@@ -783,38 +855,20 @@ def teach(
         evidence_event_ids=evid,
     )
 
-    # P1: freeze / update setup case with features + chips + note
+    # P1: freeze / update setup case with features + chips + note + incident
     case_view: Dict[str, Any] = {}
     if lid and symbol:
         try:
             from ..learning.cases import freeze_case
 
-            store = event_store()
-            fire_price = None
-            fire_ts = None
-            ref_price = None
-            drop_pct = None
-            velocity_band = None
-            heat_breadth = None
-            if event_id:
-                for e in store.recent_events(uid, limit=80):
-                    if int(e.get("id") or 0) == int(event_id):
-                        fire_price = e.get("price")
-                        fire_ts = e.get("ts")
-                        ref_price = e.get("ref_price")
-                        drop_pct = e.get("drop_pct")
-                        velocity_band = e.get("velocity_band")
-                        heat_breadth = e.get("heat_breadth")
-                        market = market or e.get("market")
-                        break
             case_view = freeze_case(
                 store,
                 uid,
                 symbol=str(symbol),
-                market=str(market or "futures"),
+                market=str(mkt or "futures"),
                 event_id=int(event_id) if event_id else None,
-                fire_ts=fire_ts or time.time(),
-                fire_price=fire_price,
+                fire_ts=inc.get("incident_ts"),
+                fire_price=inc.get("incident_price") or fire_price,
                 ref_price=ref_price,
                 drop_pct=drop_pct,
                 velocity_band=velocity_band,
@@ -827,7 +881,12 @@ def teach(
                 recompute=True,
             )
             if case_view.get("id"):
+                # persist case: + bucket already on tags; append case id
                 tag_list.append(f"case:{int(case_view['id'])}")
+                try:
+                    store.update_lesson(uid, int(lid), tags=tag_list)
+                except Exception:
+                    pass
         except Exception as e:
             logger.warning("p1 freeze on teach failed: %s", e)
 
@@ -838,6 +897,8 @@ def teach(
         "entity_key": entity_key,
         "event_id": event_id,
         "text": full_text,
+        "bucket": bucket,
+        "incident": inc,
         "case": case_view or None,
         "case_id": (case_view or {}).get("id"),
     }
@@ -1017,6 +1078,9 @@ def update_lesson(
         in {b for b in list(allowed_beh) + list(allowed_ad)}
     ]
 
+    from ..learning.buckets import ensure_bucket_in_chips_or_tags
+    from ..learning.symbols import rewrite_sym_tags
+
     if tags is not None:
         # Full replace of free tags, keep structured from old + any new structured
         tag_list: List[str] = []
@@ -1030,6 +1094,10 @@ def update_lesson(
         for s in structured:
             if s not in tag_list:
                 tag_list.append(s)
+        tag_list = rewrite_sym_tags(tag_list)
+        tag_list = ensure_bucket_in_chips_or_tags(
+            tag_list, chips=[x for x in tag_list if ":" not in x], note=text
+        )
     elif behaviors is not None:
         tag_list = list(structured)
         for b in behaviors:
@@ -1037,6 +1105,10 @@ def update_lesson(
             if s in allowed_beh or s in allowed_ad:
                 if s not in tag_list:
                     tag_list.append(s)
+        tag_list = rewrite_sym_tags(tag_list)
+        tag_list = ensure_bucket_in_chips_or_tags(
+            tag_list, chips=behaviors, note=text or existing.get("text")
+        )
     else:
         tag_list = None  # leave tags unchanged
 

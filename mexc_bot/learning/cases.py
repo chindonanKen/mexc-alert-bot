@@ -12,8 +12,11 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
+from .buckets import ensure_bucket_in_chips_or_tags, infer_case_bucket, normalize_bucket
 from .chart_features import compute_fire_features
+from .incident import build_incident, merge_incident_into_features
 from .store import EventStore
+from .symbols import learning_base, normalize_learning_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +49,49 @@ def case_public_view(row: dict) -> Dict[str, Any]:
     drop = row.get("drop_pct")
     if drop is None and feats.get("dd_pct") is not None:
         drop = -abs(float(feats["dd_pct"]))
+    mkt = (row.get("market") or "futures").lower()
+    sym_raw = row.get("symbol") or ""
+    sym = normalize_learning_symbol(str(sym_raw), mkt)
+    base = learning_base(sym)
+    # Incident = fire moment (not teach/edit time)
+    inc_ts = row.get("fire_ts") or feats.get("incident_ts")
+    inc_px = row.get("fire_price") or feats.get("incident_price")
+    if isinstance(feats.get("incident"), dict):
+        inc_ts = feats["incident"].get("ts") or inc_ts
+        inc_px = feats["incident"].get("price") or inc_px
+    bucket = feats.get("bucket") or infer_case_bucket(
+        chips=chips, features=feats, note=row.get("note")
+    )
+    bucket = normalize_bucket(bucket) or bucket
+    inc_feat = feats.get("incident") if isinstance(feats.get("incident"), dict) else {}
+    ref_px = row.get("ref_price")
+    if ref_px is None:
+        ref_px = inc_feat.get("ref_price")
     return {
         "id": row.get("id"),
         "event_id": row.get("event_id"),
-        "symbol": row.get("symbol"),
-        "market": row.get("market"),
+        "symbol": sym,
+        "symbol_raw": sym_raw,
+        "base": base,
+        "market": mkt,
+        "bucket": bucket,
         "frozen_at": row.get("frozen_at"),
         "fire_ts": row.get("fire_ts"),
         "fire_price": row.get("fire_price"),
+        "incident_ts": inc_ts,
+        "incident_price": inc_px,
+        "incident": {
+            "ts": inc_ts,
+            "price": inc_px,
+            "ref_price": ref_px,
+            "event_id": row.get("event_id"),
+            "trade_key": row.get("trade_key"),
+            "chart_tfs": inc_feat.get("chart_tfs") or ["5m", "15m", "1h"],
+            "chart_lookback_seconds": int(
+                inc_feat.get("chart_lookback_seconds") or 6 * 3600
+            ),
+            "anchor": "fire" if row.get("event_id") else "case",
+        },
         "ref_price": row.get("ref_price"),
         "drop_pct": drop,
         "velocity_band": band,
@@ -128,30 +166,44 @@ def freeze_case(
     recompute: bool = True,
 ) -> Dict[str, Any]:
     """Freeze or update a setup case. Soft-fail friendly."""
-    feats: Dict[str, Any] = {}
+    mkt = (market or "futures").lower()
+    sym = normalize_learning_symbol(symbol or "", mkt)
+    inc = build_incident(
+        incident_ts=fire_ts,
+        incident_price=fire_price,
+        ref_price=ref_price,
+        event_id=event_id,
+        trade_key=trade_key,
+        drop_pct=drop_pct,
+    )
+    feats: Optional[Dict[str, Any]] = None
     if recompute:
         feats = build_features_for_event(
-            market=market,
-            symbol=symbol,
+            market=mkt,
+            symbol=sym,
             fire_px=fire_price,
             fire_ts=fire_ts,
             ref_price=ref_price,
             velocity_band=velocity_band,
             heat_breadth=heat_breadth,
         )
+        feats = merge_incident_into_features(feats, inc)
+        bucket = infer_case_bucket(chips=chips, features=feats, note=note)
+        feats["bucket"] = bucket
+    chip_list = list(chips or [])
     cid = store.upsert_setup_case(
         user_id,
-        symbol=symbol,
-        market=market,
+        symbol=sym,
+        market=mkt,
         event_id=event_id,
-        fire_ts=fire_ts,
+        fire_ts=fire_ts if fire_ts is not None else inc.get("incident_ts"),
         fire_price=fire_price,
         ref_price=ref_price,
         drop_pct=drop_pct,
         velocity_band=velocity_band,
         heat_breadth=heat_breadth,
-        features=feats if recompute else None,
-        chips=chips,
+        features=feats,
+        chips=chip_list,
         note=note,
         lesson_id=lesson_id,
         trade_key=trade_key,

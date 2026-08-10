@@ -1095,6 +1095,91 @@ class EventStore:
             ).fetchone()
             return dict(row) if row else None
 
+    def normalize_learning_index(self, user_id: int) -> Dict[str, int]:
+        """Rewrite legacy sym tags + case symbols to canonical form; stamp buckets.
+
+        Safe / additive. Does not delete lessons or cases.
+        """
+        from .buckets import ensure_bucket_in_chips_or_tags, infer_case_bucket
+        from .symbols import normalize_learning_symbol, rewrite_sym_tags
+
+        n_les = 0
+        n_case = 0
+        try:
+            with self._lock:
+                conn = self._get_conn()
+                lessons = conn.execute(
+                    "SELECT id, tags_json, text FROM learning_lessons WHERE user_id = ?",
+                    (int(user_id),),
+                ).fetchall()
+                for row in lessons:
+                    try:
+                        tags = json.loads(row["tags_json"] or "[]")
+                    except Exception:
+                        tags = []
+                    mkt = None
+                    for t in tags:
+                        if str(t).lower().startswith("mkt:"):
+                            mkt = str(t).split(":", 1)[-1]
+                    new_tags = rewrite_sym_tags(list(tags), mkt)
+                    chips = [t for t in new_tags if ":" not in str(t)]
+                    new_tags = ensure_bucket_in_chips_or_tags(
+                        new_tags, chips=chips, note=row["text"]
+                    )
+                    # Preserve existing ts:/px: if any
+                    if json.dumps(new_tags) != json.dumps(tags):
+                        conn.execute(
+                            "UPDATE learning_lessons SET tags_json = ? WHERE id = ?",
+                            (json.dumps(new_tags), int(row["id"])),
+                        )
+                        n_les += 1
+                cases = conn.execute(
+                    "SELECT id, symbol, market, chips_json, note, features_json, "
+                    "fire_ts, fire_price, event_id "
+                    "FROM agent_setup_cases WHERE user_id = ?",
+                    (int(user_id),),
+                ).fetchall()
+                for row in cases:
+                    mkt = (row["market"] or "futures").lower()
+                    sym = normalize_learning_symbol(row["symbol"] or "", mkt)
+                    try:
+                        chips = json.loads(row["chips_json"] or "[]")
+                    except Exception:
+                        chips = []
+                    try:
+                        feats = json.loads(row["features_json"] or "{}")
+                    except Exception:
+                        feats = {}
+                    if not isinstance(feats, dict):
+                        feats = {}
+                    bucket = infer_case_bucket(
+                        chips=chips, features=feats, note=row["note"]
+                    )
+                    feats["bucket"] = bucket
+                    if row["fire_ts"] is not None:
+                        feats.setdefault("incident_ts", row["fire_ts"])
+                        feats.setdefault(
+                            "incident",
+                            {
+                                "ts": row["fire_ts"],
+                                "price": row["fire_price"],
+                                "event_id": row["event_id"],
+                                "chart_tfs": ["5m", "15m", "1h"],
+                                "chart_lookback_seconds": 6 * 3600,
+                                "anchor": "fire",
+                            },
+                        )
+                    conn.execute(
+                        "UPDATE agent_setup_cases SET symbol = ?, features_json = ? "
+                        "WHERE id = ?",
+                        (sym, json.dumps(feats), int(row["id"])),
+                    )
+                    n_case += 1
+            return {"lessons_rewritten": n_les, "cases_touched": n_case}
+        except Exception as e:
+            logger.error("normalize_learning_index failed: %s", e)
+            return {"lessons_rewritten": n_les, "cases_touched": n_case, "error": str(e)}
+
     def update_lesson(
         self,
         user_id: int,

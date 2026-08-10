@@ -2028,26 +2028,58 @@
         ? lessons
             .map((l) => {
               const tags = (() => {
+                if (Array.isArray(l.tags)) return l.tags;
                 try {
                   return JSON.parse(l.tags_json || "[]");
                 } catch (_) {
-                  return l.tags || [];
+                  return [];
                 }
               })();
               const symTag = (tags || []).find(
                 (x) => typeof x === "string" && x.startsWith("sym:")
               );
-              const about = symTag
-                ? symTag.slice(4)
-                : (l.text || "").startsWith("[")
-                  ? "linked"
-                  : "general";
+              const bucketTag = (tags || []).find(
+                (x) => typeof x === "string" && x.startsWith("bucket:")
+              );
+              const about = l.symbol_norm
+                ? l.symbol_norm
+                : symTag
+                  ? symTag.slice(4)
+                  : (l.text || "").startsWith("[")
+                    ? "linked"
+                    : "general";
               const chipTags = (tags || []).filter(
                 (x) =>
                   typeof x === "string" &&
                   !x.includes(":") &&
                   x.length < 24
               );
+              const bucket =
+                l.bucket ||
+                (bucketTag ? bucketTag.slice(7) : "") ||
+                "";
+              const when =
+                l.incident_iso ||
+                (l.incident_ts
+                  ? fmtTime(l.incident_ts)
+                  : l.created_at
+                    ? fmtTime(l.created_at)
+                    : "");
+              const px =
+                l.incident_price != null && !Number.isNaN(+l.incident_price)
+                  ? fmtPx(l.incident_price)
+                  : "";
+              const metaBits = [
+                when ? `incident ${when}` : "",
+                px ? `@ ${px}` : "",
+                bucket ? bucket : "",
+                l.event_id ? `ev ${l.event_id}` : "",
+              ].filter(Boolean);
+              const metaHtml = metaBits.length
+                ? `<div class="learn-lesson-incident mute">${escHtml(
+                    metaBits.join(" · ")
+                  )}</div>`
+                : "";
               const tagHtml = chipTags.length
                 ? `<div class="learn-lesson-tags">${chipTags
                     .map((t) => {
@@ -2056,8 +2088,18 @@
                         ad ? "ad" : "beh"
                       }">${escHtml(t)}</span>`;
                     })
-                    .join("")}</div>`
-                : "";
+                    .join("")}${
+                    bucket
+                      ? `<span class="learn-tag bucket">${escHtml(
+                          bucket
+                        )}</span>`
+                      : ""
+                  }</div>`
+                : bucket
+                  ? `<div class="learn-lesson-tags"><span class="learn-tag bucket">${escHtml(
+                      bucket
+                    )}</span></div>`
+                  : "";
               const fullText = l.text || "";
               const chipBtns = [...PROCESS_CHIPS, ...AD_CHIPS]
                 .map((c) => {
@@ -2068,10 +2110,13 @@
                   }">${c}</button>`;
                 })
                 .join("");
-              return `<div class="learn-lesson" data-lesson-id="${l.id}">
+              return `<div class="learn-lesson" data-lesson-id="${l.id}" data-incident-ts="${
+                l.incident_ts != null ? l.incident_ts : ""
+              }" data-base="${escHtml(l.base || "")}">
                 <div class="learn-lesson-view">
                   <div class="learn-lesson-main">
                     <span class="learn-about">${escHtml(about)}</span>
+                    ${metaHtml}
                     <span class="learn-lesson-text">${escHtml(fullText)}</span>
                     ${tagHtml}
                   </div>

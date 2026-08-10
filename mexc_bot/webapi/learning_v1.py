@@ -31,7 +31,13 @@ def what_have_you_learned(
     """Agent recall: lessons + stats + short real cites (no inventions)."""
     uid = int(user_id or uid_or_raise())
     store = event_store()
-    lessons = store.list_lessons(uid, approved_only=True, limit=limit_lessons)
+    lessons_raw = store.list_lessons(uid, approved_only=True, limit=limit_lessons)
+    try:
+        from ..learning.incident import enrich_lesson_row
+
+        lessons = [enrich_lesson_row(L) for L in lessons_raw]
+    except Exception:
+        lessons = lessons_raw
     stats = store.learning_stats(uid)
     trades = list_money_reviews(
         uid, closed_only=True, teach_only=True, limit=5, store=store
