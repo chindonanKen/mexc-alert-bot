@@ -442,25 +442,23 @@ def create_app() -> FastAPI:
             if uid
             else []
         )
-        # Never pad with unrelated intel — empty is fine
+        # Isolated-dump investigations still available (secondary)
         book_intel = [i for i in recent_inv if _in_book(i.get("symbol") or "")][:6]
 
-        # Recent only (48h) — and only book-linked. No filler headlines.
-        news_horizon = now_ts - 48 * 3600
-        news_rows = db.fetch_all(
-            """
-            SELECT id, symbol, class, severity, title, source, ts
-            FROM news_events
-            WHERE ts IS NULL OR ts >= ?
-            ORDER BY ts DESC LIMIT 40
-            """,
-            (news_horizon,),
-        )
-        book_news = [
-            n
-            for n in news_rows
-            if _in_book(n.get("symbol") or "", n.get("title") or "")
-        ][:8]
+        # Book intel strip: always latest bad news (delist/scam/hack/closure/listing).
+        # No 48h cut-off — old delist notices remain useful reminders while coin still trades.
+        try:
+            from .bad_intel import load_bad_intel_feed
+
+            book_news = load_bad_intel_feed(
+                db.fetch_all,
+                limit=5,
+                book_bases=book_bases,
+                now=now_ts,
+            )
+        except Exception as e:
+            logger.debug("bad_intel feed: %s", e)
+            book_news = []
 
         # Learning snapshot + Needs you (desk-native)
         labels_recent = (

@@ -286,28 +286,59 @@
       }
     }
 
-    // High-priority book news only (targets / movers / positions). Hidden if none.
+    // Bad intel strip — always top 5 delist/scam/hack/… (any age = reminder)
     const newsEl = $("#ovBookNews");
     if (newsEl) {
       const bn = h.book_news || [];
       if (!bn.length) {
-        newsEl.hidden = true;
-        newsEl.innerHTML = "";
+        newsEl.hidden = false;
+        newsEl.innerHTML =
+          `<div class="ov-news-h">Book intel · bad news</div>` +
+          rankEmpty("No delist/scam/hack items in cache yet — open Intel radar");
       } else {
         newsEl.hidden = false;
         newsEl.innerHTML =
-          `<div class="ov-news-h">Book news</div>` +
+          `<div class="panel-h ov-news-head">
+            <h3 class="ov-news-h">Book intel · bad news</h3>
+            <span class="mute sm">Top 5 · delist/scam/hack · even if old</span>
+            <button type="button" class="btn soft sm" data-jump="intel">All intel</button>
+          </div>` +
           bn
-            .map(
-              (n) => `<div class="ov-news-row">
-              <span class="ov-news-sev">${(n.severity || n.class || "news").toString().slice(0, 12)}</span>
+            .slice(0, 5)
+            .map((n) => {
+              const cls = (n.class || n.severity || "intel").toString().toUpperCase();
+              const age = n.age_label || fmtTime(n.ts) || "";
+              const hit = n.book_hit ? " · on book" : "";
+              const sym =
+                n.symbol ||
+                (Array.isArray(n.bases) && n.bases.length
+                  ? n.bases.slice(0, 4).join(",")
+                  : "—");
+              const title = escHtml(String(n.title || "—").slice(0, 140));
+              const link = n.url
+                ? `<a class="ov-news-link" href="${escHtml(
+                    n.url
+                  )}" target="_blank" rel="noopener">open</a>`
+                : "";
+              return `<div class="ov-news-row${n.book_hit ? " on-book" : ""}">
+              <span class="ov-news-sev sev-${escHtml(
+                cls.toLowerCase().slice(0, 12)
+              )}">${escHtml(cls.slice(0, 10))}</span>
               <div class="ov-news-body">
-                <div class="ov-news-title">${(n.title || "—").slice(0, 120)}</div>
-                <div class="ov-news-meta">${n.symbol || "—"} · ${n.source || ""} · ${fmtTime(n.ts)}</div>
+                <div class="ov-news-title">${title}</div>
+                <div class="ov-news-meta">${escHtml(String(sym).slice(0, 48))} · ${escHtml(
+                String(n.source || "")
+              )} · ${escHtml(age)}${hit}${link ? " · " + link : ""}</div>
               </div>
-            </div>`
-            )
+            </div>`;
+            })
             .join("");
+        $$("[data-jump]", newsEl).forEach((b) =>
+          b.addEventListener("click", () => {
+            setView(b.dataset.jump);
+            refreshAll();
+          })
+        );
       }
     }
 
@@ -426,7 +457,7 @@
           .join("")
       : rankEmpty("No open positions");
 
-    // Book-matched intel (investigations) — only when present
+    // Isolated-dump investigations only (bad news lives in Book intel · bad news above)
     const intelEl = $("#ovBookIntel");
     if (intelEl) {
       const bi = h.book_intel || [];
@@ -436,17 +467,23 @@
       } else {
         intelEl.hidden = false;
         intelEl.innerHTML =
-          `<div class="panel-h"><h3>Book intel</h3><button type="button" class="btn soft sm" data-jump="intel">Open</button></div>` +
+          `<div class="panel-h"><h3>Isolated dump probes</h3><button type="button" class="btn soft sm" data-jump="intel">Open</button></div>` +
           bi
             .map(
               (i) => `<div class="cmd-row">
               <div class="cmd-row-main">
-                <div class="cmd-sym">${i.symbol || "—"}</div>
-                <div class="cmd-meta">${i.verdict || i.velocity_band || "intel"}${
-                i.drop_pct != null ? " · " + Number(i.drop_pct).toFixed(1) + "%" : ""
+                <div class="cmd-sym">${escHtml(i.symbol || "—")}</div>
+                <div class="cmd-meta">${escHtml(
+                  i.verdict || i.velocity_band || "intel"
+                )}${
+                i.drop_pct != null
+                  ? " · " + Number(i.drop_pct).toFixed(1) + "%"
+                  : ""
               }</div>
               </div>
-              <div class="cmd-px">${(i.confidence != null ? Number(i.confidence).toFixed(2) : "—")}</div>
+              <div class="cmd-px">${
+                i.confidence != null ? Number(i.confidence).toFixed(2) : "—"
+              }</div>
             </div>`
             )
             .join("");

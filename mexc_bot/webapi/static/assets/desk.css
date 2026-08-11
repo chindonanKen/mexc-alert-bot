@@ -1368,6 +1368,27 @@ tr.row-flash td {
   100% { background: transparent; }
 }
 .sm { font-size: 0.72rem; }
+.ov-news-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+.ov-news-head .ov-news-h {
+  margin: 0;
+  flex: 1;
+}
+.ov-news-row.on-book {
+  border-left: 2px solid rgba(251, 191, 36, 0.55);
+  padding-left: 0.35rem;
+}
+.ov-news-sev.sev-delist { color: #fb7185; }
+.ov-news-sev.sev-hack,
+.ov-news-sev.sev-scam { color: #fbbf24; }
+.ov-news-sev.sev-closure { color: #f472b6; }
+.ov-news-link { color: var(--sky); text-decoration: none; }
+.ov-news-link:hover { text-decoration: underline; }
 .pos-flag-row .btn:disabled {
   opacity: 0.55;
   cursor: wait;
