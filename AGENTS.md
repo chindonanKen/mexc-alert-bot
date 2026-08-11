@@ -92,7 +92,7 @@ Stack: long-poll Telegram (`pyTelegramBotAPI`), **public** MEXC REST only (no tr
 2. **Feature flags default OFF** in code / `.env.example`. Production enables them in droplet `.env`.
 3. **Additive DB only — never wipe data on deploy/rebuild/desk update.** Migrations may only **add** tables/columns (or verified rebuilds that preserve **every** row). No `DROP` of live tables outside `safe_rebuild_table`. No `rm data/`, no `docker compose down -v` on prod. Full rule: **[docs/DB_SAFETY.md](docs/DB_SAFETY.md)** · helpers: `mexc_bot/db_safety.py` · gates: `make db-safety` / `scripts/pre_deploy_db_guard.sh` (wired into `deploy.sh` + `droplet.sh deploy-prod`).
 4. **Movers must not delete target alerts.** Separate tables + `MoverScanner` (no shared fire/remove path with `PriceMonitor`).
-5. **Prefer `/mw add` / `/mw remove`** over bare `/mw SYMBOL…` (replace-all wipes the whole watchlist).
+5. **Movers list protection:** `/mw add` and bare `/mw COIN` are **additive only**. Full wipe needs `/mw clear confirm`. Full replace needs explicit `/mw replace …` and aborts if any symbol fails resolve. `set_watchlist([])` refuses to empty a non-empty list unless `force_empty=True`. Regression: `tests/test_mw_data_safety.py`.
 6. **Never commit `.env`** or bot tokens. Templates only: `.env.example`, `.env.staging.example`.
 7. **Staging** uses `./data-staging` (and preferably a second BotFather token) — never prod `./data`.
 
