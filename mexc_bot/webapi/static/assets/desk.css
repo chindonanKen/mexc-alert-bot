@@ -1349,6 +1349,25 @@ table.data tr:hover td { background: rgba(56,189,248,.04); }
   max-width: min(22rem, 90vw);
   pointer-events: none;
 }
+.rail-sound {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+  font-size: 0.72rem;
+  color: var(--mute);
+  cursor: pointer;
+  user-select: none;
+}
+.rail-sound input { accent-color: var(--mint); }
+tr.row-flash td {
+  animation: rowFlash 1.2s ease;
+}
+@keyframes rowFlash {
+  0% { background: rgba(251, 191, 36, 0.25); }
+  100% { background: transparent; }
+}
+.sm { font-size: 0.72rem; }
 .pos-flag-row .btn:disabled {
   opacity: 0.55;
   cursor: wait;

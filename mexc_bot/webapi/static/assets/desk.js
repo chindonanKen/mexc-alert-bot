@@ -1364,19 +1364,23 @@
       .join("");
   }
 
-  async function loadMovers() {
-    const q = _moverSetQuery();
-    const d = await api(`/api/watchlist${q}`);
-    _fillMoverSetSelect(d.sets || [], d.active_set_id ?? _activeMoverSetId);
-    // Re-fetch if select changed active id and response was unfiltered
-    if (_activeMoverSetId != null && d.active_set_id == null) {
-      const d2 = await api(`/api/watchlist?set_id=${_activeMoverSetId}`);
-      return _renderMovers(d2);
+  async function loadMovers(opts) {
+    const soft = !!(opts && opts.soft);
+    try {
+      const q = _moverSetQuery();
+      const d = await api(`/api/watchlist${q}`);
+      _fillMoverSetSelect(d.sets || [], d.active_set_id ?? _activeMoverSetId);
+      if (_activeMoverSetId != null && d.active_set_id == null) {
+        const d2 = await api(`/api/watchlist?set_id=${_activeMoverSetId}`);
+        return _renderMovers(d2, soft);
+      }
+      _renderMovers(d, soft);
+    } catch (e) {
+      if (!soft) toast(e.message || String(e));
     }
-    _renderMovers(d);
   }
 
-  function _renderMovers(d) {
+  function _renderMovers(d, soft) {
     const s = d.settings;
     const setMeta = (d.sets || []).find((x) => +x.id === +_activeMoverSetId);
     $("#mwBadge").textContent = s
@@ -1384,7 +1388,7 @@
           (s.lookback_seconds || 0) / 60
         )}m`
       : "movers";
-    if (s) {
+    if (s && !soft) {
       const f = $("#moversForm");
       if (f) {
         f.enabled.checked = !!s.enabled;
@@ -1401,17 +1405,40 @@
         const key = String(w.symbol).toUpperCase().replace(/_/g, "");
         const t = by[key] || by[key.replace("USDT", "") + "USDT"];
         const chg = t ? +t.changePercent : null;
-        return `<tr>
+        const lf = w.last_fire || null;
+        const dump =
+          lf && lf.drop_pct != null
+            ? Number(lf.drop_pct).toFixed(1) + "%"
+            : "—";
+        const band = (lf && lf.velocity_band) || "—";
+        const when = lf && lf.ts ? fmtTime(lf.ts) : "—";
+        const mode = lf
+          ? lf.mode ||
+            (String(lf.source || "").includes("step")
+              ? "step"
+              : String(lf.source || "").includes("peak")
+                ? "peak"
+                : lf.source || "")
+          : "";
+        return `<tr class="${lf && lf.id === state.lastAlarmFlashId ? "row-flash" : ""}">
           <td>${w.market === "futures" ? "F" : "S"}</td>
           <td>${w.symbol}</td>
           <td>${t ? fmtPx(t.price) : "—"}</td>
           <td class="${chg != null && chg < 0 ? "dn" : "up"}">${fmtChg(chg)}</td>
+          <td class="${dump !== "—" && Number(lf.drop_pct) < 0 ? "dn" : ""}">${dump}${
+            mode ? " · " + mode : ""
+          }</td>
+          <td class="mute sm">${when !== "—" ? when + " · " + band : "—"}</td>
           <td><button type="button" class="btn soft sm" data-unwatch="${w.symbol}" data-m="${w.market}" data-set="${w.set_id || _activeMoverSetId || ""}">✕</button></td>
         </tr>`;
       })
       .join("");
     const tableEl = $("#moversTable") || $("#tapeTable");
-    if (tableEl) tableEl.innerHTML = table(["M", "Symbol", "Mark", "24h", ""], rows);
+    if (tableEl)
+      tableEl.innerHTML = table(
+        ["M", "Symbol", "Mark", "24h", "Last fire", "When", ""],
+        rows
+      );
     $$("[data-unwatch]").forEach((b) =>
       b.addEventListener("click", async () => {
         try {
@@ -1427,8 +1454,15 @@
     );
   }
 
-  async function loadTargets() {
-    const d = await api("/api/alerts");
+  async function loadTargets(opts) {
+    const soft = !!(opts && opts.soft);
+    let d;
+    try {
+      d = await api("/api/alerts");
+    } catch (e) {
+      if (!soft) toast(e.message || String(e));
+      return;
+    }
     const rows = (d.alerts || [])
       .map(
         (a) => `<tr>
@@ -3562,11 +3596,13 @@
   });
 
   wireLearningForms();
-  // Soft auto-refresh: health only by default. Positions never full-wipe on timer.
+  // Live desk: soft poll (~10s) + fire alarms (~5s) + health
+  const DESK_SOFT_MS = 10000;
+  const DESK_FIRE_POLL_MS = 5000;
   const HEALTH_MS = 60000;
-  const OVERVIEW_SOFT_MS = 180000; // 3 min overview only
   let softTimer = null;
   let healthTimer = null;
+  let fireTimer = null;
 
   async function refreshHealthOnly() {
     if (document.hidden || state.inCall || state.busy) return;
@@ -3587,37 +3623,161 @@
       }
     }
   }
+  state.lastSeenFireId = Number(localStorage.getItem("desk_last_fire_id") || 0) || 0;
+  state.lastAlarmFlashId = null;
+  state.alarmSoundOn = localStorage.getItem("desk_alarm_sound") === "1";
+  state.alarmAudioArmed = false;
+
+  function initAlarmSoundUi() {
+    const tog = $("#alarmSoundToggle");
+    if (!tog) return;
+    tog.checked = !!state.alarmSoundOn;
+    tog.addEventListener("change", () => {
+      state.alarmSoundOn = !!tog.checked;
+      localStorage.setItem("desk_alarm_sound", state.alarmSoundOn ? "1" : "0");
+      // User gesture arms WebAudio / Audio play
+      state.alarmAudioArmed = true;
+      if (state.alarmSoundOn) {
+        playAlarmSound(true);
+        toast("Alarm sound on");
+      } else {
+        toast("Alarm sound off");
+      }
+    });
+  }
+
+  function playAlarmSound(quietTest) {
+    if (!state.alarmSoundOn && !quietTest) return;
+    if (!state.alarmAudioArmed && !quietTest) return;
+    try {
+      const ctx = window.AudioContext || window.webkitAudioContext;
+      if (!ctx) return;
+      if (!playAlarmSound._ctx) playAlarmSound._ctx = new ctx();
+      const ac = playAlarmSound._ctx;
+      if (ac.state === "suspended") ac.resume();
+      const o = ac.createOscillator();
+      const g = ac.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(880, ac.currentTime);
+      o.frequency.exponentialRampToValueAtTime(1320, ac.currentTime + 0.08);
+      g.gain.setValueAtTime(0.0001, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.12, ac.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.28);
+      o.connect(g);
+      g.connect(ac.destination);
+      o.start();
+      o.stop(ac.currentTime + 0.3);
+    } catch (_) {}
+  }
+
+  function alarmToastLine(a) {
+    const src = String(a.source || "");
+    const sym = a.symbol || "?";
+    const drop = a.drop_pct != null ? Number(a.drop_pct).toFixed(1) + "%" : "";
+    if (src === "target" || src.includes("target")) {
+      return `TARGET ${sym}${a.price != null ? " @ " + fmtPx(a.price) : ""}`;
+    }
+    const mode =
+      a.mode ||
+      (src.includes("step") ? "step" : src.includes("peak") ? "peak" : "mover");
+    return `MOVER ${sym} ${drop} ${mode}`.trim();
+  }
+
+  async function pollDeskAlarms() {
+    if (document.hidden || state.inCall) return;
+    try {
+      const q =
+        state.lastSeenFireId > 0
+          ? `?since_id=${state.lastSeenFireId}&limit=20`
+          : `?limit=15`;
+      const d = await api("/api/desk/alarms" + q);
+      const alarms = d.alarms || [];
+      if (!alarms.length) {
+        if (d.max_id && !state.lastSeenFireId) {
+          state.lastSeenFireId = +d.max_id;
+          localStorage.setItem("desk_last_fire_id", String(state.lastSeenFireId));
+        }
+        return;
+      }
+      // Bootstrap: first poll only seeds cursor (no toast flood)
+      if (!state.lastSeenFireId) {
+        let mx = 0;
+        alarms.forEach((a) => {
+          mx = Math.max(mx, +a.id || 0);
+        });
+        state.lastSeenFireId = mx || +d.max_id || 0;
+        localStorage.setItem("desk_last_fire_id", String(state.lastSeenFireId));
+        return;
+      }
+      const fresh = alarms.filter((a) => +a.id > state.lastSeenFireId);
+      if (!fresh.length) return;
+      let mx = state.lastSeenFireId;
+      fresh.forEach((a) => {
+        mx = Math.max(mx, +a.id || 0);
+      });
+      state.lastSeenFireId = mx;
+      localStorage.setItem("desk_last_fire_id", String(mx));
+      // Newest last for toast order
+      const ordered = fresh.slice().sort((a, b) => (+a.id || 0) - (+b.id || 0));
+      const last = ordered[ordered.length - 1];
+      state.lastAlarmFlashId = last && last.id != null ? +last.id : null;
+      toast(alarmToastLine(last) + (ordered.length > 1 ? ` · +${ordered.length - 1}` : ""));
+      if (state.alarmSoundOn) playAlarmSound();
+      // Soft refresh surfaces that show fires
+      if (state.view === "overview") {
+        try {
+          await loadOverview();
+        } catch (_) {}
+      } else if (state.view === "movers") {
+        try {
+          await loadMovers({ soft: true });
+        } catch (_) {}
+      }
+    } catch (_) {
+      /* quiet — offline / no learning table */
+    }
+  }
 
   async function softRefreshView() {
     if (document.hidden || state.inCall || state.busy) return;
-    // Positions: soft patch only (skip if interacting / unchanged)
     if (state.view === "positions") {
       await loadPositions({ soft: true });
       return;
     }
-    // Overview can soft-reload; other tabs are manual / nav only
-    if (state.view === "overview") {
-      try {
+    try {
+      if (state.view === "overview") {
         await loadOverview();
-      } catch (e) {
-        console.error(e);
+      } else if (state.view === "movers") {
+        await loadMovers({ soft: true });
+      } else if (state.view === "targets") {
+        await loadTargets({ soft: true });
       }
+    } catch (e) {
+      console.error(e);
     }
   }
 
   function scheduleSoftRefresh() {
     if (softTimer) clearInterval(softTimer);
     if (healthTimer) clearInterval(healthTimer);
-    softTimer = setInterval(softRefreshView, OVERVIEW_SOFT_MS);
+    if (fireTimer) clearInterval(fireTimer);
+    softTimer = setInterval(softRefreshView, DESK_SOFT_MS);
     healthTimer = setInterval(refreshHealthOnly, HEALTH_MS);
+    fireTimer = setInterval(pollDeskAlarms, DESK_FIRE_POLL_MS);
   }
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) refreshHealthOnly();
+    if (!document.hidden) {
+      refreshHealthOnly();
+      pollDeskAlarms();
+    }
   });
 
+  initAlarmSoundUi();
   setView("overview");
   updateMicUi();
   refreshAll();
   scheduleSoftRefresh();
+  // Seed fire cursor shortly after load
+  setTimeout(() => pollDeskAlarms(), 800);
 })();

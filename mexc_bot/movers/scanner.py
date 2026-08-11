@@ -95,7 +95,10 @@ class MoverScanner:
         self._last_fire_mono: Dict[Key, float] = {}
         # Wall-clock last fire (for step-mode velocity, not mono clock)
         self._last_fire_wall: Dict[Key, float] = {}
+        # Last successful fire price (same-level / micro-move suppress)
+        self._last_fire_price: Dict[Key, float] = {}
         self._fires_total: int = 0
+        self._fires_suppressed: int = 0
         self._missing_symbol_logs: int = 0
 
         # Auto heat board anti-spam (per user)
@@ -124,9 +127,16 @@ class MoverScanner:
             "tracked_series": self.history.tracked_count(),
             "active_anchors": len(self._anchors),
             "fires_total": self._fires_total,
+            "fires_suppressed": self._fires_suppressed,
             "heat_boards_total": self._heat_boards_total,
             "poll_seconds": max(_MIN_POLL_SECONDS, float(self.settings.mover_poll_seconds)),
             "min_gap_seconds": float(self.settings.mover_cooldown_seconds),
+            "dedupe_price_eps": float(
+                getattr(self.settings, "mover_dedupe_price_eps", 0.002) or 0
+            ),
+            "dedupe_window_seconds": float(
+                getattr(self.settings, "mover_dedupe_window_seconds", 120) or 0
+            ),
             "heat_auto": bool(getattr(self.settings, "mover_heat_auto", True)),
         }
 
@@ -200,6 +210,39 @@ class MoverScanner:
         if gap <= 0:
             return False
         return (time.monotonic() - last) < gap
+
+    def _same_price_dedupe_blocks(self, key: Key, price_now: float, now: float) -> bool:
+        """Suppress micro-moves / same-level re-alerts within dedupe window.
+
+        True cascade (full threshold new low beyond eps) is not blocked here —
+        step math still requires a full threshold from the anchor; this only
+        stops near-identical prices that still trip float/book noise.
+        """
+        last_px = self._last_fire_price.get(key)
+        last_wall = self._last_fire_wall.get(key)
+        if last_px is None or last_px <= 0 or last_wall is None:
+            return False
+        try:
+            eps = float(getattr(self.settings, "mover_dedupe_price_eps", 0.002) or 0)
+        except (TypeError, ValueError):
+            eps = 0.002
+        try:
+            window = float(
+                getattr(self.settings, "mover_dedupe_window_seconds", 120) or 0
+            )
+        except (TypeError, ValueError):
+            window = 120.0
+        if eps <= 0:
+            return False
+        # Outside window: allow (true re-arms / new waves)
+        if window > 0 and (now - float(last_wall)) > window:
+            return False
+        # Within window (or window=0 always): block if still within eps of last fire
+        try:
+            rel = abs(float(price_now) - float(last_px)) / float(last_px)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return False
+        return rel < eps
 
     def _format_lookback(self, lookback: float) -> str:
         if lookback < 60:
@@ -472,6 +515,8 @@ class MoverScanner:
                             price_now,
                         )
                         self._anchors.pop(key, None)
+                        # New wave allowed: clear same-price lock for this key
+                        self._last_fire_price.pop(key, None)
                         continue
 
                 fire_mode: Optional[str] = None  # "peak" | "step"
@@ -507,6 +552,20 @@ class MoverScanner:
                         peak_ts = now - 60.0  # fallback: mild grind-ish window
 
                 if self._min_gap_blocks(key):
+                    continue
+                if self._same_price_dedupe_blocks(key, price_now, now):
+                    self._fires_suppressed += 1
+                    logger.info(
+                        "MOVER SUPPRESS same-price user=%s set=%s %s:%s mode=%s "
+                        "now=%s last=%s",
+                        user_id,
+                        set_id,
+                        market,
+                        symbol,
+                        fire_mode,
+                        price_now,
+                        self._last_fire_price.get(key),
+                    )
                     continue
 
                 window = self._format_lookback(lookback)
@@ -622,6 +681,7 @@ class MoverScanner:
                     self._anchors[key] = price_now
                     self._last_fire_mono[key] = time.monotonic()
                     self._last_fire_wall[key] = now
+                    self._last_fire_price[key] = float(price_now)
                     self._fires_total += 1
                     fired += 1
                     logger.info(

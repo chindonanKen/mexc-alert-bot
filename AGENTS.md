@@ -157,6 +157,8 @@ bot.py  ────────────────────────
 | `MOVER_THRESHOLD_PERCENT` | `5` | Default downside % from **high within window** |
 | `MOVER_POLL_SECONDS` | `5` | Scanner cadence (code floor **2s**) |
 | `MOVER_COOLDOWN_SECONDS` | `45` | **Min-gap** between fires only — **not** a long mute. Prod must not leave `1800` if cascade matters |
+| `MOVER_DEDUPE_PRICE_EPS` | `0.002` | Suppress re-fire if price within this fraction of last fire (anti same-price spam) |
+| `MOVER_DEDUPE_WINDOW_SECONDS` | `120` | Apply price-eps suppress only within this window after last fire |
 | `MOVER_RECOVERY_PERCENT` | `3` | Bounce above last-fire **anchor** clears cascade → peak mode again |
 | `MOVER_MARKETS` | `both` | Idle fallback; live scans follow watchlist row markets |
 

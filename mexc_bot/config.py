@@ -68,6 +68,10 @@ class Settings:
     mover_cooldown_seconds: int
     # Bounce above last-fire anchor by this % clears cascade state → peak mode again
     mover_recovery_percent: float
+    # Same-price / micro-move suppress (fraction, e.g. 0.002 = 0.2%)
+    mover_dedupe_price_eps: float
+    # Within this window after a fire, suppress if price still within eps of last fire
+    mover_dedupe_window_seconds: float
     mover_markets: str  # "futures" | "spot" | "both"
 
     # Mover enrichments (scanner-owned; never touch target alerts)
@@ -180,6 +184,10 @@ def load_settings() -> Settings:
         # Default 45s min-gap (was 1800s mute — that blocked cascade dumps).
         mover_cooldown_seconds=int(os.getenv("MOVER_COOLDOWN_SECONDS", "45")),
         mover_recovery_percent=float(os.getenv("MOVER_RECOVERY_PERCENT", "3")),
+        mover_dedupe_price_eps=float(os.getenv("MOVER_DEDUPE_PRICE_EPS", "0.002")),
+        mover_dedupe_window_seconds=float(
+            os.getenv("MOVER_DEDUPE_WINDOW_SECONDS", "120")
+        ),
         mover_markets=mover_markets,
         # Enrichments: velocity/volume/auto-heat ON by default when movers are on;
         # klines OFF until staging validates (API + rate limits).

@@ -20,7 +20,8 @@ test:
 	$$PY tests/test_v1_complete.py && \
 	$$PY tests/test_isolated_agent.py && \
 	$$PY tests/test_webapi.py && \
-	$$PY tests/test_audio_convert.py
+	$$PY tests/test_audio_convert.py && \
+	$$PY tests/test_mover_dedupe.py
 
 verify:
 	bash scripts/verify_build.sh

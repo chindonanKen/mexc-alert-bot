@@ -681,6 +681,45 @@ def create_app() -> FastAPI:
                 s = r["symbol"]
                 symbols.append(s.replace("_", "") if "_" in s else s)
             tickers = watchlist_tickers(symbols[:40])
+            # Last fire per symbol (learning_events) for live desk columns
+            last_fires: Dict[str, dict] = {}
+            if uid:
+                try:
+                    fl = db.fetch_all(
+                        """
+                        SELECT id, symbol, market, source, ts, price, ref_price,
+                               drop_pct, velocity_band, mode
+                        FROM learning_events
+                        WHERE user_id = ?
+                          AND source IN ('mover_peak','mover_step','target')
+                        ORDER BY ts DESC LIMIT 80
+                        """,
+                        (int(uid),),
+                    )
+                    for e in fl:
+                        k = str(e.get("symbol") or "").upper()
+                        if k and k not in last_fires:
+                            last_fires[k] = e
+                            # also compact key without underscore
+                            ck = k.replace("_", "")
+                            if ck not in last_fires:
+                                last_fires[ck] = e
+                except Exception:
+                    last_fires = {}
+            for r in rows:
+                sym = str(r.get("symbol") or "").upper()
+                compact = sym.replace("_", "")
+                lf = last_fires.get(sym) or last_fires.get(compact)
+                if lf:
+                    r["last_fire"] = {
+                        "id": lf.get("id"),
+                        "source": lf.get("source"),
+                        "mode": lf.get("mode"),
+                        "ts": lf.get("ts"),
+                        "price": lf.get("price"),
+                        "drop_pct": lf.get("drop_pct"),
+                        "velocity_band": lf.get("velocity_band"),
+                    }
             settings = None
             if uid:
                 if set_id is not None:
@@ -711,6 +750,65 @@ def create_app() -> FastAPI:
                 "settings": None,
                 "sets": [],
             }
+
+    @app.get("/api/desk/alarms")
+    def desk_alarms(
+        since_id: int = Query(0, ge=0),
+        since_ts: float = Query(0, ge=0),
+        limit: int = Query(30, ge=1, le=100),
+        _: bool = Depends(require_auth),
+    ):
+        """Slim fire feed for desk toasts / overview (mover + target)."""
+        uid = db.default_user_id()
+        if not uid:
+            return {"alarms": [], "max_id": 0}
+        try:
+            if since_id > 0:
+                rows = db.fetch_all(
+                    """
+                    SELECT id, symbol, market, source, ts, price, ref_price,
+                           drop_pct, velocity_band, mode
+                    FROM learning_events
+                    WHERE user_id = ? AND id > ?
+                      AND source IN ('mover_peak','mover_step','target')
+                    ORDER BY id ASC LIMIT ?
+                    """,
+                    (int(uid), int(since_id), int(limit)),
+                )
+            elif since_ts > 0:
+                rows = db.fetch_all(
+                    """
+                    SELECT id, symbol, market, source, ts, price, ref_price,
+                           drop_pct, velocity_band, mode
+                    FROM learning_events
+                    WHERE user_id = ? AND ts > ?
+                      AND source IN ('mover_peak','mover_step','target')
+                    ORDER BY ts ASC LIMIT ?
+                    """,
+                    (int(uid), float(since_ts), int(limit)),
+                )
+            else:
+                rows = db.fetch_all(
+                    """
+                    SELECT id, symbol, market, source, ts, price, ref_price,
+                           drop_pct, velocity_band, mode
+                    FROM learning_events
+                    WHERE user_id = ?
+                      AND source IN ('mover_peak','mover_step','target')
+                    ORDER BY ts DESC LIMIT ?
+                    """,
+                    (int(uid), int(limit)),
+                )
+                rows = list(reversed(rows))
+            max_id = 0
+            for r in rows:
+                try:
+                    max_id = max(max_id, int(r.get("id") or 0))
+                except (TypeError, ValueError):
+                    pass
+            return {"user_id": uid, "alarms": rows, "max_id": max_id}
+        except Exception as e:
+            raise HTTPException(400, str(e))
 
     @app.post("/api/watchlist")
     def post_watch(body: WatchBody, _: bool = Depends(require_auth)):
