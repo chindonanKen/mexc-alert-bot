@@ -185,6 +185,14 @@ def _format_mw_with_heat(
     return lines
 
 
+def _strip_mw_token(raw: str) -> str:
+    """Strip whitespace and matching quotes from a Telegram token."""
+    s = (raw or "").strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"', "`"):
+        s = s[1:-1].strip()
+    return s
+
+
 def _parse_mw_token(raw: str, default_market: str = "futures") -> tuple[str, str] | None:
     """
     Parse one watchlist token into (symbol_raw, market).
@@ -194,7 +202,7 @@ def _parse_mw_token(raw: str, default_market: str = "futures") -> tuple[str, str
       s:SIREN  SIREN:s  SIREN:spot
       f:BTC    BTC:f    BTC:futures
     """
-    s = (raw or "").strip()
+    s = _strip_mw_token(raw)
     if not s:
         return None
     low = s.lower()
@@ -217,10 +225,37 @@ def _parse_mw_token(raw: str, default_market: str = "futures") -> tuple[str, str
         elif r in ("f", "fut", "futures", "perp"):
             market, body = "futures", left
 
-    body = body.strip()
+    body = _strip_mw_token(body)
     if not body:
         return None
     return body, market
+
+
+# Subcommands that mutate / inspect movers watchlist (not coin symbols)
+_MW_MUTATING_SUBS = frozenset(
+    {
+        "add",
+        "+",
+        "append",
+        "remove",
+        "rm",
+        "r",
+        "del",
+        "delete",
+        "-",
+        "clear",
+        "reset",
+        "none",
+        "list",
+        "show",
+        "ls",
+        "help",
+        "?",
+        "replace",
+        "set",
+        "only",
+    }
+)
 
 
 def _mw_resolve_symbol(
@@ -1259,7 +1294,9 @@ def create_bot(
         @bot.message_handler(commands=["mw", "moverwatch", "watchlist"])
         def cmd_mover_watch(message):
             user_id = message.from_user.id
-            args = message.text.split()[1:]
+            # Drop bot @mention if present on command only; args stay intact
+            raw_parts = (message.text or "").split()
+            args = raw_parts[1:] if len(raw_parts) > 1 else []
 
             def show_list(header: str = "") -> None:
                 s = mover_store.get_settings(
@@ -1282,21 +1319,77 @@ def create_bot(
                 )
                 _reply(message, "\n".join(lines))
 
+            def do_add(rest: list, default_market: str = "futures") -> None:
+                """Additive only — never deletes existing coins."""
+                if rest and rest[0].lower() in ("f", "fut", "futures", "perp"):
+                    default_market = "futures"
+                    rest = rest[1:]
+                elif rest and rest[0].lower() in ("s", "spot"):
+                    default_market = "spot"
+                    rest = rest[1:]
+                if not rest:
+                    _reply(
+                        message,
+                        "Usage:\n"
+                        "/mw add f BTC ETH\n"
+                        "/mw add s SIREN\n"
+                        "/mw add f:BTC s:SIREN\n"
+                        "(add never wipes your list)",
+                    )
+                    return
+                added: list[str] = []
+                failed: list[str] = []
+                for raw in rest:
+                    parsed = _parse_mw_token(raw, default_market=default_market)
+                    if not parsed:
+                        failed.append(raw)
+                        continue
+                    body, market = parsed
+                    sym = _mw_resolve_symbol(body, market, futures_provider)
+                    if not sym:
+                        failed.append(f"{raw}({market})")
+                        continue
+                    mover_store.add_watchlist(user_id, sym, market=market)
+                    added.append(f"{sym} [{_market_tag(market)}]")
+                header = f"Added {len(added)}: {', '.join(added) if added else '(none)'}"
+                if failed:
+                    header += f"\nCould not resolve: {', '.join(failed)}"
+                    header += "\n(List unchanged for failed names — nothing deleted)"
+                show_list(header)
+
             if not args:
                 show_list(
                     "Watchlist help:\n"
-                    "/mw add f BTC ETH     — futures\n"
-                    "/mw add s SIREN       — spot (different book)\n"
+                    "/mw add f BTC ETH     — add futures (safe)\n"
+                    "/mw add s SIREN       — add spot\n"
                     "/mw add f:BTC s:SIREN — mix\n"
-                    "/mw remove SIREN\n"
-                    "/mw clear\n"
-                    "(Prefer add/remove — they do not wipe the other market)\n"
+                    "/mw remove SIREN      — remove one\n"
+                    "/mw clear confirm     — wipe list (requires confirm)\n"
+                    "/mw replace f A B     — full replace (explicit only)\n"
+                    "Bare /mw COIN is ADD, not replace — lists are protected.\n"
                 )
                 return
 
-            sub = args[0].lower()
+            sub = args[0].lower().strip("'\"`")
+
+            if sub in ("help", "?"):
+                show_list(
+                    "Safe: /mw add …  /mw remove …\n"
+                    "Destructive: /mw clear confirm  |  /mw replace f A B\n"
+                )
+                return
 
             if sub in ("clear", "reset", "none"):
+                rest = [a.lower() for a in args[1:]]
+                if "confirm" not in rest:
+                    n = len(mover_store.get_watchlist(user_id))
+                    _reply(
+                        message,
+                        f"Watchlist has {n} coin(s). "
+                        f"To wipe ALL: /mw clear confirm\n"
+                        f"(refusing without confirm — data safety)",
+                    )
+                    return
                 n = mover_store.clear_watchlist(user_id)
                 _reply(message, f"Watchlist cleared ({n} removed).")
                 return
@@ -1323,7 +1416,7 @@ def create_bot(
                 to_remove: list[str] = []
                 for raw in rest:
                     parsed = _parse_mw_token(raw, default_market="futures")
-                    body = parsed[0] if parsed else raw
+                    body = parsed[0] if parsed else _strip_mw_token(raw)
                     to_remove.append(body.strip().upper())
                     to_remove.append(normalize_futures_symbol(body))
                     to_remove.append(normalize_spot_symbol(body))
@@ -1334,9 +1427,6 @@ def create_bot(
                         live = futures_provider.resolve_symbol(body)  # type: ignore[attr-defined]
                         if live:
                             to_remove.append(str(live).upper())
-                    if parsed and parsed[1] == "spot" and market_filter is None:
-                        # token was s:SIREN — prefer spot-only remove for that token
-                        pass
                 seen: set[str] = set()
                 uniq = []
                 for s in to_remove:
@@ -1344,7 +1434,6 @@ def create_bot(
                         seen.add(s)
                         uniq.append(s)
 
-                # If any token explicitly marked spot/futures, remove with that filter per token
                 n = 0
                 for raw in rest:
                     parsed = _parse_mw_token(raw, default_market=market_filter or "futures")
@@ -1359,17 +1448,24 @@ def create_bot(
                     res = _mw_resolve_symbol(body, mkt, futures_provider)
                     if res:
                         cands.append(res)
-                    # Also try other market resolve for untagged global remove
-                    filt = market_filter if market_filter else (mkt if raw.lower().startswith(("s:", "f:", "spot:", "fut")) or ":" in raw else None)
+                    filt = market_filter if market_filter else (
+                        mkt
+                        if raw.lower().startswith(("s:", "f:", "spot:", "fut")) or ":" in raw
+                        else None
+                    )
                     n += mover_store.remove_from_watchlist(user_id, cands, market=filt)
 
                 if n == 0:
-                    # fallback bulk
                     n = mover_store.remove_from_watchlist(user_id, uniq, market=market_filter)
                 show_list(f"Removed {n} row(s).")
                 return
 
             if sub in ("add", "+", "append"):
+                do_add(args[1:], default_market="futures")
+                return
+
+            # Explicit full replace only — never the default for bare symbols
+            if sub in ("replace", "set", "only"):
                 rest = args[1:]
                 default_market = "futures"
                 if rest and rest[0].lower() in ("f", "fut", "futures", "perp"):
@@ -1381,14 +1477,13 @@ def create_bot(
                 if not rest:
                     _reply(
                         message,
-                        "Usage:\n"
-                        "/mw add f BTC ETH\n"
-                        "/mw add s SIREN\n"
-                        "/mw add f:BTC s:SIREN",
+                        "Full replace is destructive.\n"
+                        "Usage: /mw replace f BTC ETH SOL\n"
+                        "Prefer: /mw add f NEWCOIN (keeps existing list)",
                     )
                     return
-                added: list[str] = []
-                failed: list[str] = []
+                items = []
+                failed = []
                 for raw in rest:
                     parsed = _parse_mw_token(raw, default_market=default_market)
                     if not parsed:
@@ -1399,48 +1494,45 @@ def create_bot(
                     if not sym:
                         failed.append(f"{raw}({market})")
                         continue
-                    mover_store.add_watchlist(user_id, sym, market=market)
-                    added.append(f"{sym} [{_market_tag(market)}]")
-                header = f"Added {len(added)}: {', '.join(added) if added else '(none)'}"
+                    items.append({"symbol": sym, "market": market})
+                if not items:
+                    _reply(
+                        message,
+                        "Replace aborted — no symbols resolved. "
+                        f"Your list was NOT deleted.\nCould not resolve: {', '.join(failed) or '(none)'}",
+                    )
+                    return
                 if failed:
-                    header += f"\nCould not resolve: {', '.join(failed)}"
-                show_list(header)
+                    _reply(
+                        message,
+                        "Replace aborted — some symbols failed resolve; "
+                        "refusing partial wipe.\n"
+                        f"Failed: {', '.join(failed)}\n"
+                        "Fix names and retry, or /mw add for safe append.",
+                    )
+                    return
+                try:
+                    n = mover_store.set_watchlist(user_id, items)
+                except ValueError as e:
+                    _reply(message, f"Replace blocked: {e}")
+                    return
+                show_list(
+                    f"⚠️ Replaced entire watchlist ({n} rows). "
+                    f"Next time prefer /mw add."
+                )
                 return
 
-            # Bare symbols: REPLACE entire list (destructive) — prefer /mw add
-            default_market = "futures"
-            if args[0].lower() in ("f", "fut", "futures", "perp"):
-                default_market = "futures"
-                args = args[1:]
-            elif args[0].lower() in ("s", "spot"):
-                default_market = "spot"
-                args = args[1:]
-
-            if not args:
-                _reply(message, "Example: /mw add f BTC   or   /mw add s SIREN")
+            # Unknown first token (e.g. /mw BTC or /mw f COIN): ADD only — never wipe
+            if sub not in _MW_MUTATING_SUBS:
+                do_add(args, default_market="futures")
                 return
 
-            items = []
-            failed = []
-            for raw in args:
-                parsed = _parse_mw_token(raw, default_market=default_market)
-                if not parsed:
-                    failed.append(raw)
-                    continue
-                body, market = parsed
-                sym = _mw_resolve_symbol(body, market, futures_provider)
-                if not sym:
-                    failed.append(f"{raw}({market})")
-                    continue
-                items.append({"symbol": sym, "market": market})
-            n = mover_store.set_watchlist(user_id, items)
-            header = (
-                f"⚠️ Replaced entire watchlist ({n} rows). "
-                f"Tip: use /mw add so you do not wipe the other market."
+            _reply(
+                message,
+                "Unknown /mw command. Safe options:\n"
+                "/mw add f BTC\n/mw remove SIREN\n/mw list\n"
+                "/mw clear confirm  (wipe)\n/mw replace f A B  (full replace)",
             )
-            if failed:
-                header += f"\nCould not resolve: {', '.join(failed)}"
-            show_list(header)
 
     # Plain-language assistant (learning on) — before unknown-/ catch-all
     @bot.message_handler(

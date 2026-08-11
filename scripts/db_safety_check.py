@@ -236,6 +236,31 @@ def main() -> int:
             return 1
         print("Live DB check OK")
 
+    # /mw data safety: bare replace must not be default; empty set_watchlist must refuse
+    bot_py = ROOT / "mexc_bot" / "bot.py"
+    if bot_py.is_file():
+        btxt = bot_py.read_text(encoding="utf-8", errors="replace")
+        if 'commands=["mw"' in btxt or "commands=['mw'" in btxt:
+            if "clear confirm" not in btxt:
+                problems.append("bot.py /mw: clear must require 'confirm' (data safety)")
+            if "Replace aborted" not in btxt and "replace aborted" not in btxt.lower():
+                problems.append("bot.py /mw: replace must abort when resolve fails")
+            if "List unchanged for failed names" not in btxt:
+                problems.append("bot.py /mw: add failures must not imply wipe")
+        stor = (ROOT / "mexc_bot" / "movers" / "storage.py").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        if "force_empty" not in stor or "refusing to replace watchlist with empty" not in stor:
+            problems.append(
+                "movers/storage.py: set_watchlist must refuse empty replace without force_empty"
+            )
+        if problems:
+            # re-print only new ones if static already passed
+            print("FAIL (mw data safety):")
+            for p in problems:
+                print(f"  - {p}")
+            return 1
+
     print("=== db_safety_check PASSED ===")
     return 0
 

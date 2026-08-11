@@ -731,9 +731,18 @@ class MoverStore:
             ]
 
     def set_watchlist(
-        self, user_id: int, items: List[dict], set_id: Optional[int] = None
+        self,
+        user_id: int,
+        items: List[dict],
+        set_id: Optional[int] = None,
+        *,
+        force_empty: bool = False,
     ) -> int:
-        """Replace watchlist for one set (default set if set_id omitted)."""
+        """Replace watchlist for one set (default set if set_id omitted).
+
+        Hard safety: refuses to wipe a non-empty list with an empty replacement
+        unless ``force_empty=True`` (only for intentional clear paths).
+        """
         with self._lock:
             conn = self._get_conn()
             sid = set_id or self._ensure_default_set(conn, user_id)
@@ -743,12 +752,29 @@ class MoverStore:
             ).fetchone()
             if not own:
                 raise ValueError("Set not found")
+            before = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS c FROM mover_watchlist "
+                    "WHERE user_id = ? AND set_id = ?",
+                    (user_id, sid),
+                ).fetchone()[0]
+            )
+            clean_items = [
+                it
+                for it in (items or [])
+                if it and str(it.get("symbol") or "").strip()
+            ]
+            if before > 0 and len(clean_items) == 0 and not force_empty:
+                raise ValueError(
+                    f"refusing to replace watchlist with empty list "
+                    f"(would delete {before} coin(s)); use clear confirm or /mw add"
+                )
             with conn:
                 conn.execute(
                     "DELETE FROM mover_watchlist WHERE user_id = ? AND set_id = ?",
                     (user_id, sid),
                 )
-                for it in items:
+                for it in clean_items:
                     conn.execute(
                         "INSERT OR IGNORE INTO mover_watchlist "
                         "(user_id, symbol, market, set_id) VALUES (?, ?, ?, ?)",
@@ -759,7 +785,16 @@ class MoverStore:
                             sid,
                         ),
                     )
-            return len(self.get_watchlist(user_id, set_id=sid))
+            after = len(self.get_watchlist(user_id, set_id=sid))
+            if before > 0 and after == 0 and not force_empty:
+                # Should be unreachable due to pre-check; belt-and-suspenders log
+                logger.error(
+                    "set_watchlist unexpected empty after replace user=%s set=%s before=%s",
+                    user_id,
+                    sid,
+                    before,
+                )
+            return after
 
     def add_watchlist(
         self,
