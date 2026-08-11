@@ -1,4 +1,4 @@
-.PHONY: run install test docker-build docker-up docker-down docker-logs docker-staging clean desk-qa
+.PHONY: run install test docker-build docker-up docker-down docker-logs docker-staging clean desk-qa db-safety pre-deploy
 
 install:
 	python -m venv .venv
@@ -21,10 +21,18 @@ test:
 	$$PY tests/test_isolated_agent.py && \
 	$$PY tests/test_webapi.py && \
 	$$PY tests/test_audio_convert.py && \
-	$$PY tests/test_mover_dedupe.py
+	$$PY tests/test_mover_dedupe.py && \
+	$$PY tests/test_db_safety.py
 
 verify:
 	bash scripts/verify_build.sh
+
+# Hard rule: never wipe SQLite on deploy/rebuild/desk update (see docs/DB_SAFETY.md)
+db-safety:
+	python3 scripts/db_safety_check.py
+
+pre-deploy:
+	bash scripts/pre_deploy_db_guard.sh
 
 # Mandatory after AD Desk edits: multi-agent panel + mark pass (see AGENTS.md)
 desk-qa:

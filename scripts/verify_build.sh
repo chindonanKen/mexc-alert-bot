@@ -49,6 +49,10 @@ fi
 echo "Safety greps OK"
 echo
 
+echo "=== 3b. DB durability guard (additive schema only) ==="
+$PY scripts/db_safety_check.py
+echo
+
 echo "=== 4. Flags default OFF in .env.example ==="
 for flag in FEATURE_LEARNING FEATURE_NEWS_MONITOR FEATURE_VOICE FEATURE_FUTURES_ALERTS FEATURE_MOVER_SCANNER FEATURE_ISOLATED_DUMP_AGENT FEATURE_MEXC_PRIVATE_READ; do
   if ! grep -q "^${flag}=false" .env.example; then

@@ -14,6 +14,8 @@ from pathlib import Path
 from threading import RLock
 from typing import List, Optional
 
+from mexc_bot.db_safety import SchemaSafetyError, ensure_column, safe_rebuild_table
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_SET_NAME = "Default"
@@ -88,15 +90,8 @@ class MoverStore:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_mover_sets_user ON mover_sets (user_id)"
         )
-        # Additive set_id on watchlist (nullable until backfill)
-        cols = {
-            r[1]
-            for r in conn.execute("PRAGMA table_info(mover_watchlist)").fetchall()
-        }
-        if "set_id" not in cols:
-            conn.execute(
-                "ALTER TABLE mover_watchlist ADD COLUMN set_id INTEGER"
-            )
+        # Additive set_id on watchlist (nullable until backfill) — never drop data
+        ensure_column(conn, "mover_watchlist", "set_id", "INTEGER")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_mover_watch_set ON mover_watchlist (set_id)"
         )
@@ -166,9 +161,8 @@ class MoverStore:
     def _migrate_watchlist_pk(self, conn: sqlite3.Connection) -> None:
         """Allow the same symbol in multiple sets: PK (set_id, symbol, market).
 
-        Transactional rebuild: never DROP the live table unless the copy
-        succeeded with at least as many rows as the source (avoids empty wipe
-        if bot/desk race mid-migration).
+        Uses :func:`mexc_bot.db_safety.safe_rebuild_table` — never drops the live
+        table unless every source row was copied (abort on any row loss).
         """
         row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='mover_watchlist'"
@@ -199,60 +193,45 @@ class MoverStore:
             return
         if "PRIMARY KEY (set_id" in compact and "symbol, market)" in compact:
             return
-        try:
-            before = int(
-                conn.execute("SELECT COUNT(*) AS c FROM mover_watchlist").fetchone()["c"]
-            )
-        except Exception:
-            before = 0
-        # Rebuild under temp name; only swap if copy ok
-        conn.execute("DROP TABLE IF EXISTS mover_watchlist_new")
-        conn.execute(
-            """
-            CREATE TABLE mover_watchlist_new (
-                user_id INTEGER NOT NULL,
-                set_id INTEGER NOT NULL,
-                symbol TEXT NOT NULL,
-                market TEXT NOT NULL DEFAULT 'futures',
-                PRIMARY KEY (set_id, symbol, market)
-            )
-            """
-        )
         self._migrate_legacy_to_sets(conn)
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO mover_watchlist_new (user_id, set_id, symbol, market)
-            SELECT user_id, COALESCE(set_id, (
-                SELECT id FROM mover_sets ms
-                WHERE ms.user_id = mover_watchlist.user_id
-                ORDER BY sort_order ASC, id ASC LIMIT 1
-            )), symbol, market FROM mover_watchlist
-            WHERE symbol IS NOT NULL AND symbol != ''
-            """
-        )
-        after = int(
-            conn.execute("SELECT COUNT(*) AS c FROM mover_watchlist_new").fetchone()["c"]
-        )
-        if before > 0 and after == 0:
-            logger.error(
-                "mover_watchlist PK migration aborted: would wipe %s rows", before
+
+        def _indexes(c: sqlite3.Connection) -> None:
+            c.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mover_watch_user ON mover_watchlist (user_id)"
             )
-            conn.execute("DROP TABLE IF EXISTS mover_watchlist_new")
+            c.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mover_watch_set ON mover_watchlist (set_id)"
+            )
+
+        try:
+            safe_rebuild_table(
+                conn,
+                table="mover_watchlist",
+                create_new_ddl="""
+                CREATE TABLE mover_watchlist_new (
+                    user_id INTEGER NOT NULL,
+                    set_id INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    market TEXT NOT NULL DEFAULT 'futures',
+                    PRIMARY KEY (set_id, symbol, market)
+                )
+                """,
+                # INSERT OR IGNORE only collapses true PK duplicates; count must still
+                # satisfy after >= before or rebuild aborts (no silent wipe).
+                copy_sql="""
+                INSERT OR IGNORE INTO mover_watchlist_new (user_id, set_id, symbol, market)
+                SELECT user_id, COALESCE(set_id, (
+                    SELECT id FROM mover_sets ms
+                    WHERE ms.user_id = mover_watchlist.user_id
+                    ORDER BY sort_order ASC, id ASC LIMIT 1
+                )), symbol, market FROM mover_watchlist
+                WHERE symbol IS NOT NULL AND symbol != ''
+                """,
+                after_swap=_indexes,
+            )
+        except SchemaSafetyError as e:
+            logger.error("mover_watchlist PK migration aborted (data preserved): %s", e)
             return
-        if before > 0 and after < before:
-            logger.warning(
-                "mover_watchlist PK migration: copied %s/%s rows (some dropped)",
-                after,
-                before,
-            )
-        conn.execute("DROP TABLE mover_watchlist")
-        conn.execute("ALTER TABLE mover_watchlist_new RENAME TO mover_watchlist")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_mover_watch_user ON mover_watchlist (user_id)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_mover_watch_set ON mover_watchlist (set_id)"
-        )
 
     def _migrate_legacy_to_sets(self, conn: sqlite3.Connection) -> None:
         """Ensure every user with settings/watchlist has a Default set + set_id backfill."""

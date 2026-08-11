@@ -248,12 +248,10 @@ class EventStore:
     def _ensure_column(
         conn: sqlite3.Connection, table: str, column: str, col_type: str
     ) -> None:
-        cols = {
-            str(r[1])
-            for r in conn.execute(f"PRAGMA table_info({table})").fetchall()
-        }
-        if column not in cols:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+        """Additive column only — delegates to db_safety (never drops/renames)."""
+        from mexc_bot.db_safety import ensure_column
+
+        ensure_column(conn, table, column, col_type)
 
     def log_event(
         self,

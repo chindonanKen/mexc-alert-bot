@@ -63,13 +63,14 @@ case "$CMD" in
     ;;
   deploy-prod)
     echo "About to rebuild PRODUCTION on $HOST ($REPO)."
+    echo "DB rule: no wipe — pre_deploy_db_guard runs on the droplet first."
     echo "Type yes to continue:"
     read -r ans
     [[ "$ans" == "yes" ]] || { echo "Aborted."; exit 1; }
-    remote "set -e; cd $REPO; git pull --ff-only origin main; docker compose up -d --build mexc-bot; docker logs --tail 40 mexc-alert-bot"
+    remote "set -e; cd $REPO; bash scripts/pre_deploy_db_guard.sh --strict; git pull --ff-only origin main; bash scripts/pre_deploy_db_guard.sh --strict; docker compose up -d --build mexc-bot; docker logs --tail 40 mexc-alert-bot"
     ;;
   verify)
-    remote "set -e; cd $REPO; git pull --ff-only origin main 2>/dev/null || true; bash scripts/verify_build.sh"
+    remote "set -e; cd $REPO; git pull --ff-only origin main 2>/dev/null || true; bash scripts/pre_deploy_db_guard.sh; bash scripts/verify_build.sh"
     ;;
   *)
     echo "Unknown command: $CMD"

@@ -9,7 +9,8 @@ services:
     # Host network so MEXC/CEX announcement fetches aren't 403'd on Docker bridge NAT
     network_mode: host
     volumes:
-      # Persist alerts across container restarts/updates
+      # DURABILITY: bind-mount host ./data — rebuild/restart never erase SQLite.
+      # Never run `docker compose down -v` on prod (would drop named volumes; keep data/ on host).
       - ./data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import os,sys; sys.exit(0 if os.path.exists('/app/data/alerts.db') else 1)"]

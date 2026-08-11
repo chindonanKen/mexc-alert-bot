@@ -64,7 +64,7 @@ Full vision: **[docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md)** · strategy: *
 | **Learn before recommend** | Teach soak first; recs / paper later; **no silent live risk** |
 | **Alarm bot stable** | Prefer event log / shared DB hooks over rewriting Telegram |
 | **Future desk push** | Design notify so alarms can leave Telegram later |
-| **Security** | Never commit secrets; additive DB; live defaults OFF; voice auth required |
+| **Security** | Never commit secrets; **never wipe DB on deploy/rebuild** ([DB_SAFETY](docs/DB_SAFETY.md)); live defaults OFF; voice auth required |
 
 **Learning loop:** **signal** (fires) + **trade** (exchange positions/layers) + **teach** (lessons bound to trade context) — desk primary; see **[Learning environment](#learning-environment-feedback--coach)**.
 
@@ -90,11 +90,23 @@ Stack: long-poll Telegram (`pyTelegramBotAPI`), **public** MEXC REST only (no tr
 
 1. **Do not break existing spot target alerts.** Live production alert sets are large.
 2. **Feature flags default OFF** in code / `.env.example`. Production enables them in droplet `.env`.
-3. **Additive DB only** — never rewrite or drop `alerts` rows in migrations.
+3. **Additive DB only — never wipe data on deploy/rebuild/desk update.** Migrations may only **add** tables/columns (or verified rebuilds that preserve **every** row). No `DROP` of live tables outside `safe_rebuild_table`. No `rm data/`, no `docker compose down -v` on prod. Full rule: **[docs/DB_SAFETY.md](docs/DB_SAFETY.md)** · helpers: `mexc_bot/db_safety.py` · gates: `make db-safety` / `scripts/pre_deploy_db_guard.sh` (wired into `deploy.sh` + `droplet.sh deploy-prod`).
 4. **Movers must not delete target alerts.** Separate tables + `MoverScanner` (no shared fire/remove path with `PriceMonitor`).
 5. **Prefer `/mw add` / `/mw remove`** over bare `/mw SYMBOL…` (replace-all wipes the whole watchlist).
 6. **Never commit `.env`** or bot tokens. Templates only: `.env.example`, `.env.staging.example`.
 7. **Staging** uses `./data-staging` (and preferably a second BotFather token) — never prod `./data`.
+
+### Database durability (owner 2026-08-11)
+
+| Do | Do not |
+|----|--------|
+| `CREATE TABLE IF NOT EXISTS` / `ensure_column` | Wipe or recreate `alerts.db` on start |
+| `safe_rebuild_table` (abort if row count would shrink) | Hand-rolled `DROP TABLE` + empty recreate |
+| Bind-mount `./data:/app/data` (already in compose) | `compose down -v`, delete host `./data` |
+| Run `pre_deploy_db_guard` before prod rebuild | Deploy when static scan fails or watchlist empty while movers ON |
+| User-facing single-row deletes (alert/lesson/mw) only in APIs | `DELETE FROM` inside `_migrate*` / `_init_db` bulk wipes |
+
+Incident that forced this rule: empty `mover_watchlist` after an unsafe PK migration → silent miss of real dumps (e.g. BLUAI). Restore: `POST /api/watchlist/restore-from-fires`.
 
 ---
 
@@ -126,9 +138,10 @@ bot.py  ────────────────────────
 | `mexc_bot/monitor.py` | Target-price loop; stable_id crossing |
 | `mexc_bot/exchange.py` | Spot + futures clients; **stock/crypto futures resolve** |
 | `mexc_bot/storage.py` | SQLite `alerts` + visual ranks + `market` |
+| `mexc_bot/db_safety.py` | **Additive schema helpers** + protected tables; use for all migrations |
 | `mexc_bot/movers/scanner.py` | Mover loop: peak/step fire, cascade anchors, enrichments, heat auto |
 | `mexc_bot/movers/history.py` | Ring buffer; `peak_drawdown` |
-| `mexc_bot/movers/storage.py` | `mover_settings` + `mover_watchlist` |
+| `mexc_bot/movers/storage.py` | `mover_settings` + `mover_watchlist` (PK migrate via `safe_rebuild_table`) |
 | `mexc_bot/movers/velocity.py` | `%/min` + PANIC/FAST/GRIND bands |
 | `mexc_bot/movers/heat.py` | Ranked dump board (auto + `/mw`) |
 | `mexc_bot/movers/klines.py` | Optional consecutive closed red counts (5m/15m/1h/4h) |
@@ -547,6 +560,7 @@ Covers: stable_id crossing, market isolation, stock resolve (compact `TSLAUSDT` 
 - Don’t set long `MOVER_COOLDOWN_SECONDS` (e.g. 1800) if cascade re-alerts matter  
 - Don’t enable `MOVER_ENRICH_KLINES` in prod without a heads-up (API load + message noise)  
 - Don’t lower prod mover thresholds for “testing” without telling the user  
+- **Don’t wipe SQLite on deploy/rebuild/desk update** — no `DROP` live tables, no `down -v`, no empty migration swaps (see [docs/DB_SAFETY.md](docs/DB_SAFETY.md))
 
 ---
 
@@ -560,6 +574,7 @@ Covers: stable_id crossing, market isolation, stock resolve (compact `TSLAUSDT` 
 | `docs/TRADING_STRATEGY.md` | **Owner trading playbook** for coach/learning agents |
 | `docs/V4_TRADING_ASSISTANT.md` | Learning / coach / fatal news / voice → fluent agent design |
 | `docs/SESSION_HANDOFF.md` | Latest build + what was done / next |
+| `docs/DB_SAFETY.md` | **Hard rule:** never erase DB on deploy/rebuild; migration + guards |
 | `docs/V3_TESTING_AND_PROMOTION.md` | Staging → prod |
 | `docs/FUTURE_STRATEGY_BOTS.md` | Future separate bots backlog |
 | `.env.example` | Full env template |
