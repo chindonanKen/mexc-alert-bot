@@ -29,8 +29,12 @@ class AlertStore:
     def __init__(self, path: Path):
         self._lock = RLock()
         self._conn: sqlite3.Connection | None = None
+        # Cache must re-validate against SQLite: AD Desk writes the same DB from
+        # another process and never calls _invalidate_caches (multi-writer).
         self._visual_cache: Dict[int, List[dict]] = {}
+        self._visual_fp: Dict[int, tuple] = {}
         self._user_ids_cache: Optional[List[int]] = None
+        self._user_ids_fp: Optional[tuple] = None
 
         # Convert legacy .json path to .db
         if str(path).endswith(".json"):
@@ -120,12 +124,44 @@ class AlertStore:
         """Invalidate in-memory caches after mutations so next reads are fresh."""
         if user_id is None:
             self._visual_cache.clear()
+            self._visual_fp.clear()
             self._user_ids_cache = None
+            self._user_ids_fp = None
         else:
             self._visual_cache.pop(user_id, None)
+            self._visual_fp.pop(user_id, None)
             # user_ids only needs full invalidation if a brand new user appears
             if self._user_ids_cache is not None and user_id not in self._user_ids_cache:
                 self._user_ids_cache = None
+                self._user_ids_fp = None
+
+    def _alerts_fingerprint(self, conn: sqlite3.Connection, user_id: int) -> tuple:
+        """Cheap change detector for external writers (AD Desk) + local mutations."""
+        row = conn.execute(
+            "SELECT COUNT(*) AS c, "
+            "COALESCE(MAX(id), 0) AS max_id, "
+            "COALESCE(SUM(enabled), 0) AS en_sum, "
+            "COALESCE(SUM(CAST(price * 1e6 AS INTEGER)), 0) AS price_fp "
+            "FROM alerts WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        return (
+            int(row["c"] if row["c"] is not None else row[0]),
+            int(row["max_id"] if row["max_id"] is not None else row[1]),
+            int(row["en_sum"] if row["en_sum"] is not None else row[2]),
+            int(row["price_fp"] if row["price_fp"] is not None else row[3]),
+        )
+
+    def _global_alerts_fingerprint(self, conn: sqlite3.Connection) -> tuple:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS max_id, "
+            "COUNT(DISTINCT user_id) AS users FROM alerts"
+        ).fetchone()
+        return (
+            int(row["c"] if row["c"] is not None else row[0]),
+            int(row["max_id"] if row["max_id"] is not None else row[1]),
+            int(row["users"] if row["users"] is not None else row[2]),
+        )
 
     def _migrate_from_json_if_needed(self) -> bool:
         """One-time migration from the old JSON format.
@@ -211,10 +247,14 @@ class AlertStore:
 
     def get_user_alerts(self, user_id: int) -> List[dict]:
         with self._lock:
-            if user_id in self._visual_cache:
-                return [a.copy() for a in self._visual_cache[user_id]]
+            conn = self._get_conn()
+            fp = self._alerts_fingerprint(conn, user_id)
+            cached = self._visual_cache.get(user_id)
+            if cached is not None and self._visual_fp.get(user_id) == fp:
+                return [a.copy() for a in cached]
             visuals = self._get_visual_alerts(user_id)
             self._visual_cache[user_id] = visuals
+            self._visual_fp[user_id] = fp
             return [a.copy() for a in visuals]
 
     def add_alert(
@@ -301,11 +341,13 @@ class AlertStore:
 
     def get_all_user_ids(self) -> List[int]:
         with self._lock:
-            if self._user_ids_cache is not None:
-                return self._user_ids_cache[:]
             conn = self._get_conn()
+            fp = self._global_alerts_fingerprint(conn)
+            if self._user_ids_cache is not None and self._user_ids_fp == fp:
+                return self._user_ids_cache[:]
             rows = conn.execute("SELECT DISTINCT user_id FROM alerts").fetchall()
-            self._user_ids_cache = [r[0] for r in rows]
+            self._user_ids_cache = [int(r[0]) for r in rows]
+            self._user_ids_fp = fp
             return self._user_ids_cache[:]
 
     def remove_alerts_by_ids(self, user_id: int, visual_ids: List[int]) -> int:
@@ -358,6 +400,50 @@ class AlertStore:
                 "SELECT 1 FROM alerts WHERE market = 'futures' AND enabled = 1 LIMIT 1"
             ).fetchone()
             return row is not None
+
+    def repair_futures_alert_symbols(self, resolve_fn) -> int:
+        """Rewrite bare/wrong futures alert symbols via live resolve (desk legacy rows).
+
+        resolve_fn(raw: str) -> Optional[str]. Returns number of rows updated.
+        Additive-safe: only UPDATEs symbol text, never deletes alerts.
+        """
+        if resolve_fn is None:
+            return 0
+        fixed = 0
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT id, user_id, symbol FROM alerts "
+                "WHERE lower(COALESCE(market, 'spot')) = 'futures'"
+            ).fetchall()
+            for row in rows:
+                raw = str(row["symbol"] or "").strip()
+                if not raw:
+                    continue
+                try:
+                    live = resolve_fn(raw)
+                except Exception as e:
+                    logger.debug("repair resolve %s: %s", raw, e)
+                    continue
+                if not live:
+                    continue
+                live_u = str(live).upper()
+                if live_u == raw.upper():
+                    continue
+                conn.execute(
+                    "UPDATE alerts SET symbol = ? WHERE id = ?",
+                    (live_u, int(row["id"])),
+                )
+                fixed += 1
+                logger.info(
+                    "Repaired futures alert id=%s %s → %s",
+                    row["id"],
+                    raw,
+                    live_u,
+                )
+            if fixed:
+                self._invalidate_caches()
+        return fixed
 
     def remove_alerts_by_symbol(self, user_id: int, symbol: str) -> int:
         with self._lock:

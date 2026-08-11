@@ -60,6 +60,16 @@ def main() -> None:
     ):
         futures_provider = MexcFuturesClient(base_url=settings.mexc_futures_api_base)
         logger.info("Futures price client ready (%s)", settings.mexc_futures_api_base)
+        # Desk used to store bare bases (AXTI, ZHIPU) that never match the book
+        if hasattr(futures_provider, "resolve_symbol"):
+            try:
+                n_fix = store.repair_futures_alert_symbols(
+                    futures_provider.resolve_symbol  # type: ignore[attr-defined]
+                )
+                if n_fix:
+                    logger.info("Repaired %s futures target symbol(s) for book match", n_fix)
+            except Exception as e:
+                logger.warning("Futures alert symbol repair skipped: %s", e)
 
     event_store = None
     outcome_poller = None

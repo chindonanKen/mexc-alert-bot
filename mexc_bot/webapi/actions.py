@@ -43,6 +43,54 @@ def list_alerts(user_id: Optional[int] = None) -> List[dict]:
     return rows
 
 
+def _resolve_target_symbol(symbol: str, market: str) -> str:
+    """Normalize desk target symbols the same way Telegram /a and /af do.
+
+    Spot → BASEUSDT. Futures → live contract id when possible (TSLAUSDT /
+    *STOCK_USDT / BASE_USDT), else normalize_futures_symbol.
+    """
+    from ..exchange import (
+        MexcFuturesClient,
+        normalize_futures_symbol,
+        normalize_spot_symbol,
+    )
+
+    raw = (symbol or "").strip()
+    mkt = (market or "spot").lower()
+    if mkt == "spot":
+        sym = normalize_spot_symbol(raw) or raw.upper().replace("-", "")
+        if sym and not sym.endswith("USDT") and not sym.endswith("USDC"):
+            sym = f"{sym}USDT"
+        if not sym:
+            raise ValueError("Invalid spot symbol")
+        return sym
+
+    # Futures: prefer live resolve (stock perps are not always BASE_USDT)
+    base_url = os.getenv("MEXC_FUTURES_API_BASE", "https://contract.mexc.com")
+    try:
+        client = MexcFuturesClient(base_url=base_url)
+        try:
+            if hasattr(client, "resolve_symbol"):
+                live = client.resolve_symbol(raw)
+                if live:
+                    return str(live).upper()
+        finally:
+            if hasattr(client, "close"):
+                try:
+                    client.close()
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning("desk futures resolve failed for %r: %s", raw, e)
+
+    sym = normalize_futures_symbol(raw) or raw.upper().strip().replace("-", "_")
+    if sym and "_" not in sym and not sym.endswith("USDT"):
+        sym = f"{sym}_USDT"
+    if not sym:
+        raise ValueError("Invalid futures symbol")
+    return sym
+
+
 def add_alert(
     symbol: str,
     price: float,
@@ -53,9 +101,7 @@ def add_alert(
     mkt = (market or "spot").lower()
     if mkt not in ("spot", "futures"):
         mkt = "spot"
-    sym = symbol.upper().strip()
-    if mkt == "spot" and not sym.endswith("USDT"):
-        sym = sym + "USDT" if not sym.endswith("USDT") else sym
+    sym = _resolve_target_symbol(symbol, mkt)
     conn = db.connect()
     try:
         cur = conn.execute(
@@ -210,9 +256,13 @@ def add_watch(
         if not sym:
             raise ValueError("Invalid spot symbol")
     else:
-        sym = normalize_futures_symbol(raw) or raw.upper().strip().replace("-", "_")
-        if "_" not in sym and not sym.endswith("USDT"):
-            sym = f"{sym}_USDT"
+        # Same live resolve path as desk futures targets / Telegram /mw add f
+        try:
+            sym = _resolve_target_symbol(raw, "futures")
+        except ValueError:
+            sym = normalize_futures_symbol(raw) or raw.upper().strip().replace("-", "_")
+            if "_" not in sym and not sym.endswith("USDT"):
+                sym = f"{sym}_USDT"
     _mover_store().add_watchlist(uid, sym, mkt, set_id=set_id)
     return {"ok": True, "symbol": sym, "market": mkt, "set_id": set_id}
 
