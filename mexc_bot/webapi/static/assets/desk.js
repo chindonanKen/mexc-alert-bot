@@ -380,7 +380,7 @@
           </div>`
           )
           .join("")
-      : rankEmpty("No mover fires in last hours");
+      : rankEmpty("No mover fires in the last hour");
 
     const pos = h.positions || d.positions || [];
     $("#ovPos").innerHTML = pos.length
