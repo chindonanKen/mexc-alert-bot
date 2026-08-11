@@ -327,41 +327,22 @@ def create_app() -> FastAPI:
             if len(top_targets) >= 5:
                 break
 
-        # Overview MOVERS = fires in last 1h, sorted by largest move (abs drop%)
+        # Overview MOVERS = fires in last 1h only (no multi-hour widen)
         mover_1h = []
         for e in recent_events:
             ts = float(e.get("ts") or 0)
             if ts < hour_ago:
                 continue
             src = e.get("source") or ""
-            if not (src.startswith("mover") or e.get("drop_pct") is not None):
-                if "target" in src.lower():
-                    continue
             if "target" in src.lower():
+                continue
+            if not (src.startswith("mover") or e.get("drop_pct") is not None):
                 continue
             row = dict(e)
             row["fired_at"] = ts
             row["age_seconds"] = now_ts - ts
             row["move_1h_pct"] = abs(float(e.get("drop_pct") or 0))
             mover_1h.append(row)
-        # if few in 1h, widen to 6h but still sort by move
-        if len(mover_1h) < 3:
-            for e in recent_events:
-                ts = float(e.get("ts") or 0)
-                if ts < now_ts - 6 * 3600:
-                    continue
-                src = e.get("source") or ""
-                if "target" in src.lower():
-                    continue
-                if not (src.startswith("mover") or e.get("drop_pct") is not None):
-                    continue
-                if any(x.get("id") == e.get("id") for x in mover_1h):
-                    continue
-                row = dict(e)
-                row["fired_at"] = ts
-                row["age_seconds"] = now_ts - ts
-                row["move_1h_pct"] = abs(float(e.get("drop_pct") or 0))
-                mover_1h.append(row)
         top_movers = sorted(
             mover_1h, key=lambda x: float(x.get("move_1h_pct") or 0), reverse=True
         )[:5]
