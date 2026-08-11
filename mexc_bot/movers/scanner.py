@@ -100,6 +100,7 @@ class MoverScanner:
         self._fires_total: int = 0
         self._fires_suppressed: int = 0
         self._missing_symbol_logs: int = 0
+        self._empty_watch_warn_mono: float = 0.0
 
         # Auto heat board anti-spam (per user)
         self._last_heat_mono: Dict[int, float] = {}
@@ -438,6 +439,19 @@ class MoverScanner:
             lookback = float(scan["lookback_seconds"])
             watchlist = self.mover_store.get_watchlist(user_id, set_id=set_id)
             if not watchlist:
+                # Enabled set with zero coins → silent no-ops (missed dumps)
+                mono = time.monotonic()
+                if mono - self._empty_watch_warn_mono >= 60.0:
+                    self._empty_watch_warn_mono = mono
+                    logger.warning(
+                        "Mover set enabled but watchlist EMPTY user=%s set=%s(%s) "
+                        "threshold=%s%% lookback=%ss — no fires until coins are added",
+                        user_id,
+                        set_name,
+                        set_id,
+                        scan.get("threshold_percent"),
+                        lookback,
+                    )
                 continue
 
             # Auto panic board FIRST (triage before individual fires) — once/user

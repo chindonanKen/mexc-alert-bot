@@ -331,6 +331,16 @@ def set_movers(
     }
 
 
+def restore_watchlist_from_fires(
+    days: float = 7.0, user_id: Optional[int] = None, set_id: Optional[int] = None
+) -> dict:
+    """Rebuild empty/partial watchlist from recent mover fires."""
+    uid = int(user_id or _uid())
+    return _mover_store().restore_watchlist_from_recent_fires(
+        uid, set_id=set_id, days=days
+    )
+
+
 def get_movers_settings(user_id: Optional[int] = None) -> dict:
     uid = _uid(user_id)
     return _mover_store().get_settings(uid, 5.0, 900)

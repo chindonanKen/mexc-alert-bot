@@ -796,6 +796,18 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(400, str(e))
 
+    @app.post("/api/watchlist/restore-from-fires")
+    def post_watch_restore(
+        days: float = Query(7.0, ge=1.0, le=30.0),
+        set_id: Optional[int] = None,
+        _: bool = Depends(require_auth),
+    ):
+        """Re-add coins that mover-fired recently (after accidental wipe / migration)."""
+        try:
+            return actions.restore_watchlist_from_fires(days=days, set_id=set_id)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
     @app.delete("/api/watchlist")
     def del_watch(
         symbol: str = Query(...),

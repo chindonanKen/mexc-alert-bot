@@ -1437,7 +1437,42 @@
     }
     const by = {};
     (d.tickers || []).forEach((t) => (by[t.symbol] = t));
-    const rows = (d.watchlist || [])
+    const wl = d.watchlist || [];
+    const tableEl = $("#moversTable") || $("#tapeTable");
+    if (s && s.enabled && !wl.length) {
+      if (tableEl) {
+        tableEl.innerHTML =
+          rankEmpty(
+            "Movers ON but watchlist is EMPTY — no dumps will fire. " +
+              "Add coins or Restore from recent fires."
+          ) +
+          `<div class="row-gap mt"><button type="button" class="btn sm" id="btnRestoreWatch">Restore from recent fires (7d)</button></div>`;
+        const br = $("#btnRestoreWatch");
+        if (br && !br.dataset.bound) {
+          br.dataset.bound = "1";
+          br.addEventListener("click", async () => {
+            try {
+              const r = await api(
+                `/api/watchlist/restore-from-fires?days=7${
+                  _activeMoverSetId != null ? "&set_id=" + _activeMoverSetId : ""
+                }`,
+                { method: "POST" }
+              );
+              toast(
+                r.added
+                  ? `Restored ${r.added} symbols to watchlist`
+                  : "No recent fire symbols to restore"
+              );
+              loadMovers({ force: true });
+            } catch (e) {
+              toast(e.message || String(e));
+            }
+          });
+        }
+      }
+      return;
+    }
+    const rows = wl
       .map((w) => {
         const key = String(w.symbol).toUpperCase().replace(/_/g, "");
         const t = by[key] || by[key.replace("USDT", "") + "USDT"];
@@ -1470,7 +1505,6 @@
         </tr>`;
       })
       .join("");
-    const tableEl = $("#moversTable") || $("#tapeTable");
     if (tableEl)
       tableEl.innerHTML = table(
         ["M", "Symbol", "Mark", "24h", "Last fire", "When", ""],

@@ -164,20 +164,52 @@ class MoverStore:
             logger.warning("spot bare base migration: %s", e)
 
     def _migrate_watchlist_pk(self, conn: sqlite3.Connection) -> None:
-        """Allow the same symbol in multiple sets: PK (set_id, symbol, market)."""
-        # Detect legacy PK (user_id, symbol, market) by trying to see table sql
+        """Allow the same symbol in multiple sets: PK (set_id, symbol, market).
+
+        Transactional rebuild: never DROP the live table unless the copy
+        succeeded with at least as many rows as the source (avoids empty wipe
+        if bot/desk race mid-migration).
+        """
         row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='mover_watchlist'"
         ).fetchone()
+        if not row:
+            # Table missing (failed prior migration) — recreate empty shell only
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mover_watchlist (
+                    user_id INTEGER NOT NULL,
+                    set_id INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    market TEXT NOT NULL DEFAULT 'futures',
+                    PRIMARY KEY (set_id, symbol, market)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mover_watch_user ON mover_watchlist (user_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mover_watch_set ON mover_watchlist (set_id)"
+            )
+            return
         sql = (row["sql"] if row else "") or ""
-        if "PRIMARY KEY (set_id, symbol, market)" in sql.replace(" ", ""):
+        compact = sql.replace(" ", "")
+        if "PRIMARY KEY (set_id, symbol, market)" in compact:
             return
-        if "PRIMARY KEY (set_id" in sql.replace(" ", ""):
+        if "PRIMARY KEY (set_id" in compact and "symbol, market)" in compact:
             return
-        # Rebuild table
+        try:
+            before = int(
+                conn.execute("SELECT COUNT(*) AS c FROM mover_watchlist").fetchone()["c"]
+            )
+        except Exception:
+            before = 0
+        # Rebuild under temp name; only swap if copy ok
+        conn.execute("DROP TABLE IF EXISTS mover_watchlist_new")
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS mover_watchlist_new (
+            CREATE TABLE mover_watchlist_new (
                 user_id INTEGER NOT NULL,
                 set_id INTEGER NOT NULL,
                 symbol TEXT NOT NULL,
@@ -186,15 +218,33 @@ class MoverStore:
             )
             """
         )
-        # Ensure all rows have set_id
         self._migrate_legacy_to_sets(conn)
         conn.execute(
             """
             INSERT OR IGNORE INTO mover_watchlist_new (user_id, set_id, symbol, market)
-            SELECT user_id, set_id, symbol, market FROM mover_watchlist
-            WHERE set_id IS NOT NULL
+            SELECT user_id, COALESCE(set_id, (
+                SELECT id FROM mover_sets ms
+                WHERE ms.user_id = mover_watchlist.user_id
+                ORDER BY sort_order ASC, id ASC LIMIT 1
+            )), symbol, market FROM mover_watchlist
+            WHERE symbol IS NOT NULL AND symbol != ''
             """
         )
+        after = int(
+            conn.execute("SELECT COUNT(*) AS c FROM mover_watchlist_new").fetchone()["c"]
+        )
+        if before > 0 and after == 0:
+            logger.error(
+                "mover_watchlist PK migration aborted: would wipe %s rows", before
+            )
+            conn.execute("DROP TABLE IF EXISTS mover_watchlist_new")
+            return
+        if before > 0 and after < before:
+            logger.warning(
+                "mover_watchlist PK migration: copied %s/%s rows (some dropped)",
+                after,
+                before,
+            )
         conn.execute("DROP TABLE mover_watchlist")
         conn.execute("ALTER TABLE mover_watchlist_new RENAME TO mover_watchlist")
         conn.execute(
@@ -791,6 +841,61 @@ class MoverStore:
                     )
                 removed += cur.rowcount
             return removed
+
+    def restore_watchlist_from_recent_fires(
+        self,
+        user_id: int,
+        *,
+        set_id: Optional[int] = None,
+        days: float = 7.0,
+        limit: int = 80,
+    ) -> dict:
+        """Re-add symbols that recently mover-fired (recovery after wipe/migration)."""
+        import time as _time
+
+        since = _time.time() - max(1.0, float(days)) * 86400.0
+        with self._lock:
+            conn = self._get_conn()
+            sid = int(set_id or self._ensure_default_set(conn, user_id))
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT symbol, market, MAX(ts) AS last_ts
+                    FROM learning_events
+                    WHERE user_id = ?
+                      AND source IN ('mover_peak', 'mover_step')
+                      AND ts >= ?
+                    GROUP BY symbol, market
+                    ORDER BY last_ts DESC
+                    LIMIT ?
+                    """,
+                    (int(user_id), since, int(limit)),
+                ).fetchall()
+            except Exception as e:
+                logger.warning("restore from fires: %s", e)
+                return {"ok": False, "added": 0, "error": str(e)}
+            added = 0
+            symbols = []
+            for r in rows:
+                sym = str(r["symbol"] or "").upper()
+                mkt = str(r["market"] or "futures").lower()
+                if not sym:
+                    continue
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO mover_watchlist (user_id, symbol, market, set_id) "
+                    "VALUES (?, ?, ?, ?)",
+                    (int(user_id), sym, mkt, sid),
+                )
+                if cur.rowcount:
+                    added += 1
+                    symbols.append({"symbol": sym, "market": mkt})
+            return {
+                "ok": True,
+                "added": added,
+                "set_id": sid,
+                "candidates": len(rows),
+                "symbols": symbols,
+            }
 
     def clear_watchlist(self, user_id: int, set_id: Optional[int] = None) -> int:
         with self._lock:
