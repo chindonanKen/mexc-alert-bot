@@ -66,7 +66,9 @@ def _resolve_target_symbol(symbol: str, market: str) -> str:
         return sym
 
     # Futures: prefer live resolve (stock perps are not always BASE_USDT)
-    base_url = os.getenv("MEXC_FUTURES_API_BASE", "https://contract.mexc.com")
+    base_url = os.getenv(
+        "MEXC_FUTURES_API_BASE", "https://contract.mexc.com/api/v1"
+    )
     try:
         client = MexcFuturesClient(base_url=base_url)
         try:
