@@ -575,6 +575,7 @@ Covers: stable_id crossing, market isolation, stock resolve (compact `TSLAUSDT` 
 | `docs/V4_TRADING_ASSISTANT.md` | Learning / coach / fatal news / voice → fluent agent design |
 | `docs/SESSION_HANDOFF.md` | Latest build + what was done / next |
 | `docs/DB_SAFETY.md` | **Hard rule:** never erase DB on deploy/rebuild; migration + guards |
+| `docs/DAILY_TARGET_REPORT.md` | Daily 6 AM target hits + near-miss report |
 | `docs/V3_TESTING_AND_PROMOTION.md` | Staging → prod |
 | `docs/FUTURE_STRATEGY_BOTS.md` | Future separate bots backlog |
 | `.env.example` | Full env template |

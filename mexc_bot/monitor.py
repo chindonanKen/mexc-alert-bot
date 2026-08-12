@@ -44,6 +44,7 @@ class PriceMonitor:
         notifier: Callable[..., None],  # user_id, message, optional parse_mode
         futures_provider: Optional[PriceProvider] = None,
         event_store=None,
+        target_fire_log=None,
     ):
         self.settings = settings
         self.store = store
@@ -52,6 +53,8 @@ class PriceMonitor:
         self.notifier = notifier
         # Optional learning EventStore — log target fires only; never delete via learning path
         self.event_store = event_store
+        # Durable hit log for daily report (works even when learning is off)
+        self.target_fire_log = target_fire_log
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_poll_ms: int = 0
@@ -186,6 +189,19 @@ class PriceMonitor:
                     )
                     reply_markup = None
                     event_id = 0
+                    if self.target_fire_log is not None:
+                        try:
+                            self.target_fire_log.log(
+                                user_id,
+                                symbol,
+                                market,
+                                target_price=float(target),
+                                fire_price=float(current),
+                                reason=trigger_reason,
+                                stable_id=int(a["stable_id"]),
+                            )
+                        except Exception as fe:
+                            logger.error("target_fire_log failed: %s", fe)
                     if self.event_store is not None and getattr(
                         self.settings, "feature_learning", False
                     ):

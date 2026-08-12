@@ -157,6 +157,10 @@ def main() -> None:
         except Exception as e:
             logger.error(f"Failed to send Telegram message to {user_id}: {e}")
 
+    from .reports.fire_log import TargetFireLog
+
+    target_fire_log = TargetFireLog(settings.alerts_file_path)
+
     monitor = PriceMonitor(
         settings=settings,
         store=store,
@@ -164,9 +168,26 @@ def main() -> None:
         notifier=send_telegram_notification,
         futures_provider=futures_provider if settings.feature_futures_alerts else None,
         event_store=event_store,
+        target_fire_log=target_fire_log,
     )
 
     tg_bot._monitor_ref = monitor  # type: ignore[attr-defined]
+
+    # Daily 6 AM target report (hits + near-misses) — in-process scheduler
+    import os as _os
+
+    if _os.getenv("FEATURE_DAILY_TARGET_REPORT", "true").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        try:
+            from .reports.daily_targets import start_daily_report_thread
+
+            start_daily_report_thread(settings, monitor._stop_event)
+        except Exception as e:
+            logger.warning("Daily target report scheduler not started: %s", e)
 
     isolated_agent = None
     delist_radar = None

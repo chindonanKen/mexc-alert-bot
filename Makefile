@@ -24,7 +24,8 @@ test:
 	$$PY tests/test_mover_dedupe.py && \
 	$$PY tests/test_db_safety.py && \
 	$$PY tests/test_desk_bot_shared_alerts.py && \
-	$$PY tests/test_mw_data_safety.py
+	$$PY tests/test_mw_data_safety.py && \
+	$$PY tests/test_daily_target_report.py
 
 verify:
 	bash scripts/verify_build.sh
