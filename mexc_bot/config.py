@@ -148,7 +148,7 @@ def load_settings() -> Settings:
             "Copy .env.example to .env and set your bot token from @BotFather."
         )
 
-    tz = os.getenv("TIMEZONE", "Asia/Singapore")
+    tz = os.getenv("TIMEZONE", "Asia/Manila")
     tolerance = float(os.getenv("ALERT_TOLERANCE_PERCENT", "0.0005"))
     poll_interval = int(os.getenv("PRICE_POLL_INTERVAL_SECONDS", "2"))
     mexc_base = os.getenv("MEXC_API_BASE", "https://api.mexc.com/api/v3").rstrip("/")

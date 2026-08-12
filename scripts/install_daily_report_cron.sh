@@ -9,9 +9,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Host cron is wall-clock on the droplet. Prefer in-bot scheduler (Asia/Manila).
+# If host TZ is UTC, 6 Manila = 22:00 previous day UTC → set CRON_HOUR accordingly.
 HOUR="${CRON_HOUR:-6}"
 MARKER="# mexc-alert-bot daily-target-report"
-CRON_LINE="0 ${HOUR} * * * cd ${ROOT} && docker exec mexc-alert-bot python -m mexc_bot.reports.daily_targets >> ${ROOT}/data/reports/cron.log 2>&1 ${MARKER}"
+CRON_LINE="0 ${HOUR} * * * cd ${ROOT} && docker exec -e DAILY_TARGET_REPORT_TZ=Asia/Manila -e TIMEZONE=Asia/Manila mexc-alert-bot python -m mexc_bot.reports.daily_targets >> ${ROOT}/data/reports/cron.log 2>&1 ${MARKER}"
 
 mkdir -p "${ROOT}/data/reports"
 

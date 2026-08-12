@@ -23,16 +23,22 @@ from mexc_bot.storage import AlertStore
 
 
 class TestReportWindow(unittest.TestCase):
-    def test_window_is_24h(self) -> None:
-        # Fixed instant: 2026-08-12 10:00 Stockholm → last 6am is today 06:00
+    def test_window_is_24h_manila(self) -> None:
+        # Fixed instant: 2026-08-12 10:00 Manila → last 6am is today 06:00 PHT
         import datetime
         from zoneinfo import ZoneInfo
 
-        tz = ZoneInfo("Europe/Stockholm")
+        tz = ZoneInfo("Asia/Manila")
         wall = datetime.datetime(2026, 8, 12, 10, 0, 0, tzinfo=tz)
-        t0, t1, label = report_window(now=wall.timestamp(), tz_name="Europe/Stockholm", hour=6)
+        t0, t1, label = report_window(
+            now=wall.timestamp(), tz_name="Asia/Manila", hour=6
+        )
         self.assertEqual(label, "2026-08-12")
         self.assertAlmostEqual(t1 - t0, 86400.0, places=0)
+        # End boundary is 06:00 Manila
+        end = datetime.datetime.fromtimestamp(t1, tz=tz)
+        self.assertEqual(end.hour, 6)
+        self.assertEqual(end.minute, 0)
 
 
 class TestClosestApproach(unittest.TestCase):

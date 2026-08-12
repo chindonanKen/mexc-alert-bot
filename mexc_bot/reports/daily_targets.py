@@ -130,12 +130,13 @@ def _px(p: float) -> str:
 def report_window(
     *,
     now: Optional[float] = None,
-    tz_name: str = "Europe/Stockholm",
+    tz_name: str = "Asia/Manila",
     hour: int = 6,
 ) -> Tuple[float, float, str]:
     """Return (window_start, window_end, date_label) for the daily 6 AM cycle.
 
-    Window = previous local ``hour`` → last local ``hour`` (typically 06:00→06:00).
+    Window = previous local ``hour`` → last local ``hour`` (typically 06:00→06:00
+    Asia/Manila Philippine time).
     """
     tz = ZoneInfo(tz_name)
     wall = datetime.fromtimestamp(now if now is not None else time.time(), tz=tz)
@@ -297,7 +298,7 @@ def generate_daily_target_report(
     user_id: int,
     window_start: Optional[float] = None,
     window_end: Optional[float] = None,
-    tz_name: str = "Europe/Stockholm",
+    tz_name: str = "Asia/Manila",
     report_hour: int = 6,
     near_pct: float = 5.0,
     klines: Optional[KlineClient] = None,
@@ -421,7 +422,13 @@ def run_daily_target_report(
     if not uid:
         raise ValueError("DESK_USER_ID required for daily target report")
 
-    tz = tz_name or os.getenv("TIMEZONE", "Europe/Stockholm")
+    # Prefer dedicated report TZ; fall back to TIMEZONE then Manila (PHT, UTC+8)
+    tz = (
+        tz_name
+        or os.getenv("DAILY_TARGET_REPORT_TZ")
+        or os.getenv("TIMEZONE")
+        or "Asia/Manila"
+    )
     hour = int(
         report_hour
         if report_hour is not None
@@ -488,7 +495,12 @@ def start_daily_report_thread(settings, stop_event) -> None:
     """Background: sleep until local report hour, run, repeat. Soft-fails."""
     import threading
 
-    tz = getattr(settings, "timezone", None) or os.getenv("TIMEZONE", "Europe/Stockholm")
+    tz = (
+        os.getenv("DAILY_TARGET_REPORT_TZ")
+        or getattr(settings, "timezone", None)
+        or os.getenv("TIMEZONE")
+        or "Asia/Manila"
+    )
     hour = int(os.getenv("DAILY_TARGET_REPORT_HOUR", "6"))
     uid_env = os.getenv("DESK_USER_ID") or os.getenv("MEXC_PRIVATE_TELEGRAM_USER_ID")
     if not uid_env or not str(uid_env).strip().isdigit():

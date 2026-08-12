@@ -17,9 +17,12 @@ Does **not** use mover watchlist (different product). Never deletes `alerts` row
 
 ## Schedule
 
-- **Default window:** previous local 06:00 → this local 06:00 (`TIMEZONE`)
-- **In-bot:** `FEATURE_DAILY_TARGET_REPORT=true` (default) starts a daemon thread at 6 AM
-- **Host cron (backup):** `bash scripts/install_daily_report_cron.sh`
+- **Default timezone:** **Asia/Manila** (Philippine Time, PHT, UTC+8)
+- **Default hour:** **06:00** Manila (`DAILY_TARGET_REPORT_HOUR=6`)
+- **Default window:** previous 06:00 Manila → this 06:00 Manila
+- **Near-miss band:** 5% of target (`DAILY_TARGET_NEAR_PCT=5`) over open targets (~43)
+- **In-bot:** `FEATURE_DAILY_TARGET_REPORT=true` (default) starts a daemon thread at 6 AM Manila
+- **Host cron (backup):** `bash scripts/install_daily_report_cron.sh` (set host TZ or `CRON_HOUR` if host is not Manila)
 
 ## Output
 
@@ -45,8 +48,9 @@ docker exec mexc-alert-bot python -m mexc_bot.reports.daily_targets
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `FEATURE_DAILY_TARGET_REPORT` | true | In-process 6 AM scheduler |
-| `DAILY_TARGET_REPORT_HOUR` | 6 | Local hour |
+| `DAILY_TARGET_REPORT_HOUR` | 6 | Local hour (Manila) |
+| `DAILY_TARGET_REPORT_TZ` | Asia/Manila | Report schedule + window TZ |
 | `DAILY_TARGET_NEAR_PCT` | 5 | Near-miss band % |
 | `DAILY_TARGET_REPORT_TELEGRAM` | true | Push report text to owner |
-| `TIMEZONE` | Europe/Stockholm | Window + schedule |
-| `DESK_USER_ID` | required | Whose targets |
+| `TIMEZONE` | Asia/Manila | Fallback for schedule/window |
+| `DESK_USER_ID` | required | Whose targets (~43 open alerts) |
