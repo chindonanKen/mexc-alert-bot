@@ -1674,6 +1674,26 @@
         ${_metric("AD zone", c.ad_zone || "—")}
         ${_metric("AD depth", adDepth)}
         ${_metric("Vol", vol)}
+        ${_metric("Regime", c.regime_guess || "—")}
+        ${_metric("TF hint", c.tf_hint || "—")}
+        ${_metric(
+          "Reds",
+          (c.timing_gate && c.timing_gate.red_streak != null
+            ? String(c.timing_gate.red_streak)
+            : "—") +
+            (c.timing_gate && c.timing_gate.red_label
+              ? " " + c.timing_gate.red_label
+              : "")
+        )}
+        ${_metric(
+          "Stack",
+          c.factor_alignment && c.factor_alignment.yes_count != null
+            ? `${c.factor_alignment.yes_count} of ${
+                (c.factor_alignment.yes_count || 0) +
+                (c.factor_alignment.weak_count || 0)
+              } history matches`
+            : "—"
+        )}
         ${_metric("Heat", heat)}
         ${_metric(
           "Setup score",
@@ -1690,14 +1710,70 @@
           ? `<p class="learn-case-trade mono mute">${escHtml(tradeLine)}</p>`
           : ""
       }
+      ${
+        Array.isArray(c.ad_by_tf) && c.ad_by_tf.length
+          ? `<p class="learn-case-tfs mute mono">${c.ad_by_tf
+              .map((p) => {
+                const bits = [p.tf, p.ad_zone || "—"];
+                if (p.red_streak != null) bits.push(p.red_streak + "r");
+                if (p.vol_panic_bar) bits.push("vol!");
+                return bits.join(" ");
+              })
+              .join(" · ")}</p>`
+          : ""
+      }
       <p class="learn-case-foot mute">${
         freeze === "ok"
-          ? "These numbers index the setup. Your chips + note are the judgment."
+          ? "Chart history on the TF you click is the truth. Chips record what you see / how you traded — they don’t invent an AD."
           : "Features incomplete — still teach with chips + note. (Setup score is chart structure only — not a recommendation.)"
-      }</p>`;
+      }</p>
+      <div class="learn-similar mute" hidden></div>`;
     try {
       host.scrollIntoView({ block: "nearest", behavior: "smooth" });
     } catch (_) {}
+    loadSimilarCases(c, sel);
+  }
+
+  async function loadSimilarCases(c, sel) {
+    const box = $("#learnCaseSnap") && $("#learnCaseSnap").querySelector(".learn-similar");
+    if (!box) return;
+    try {
+      let q = `k=4`;
+      if (c && c.id) q += `&case_id=${c.id}`;
+      const sym = (c && c.symbol) || (sel && sel.symbol);
+      const mkt = (c && c.market) || (sel && sel.market) || "futures";
+      if (sym) q += `&symbol=${encodeURIComponent(sym)}&market=${encodeURIComponent(mkt)}`;
+      if (!c?.id && !sym) return;
+      const r = await api(`/api/learning/similar-cases?${q}`);
+      const rows = (r && r.similar) || [];
+      if (!rows.length) {
+        box.hidden = true;
+        return;
+      }
+      box.hidden = false;
+      box.innerHTML =
+        `<span class="learn-similar-h">Similar setups (index)</span> ` +
+        rows
+          .map(
+            (s) =>
+              `<span class="learn-similar-item">${escHtml(
+                (s.symbol || "") +
+                  " " +
+                  (s.bucket || "") +
+                  (s.tf_hint ? " · " + s.tf_hint : "")
+              )}</span>`
+          )
+          .join(" · ");
+    } catch (_) {
+      box.hidden = true;
+    }
+  }
+
+  function _learnSnapKey(sel) {
+    if (!sel) return "";
+    if (sel.event_id) return "ev:" + sel.event_id;
+    if (sel.entity_key) return "ek:" + sel.entity_key;
+    return "sy:" + (sel.symbol || "") + ":" + (sel.market || "");
   }
 
   async function loadCasePreview(sel) {
@@ -1705,10 +1781,21 @@
       renderCaseSnap(null, null);
       return;
     }
-    // Prefer case already on fire row
+    state.learnSnapCache = state.learnSnapCache || {};
+    const cacheKey = _learnSnapKey(sel);
     if (sel.case && (sel.case.features_ok || sel.case.ad_zone || sel.case.band)) {
+      state.learnSnapCache[cacheKey] = sel.case;
       renderCaseSnap(sel.case, sel);
       return;
+    }
+    if (cacheKey && state.learnSnapCache[cacheKey]) {
+      renderCaseSnap(state.learnSnapCache[cacheKey], sel);
+      return;
+    }
+    const host = $("#learnCaseSnap");
+    if (host) {
+      host.hidden = false;
+      host.innerHTML = `<p class="mute">Loading chart history…</p>`;
     }
     try {
       let q = `symbol=${encodeURIComponent(sel.symbol)}&market=${encodeURIComponent(
@@ -1722,6 +1809,7 @@
       if (sel.velocity_band && !snap.velocity_band)
         snap.velocity_band = sel.velocity_band;
       if (sel.price != null && snap.fire_price == null) snap.fire_price = sel.price;
+      if (cacheKey) state.learnSnapCache[cacheKey] = snap;
       renderCaseSnap(snap, sel);
     } catch (e) {
       renderCaseSnap(
@@ -1749,6 +1837,9 @@
     $$(".chip-bucket", $("#learnBucketChips")).forEach((c) =>
       c.classList.remove("on")
     );
+    $$(".chip[data-tag]", $("#teachForm")).forEach((c) =>
+      c.classList.remove("on")
+    );
     const bar = $("#learnContextBar");
     const det = $("#learnContextDetail");
     const sub = $("#teachSubmit");
@@ -1768,7 +1859,10 @@
         det.innerHTML = "";
       }
       renderCaseSnap(null, null);
-      if (sub) sub.disabled = true;
+      if (sub) {
+        sub.disabled = true;
+        sub.textContent = "Save case + lesson";
+      }
       if (ek) ek.value = "";
       if (sy) sy.value = "";
       if (mk) mk.value = "";
@@ -1791,7 +1885,10 @@
       det.hidden = !sel.detail;
       det.innerHTML = escHtml(sel.detail || "");
     }
-    if (sub) sub.disabled = false;
+    if (sub) {
+      sub.disabled = false;
+      sub.textContent = "Save case + lesson";
+    }
     if (ek) ek.value = sel.entity_key || "";
     if (sy) sy.value = sel.symbol || "";
     if (mk) mk.value = sel.market || "";
@@ -2115,6 +2212,43 @@
     }
 
     // 4 Lessons with about context + delete
+    const SETUP_TF = [
+      "tf:1m",
+      "tf:5m",
+      "tf:15m",
+      "tf:1h",
+      "tf:4h",
+      "tf:8h",
+      "tf:12h",
+      "tf:1d",
+      "tf:1w",
+    ];
+    const SETUP_REGIME = ["regime:familiar", "regime:new_high", "regime:new_low"];
+    const SETUP_REDS = [
+      "reds:1",
+      "reds:2",
+      "reds:3",
+      "reds:4",
+      "reds:5",
+      "reds:6",
+    ];
+    const SETUP_VOL = ["vol:climax", "vol:dry"];
+    const SETUP_ALL = [
+      ...SETUP_TF,
+      ...SETUP_REGIME,
+      ...SETUP_REDS,
+      ...SETUP_VOL,
+    ];
+    const stackLabel = (t) => {
+      if (t.startsWith("tf:")) return t.slice(3);
+      if (t.startsWith("regime:")) return t.slice(7).replace("_", " ");
+      if (t.startsWith("reds:")) {
+        const n = t.slice(5);
+        return n === "6" ? "6+ reds" : n + (n === "1" ? "st" : n === "2" ? "nd" : n === "3" ? "rd" : "th");
+      }
+      if (t.startsWith("vol:")) return t.slice(4);
+      return t;
+    };
     const PROCESS_CHIPS = [
       "plan_ok",
       "greed",
@@ -2163,6 +2297,11 @@
                   !x.includes(":") &&
                   x.length < 24
               );
+              const stackTags = (tags || []).filter(
+                (x) =>
+                  typeof x === "string" &&
+                  SETUP_ALL.includes(x.toLowerCase())
+              );
               const bucket =
                 l.bucket ||
                 (bucketTag ? bucketTag.slice(7) : "") ||
@@ -2189,25 +2328,29 @@
                     metaBits.join(" · ")
                   )}</div>`
                 : "";
-              const tagHtml = chipTags.length
-                ? `<div class="learn-lesson-tags">${chipTags
-                    .map((t) => {
-                      const ad = t === "ad_met" || t === "ad_missed";
-                      return `<span class="learn-tag ${
-                        ad ? "ad" : "beh"
-                      }">${escHtml(t)}</span>`;
-                    })
-                    .join("")}${
-                    bucket
-                      ? `<span class="learn-tag bucket">${escHtml(
-                          bucket
-                        )}</span>`
-                      : ""
-                  }</div>`
-                : bucket
-                  ? `<div class="learn-lesson-tags"><span class="learn-tag bucket">${escHtml(
+              const tagHtml =
+                chipTags.length || bucket || stackTags.length
+                  ? `<div class="learn-lesson-tags">${chipTags
+                      .map((t) => {
+                        const ad = t === "ad_met" || t === "ad_missed";
+                        return `<span class="learn-tag ${
+                          ad ? "ad" : "beh"
+                        }">${escHtml(t)}</span>`;
+                      })
+                      .join("")}${stackTags
+                      .map(
+                        (t) =>
+                          `<span class="learn-tag stack">${escHtml(
+                            stackLabel(t.toLowerCase())
+                          )}</span>`
+                      )
+                      .join("")}${
                       bucket
-                    )}</span></div>`
+                        ? `<span class="learn-tag bucket">${escHtml(
+                            bucket
+                          )}</span>`
+                        : ""
+                    }</div>`
                   : "";
               const fullText = l.text || "";
               const activeBucket = bucket || "";
@@ -2226,6 +2369,15 @@
                   }">${c}</button>`;
                 })
                 .join("");
+              const setupBtns = (codes, kind) =>
+                codes
+                  .map((c) => {
+                    const on = stackTags.includes(c) ? " on" : "";
+                    return `<button type="button" class="chip sm chip-setup chip-${kind}${on}" data-edit-chip="${c}" data-setup="${kind}" data-lid="${
+                      l.id
+                    }">${escHtml(stackLabel(c))}</button>`;
+                  })
+                  .join("");
               return `<div class="learn-lesson" data-lesson-id="${l.id}" data-incident-ts="${
                 l.incident_ts != null ? l.incident_ts : ""
               }" data-base="${escHtml(l.base || "")}">
@@ -2246,13 +2398,22 @@
                   </div>
                 </div>
                 <div class="learn-lesson-edit" hidden data-edit-panel="${l.id}">
-                  <p class="learn-panel-hint mute">Edit text and chips · agent will use the updated lesson.</p>
+                  <p class="learn-panel-hint mute">Edit text, process chips, and the chart stack (TF / reds / vol). History stays on the candles.</p>
                   <textarea class="learn-edit-text" data-edit-text="${
                     l.id
                   }" rows="4">${escHtml(fullText)}</textarea>
                   <div class="learn-chips learn-edit-chips" data-edit-chips="${
                     l.id
-                  }">${chipBtns}</div>
+                  }">${chipBtns}
+                    <span class="learn-chip-hint mute" style="width:100%">Stack · TF</span>
+                    ${setupBtns(SETUP_TF, "tf")}
+                    <span class="learn-chip-hint mute" style="width:100%">Regime</span>
+                    ${setupBtns(SETUP_REGIME, "regime")}
+                    <span class="learn-chip-hint mute" style="width:100%">Reds</span>
+                    ${setupBtns(SETUP_REDS, "red")}
+                    <span class="learn-chip-hint mute" style="width:100%">Vol</span>
+                    ${setupBtns(SETUP_VOL, "vol")}
+                  </div>
                   <div class="row-gap">
                     <button type="button" class="btn sm" data-save-lesson="${
                       l.id
@@ -2306,6 +2467,12 @@
           }
           if (BUCKET_CHIPS.includes(code)) {
             $$(".chip-bucket", panel).forEach((c) => {
+              if (c !== b) c.classList.remove("on");
+            });
+          }
+          const setupKind = b.dataset.setup;
+          if (setupKind) {
+            $$(`[data-setup="${setupKind}"]`, panel).forEach((c) => {
               if (c !== b) c.classList.remove("on");
             });
           }
@@ -2389,6 +2556,25 @@
       $("#learnAdChips"),
       $("#learnBucketChips"),
     ].filter(Boolean);
+    // Click-first setup tags (TF / regime / reds / vol) — exclusive per row
+    [
+      ["#learnTfChips", ".chip-tf"],
+      ["#learnRegimeChips", ".chip-regime"],
+      ["#learnRedChips", ".chip-red"],
+      ["#learnVolChips", ".chip-vol"],
+    ].forEach(([rid, sel]) => {
+      const root = $(rid);
+      if (!root || root.dataset.bound) return;
+      root.dataset.bound = "1";
+      root.addEventListener("click", (ev) => {
+        const b = ev.target.closest("[data-tag]");
+        if (!b) return;
+        const on = !b.classList.contains("on");
+        $$(sel, root).forEach((c) => c.classList.remove("on"));
+        if (on) b.classList.add("on");
+      });
+    });
+
     chipRoots.forEach((chips) => {
       if (chips.dataset.bound) return;
       chips.dataset.bound = "1";
@@ -2444,6 +2630,12 @@
           );
           return;
         }
+        const btn = $("#teachSubmit");
+        const prevLabel = btn ? btn.textContent : "";
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = "Saving…";
+        }
         try {
           await api("/api/learning/teach", {
             method: "POST",
@@ -2454,7 +2646,9 @@
               entity_key: sel.entity_key || null,
               event_id: sel.event_id || null,
               context_type: sel.type || null,
-              behaviors: state.learnBehaviors || [],
+              behaviors: (state.learnBehaviors || []).concat(
+                $$(".chip.on[data-tag]", $("#teachForm")).map((c) => c.dataset.tag)
+              ),
             }),
           });
           toast(`Case saved on ${sel.symbol}`);
@@ -2469,10 +2663,17 @@
           $$(".chip-bucket", $("#learnBucketChips")).forEach((c) =>
             c.classList.remove("on")
           );
+          $$(".chip.on[data-tag]", $("#teachForm")).forEach((c) =>
+            c.classList.remove("on")
+          );
           setLearnSelection(null);
           loadMemory();
         } catch (e) {
           toast(e.message);
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = prevLabel || "Save case + lesson";
+          }
         }
       });
     }

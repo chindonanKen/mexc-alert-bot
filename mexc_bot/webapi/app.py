@@ -233,8 +233,8 @@ def create_app() -> FastAPI:
                 {"id": "desk_ui", "title": "AD Desk (small edits only while agent builds)", "status": "beta"},
             ],
             "next": [
-                {"id": "p1_cases", "title": "P1 Case factory — freeze on fire/teach + Learning snapshot UI", "status": "live"},
-                {"id": "p2_decide", "title": "P2 Decide + log (agent_decisions, nearest-case)", "status": "planned"},
+                {"id": "p1_cases", "title": "P1 Case factory — multi-TF AD + regime/vol/reds + retrieve", "status": "wip"},
+                {"id": "p2_decide", "title": "P2 Decide + log (TF pick + factor stack + size hint)", "status": "planned"},
                 {"id": "p3_grade", "title": "P3 Grade decisions vs teach_ok / ad_met", "status": "planned"},
                 {"id": "p4_policy", "title": "P4 AD policy proposals (layers/zones)", "status": "planned"},
                 {"id": "p5_paper", "title": "P5 Paper / replay + pass bar", "status": "planned"},
@@ -246,6 +246,7 @@ def create_app() -> FastAPI:
                 "Follow docs/AD_AGENT_PLAN.md — do not skip phases",
                 "Telegram = panic push; Desk = positions + teach + agent",
                 "Structured cases over free-text scrapbook",
+                "Chart history on the working TF is the source of truth — size to how this dump matches that history",
                 "Exchange money_truth only for $ (teach_ok window)",
                 "Decide+log then grade before any coach or live",
                 "Live exchange orders off unless explicitly enabled",
@@ -1201,6 +1202,42 @@ def create_app() -> FastAPI:
                 symbol=symbol,
                 market=market,
             )
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/learning/similar-cases")
+    def learning_similar_cases(
+        case_id: Optional[int] = None,
+        symbol: Optional[str] = None,
+        market: Optional[str] = None,
+        k: int = 5,
+        _: bool = Depends(require_auth),
+    ):
+        """P1 index: nearest frozen setups. Scores only — not advice."""
+        from ..learning.cases import case_public_view
+        from ..learning.retrieve import similar_cases
+        from .learning_v1 import event_store, uid_or_raise
+
+        try:
+            uid = uid_or_raise()
+            store = event_store()
+            rows = store.list_setup_cases(uid, limit=80)
+            views = [case_public_view(r) for r in rows]
+            query = None
+            if case_id:
+                query = next((v for v in views if v.get("id") == int(case_id)), None)
+            if query is None:
+                # Never recompute klines here — pick already fetched case-preview.
+                if not symbol:
+                    return {"ok": True, "query": None, "similar": []}
+                query = {
+                    "symbol": symbol,
+                    "market": market or "futures",
+                }
+            neighbors = similar_cases(
+                views, query, k=min(max(int(k), 1), 8), exclude_id=query.get("id")
+            )
+            return {"ok": True, "query": {"id": query.get("id"), "symbol": query.get("symbol")}, "similar": neighbors}
         except Exception as e:
             raise HTTPException(400, str(e))
 

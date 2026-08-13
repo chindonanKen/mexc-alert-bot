@@ -733,6 +733,7 @@ def teach(
     from ..learning.buckets import ensure_bucket_in_chips_or_tags, normalize_bucket
 
     bucket_explicit: Optional[str] = None
+    SETUP_PREFIXES = ("tf:", "regime:", "reds:", "vol:")
     for b in behaviors or []:
         s = str(b or "").strip().lower().replace(" ", "_")
         nb = normalize_bucket(s)
@@ -743,6 +744,10 @@ def teach(
             "ad_skip",
         ):
             bucket_explicit = nb or s
+            continue
+        if s.startswith(SETUP_PREFIXES) and ":" in s:
+            if s not in tag_list:
+                tag_list.append(s)
             continue
         if s in allowed_beh and s not in beh_clean:
             beh_clean.append(s)
@@ -881,7 +886,13 @@ def teach(
                 drop_pct=drop_pct,
                 velocity_band=velocity_band,
                 heat_breadth=heat_breadth,
-                chips=beh_clean + ad_clean,
+                chips=beh_clean
+                + ad_clean
+                + [
+                    t
+                    for t in tag_list
+                    if str(t).startswith(("tf:", "regime:", "reds:", "vol:"))
+                ],
                 note=body,
                 lesson_id=int(lid),
                 trade_key=entity_key,
@@ -1109,8 +1120,9 @@ def update_lesson(
 
     def _split_behaviors(
         raw: Optional[List[str]],
-    ) -> tuple[List[str], Optional[str]]:
+    ) -> tuple[List[str], Optional[str], List[str]]:
         process: List[str] = []
+        setup: List[str] = []
         bucket_ex: Optional[str] = None
         for b in raw or []:
             s = str(b or "").strip().lower().replace(" ", "_")
@@ -1123,8 +1135,11 @@ def update_lesson(
             if s.startswith("bucket:"):
                 bucket_ex = normalize_bucket(s.split(":", 1)[-1])
                 continue
+            if s.startswith(("tf:", "regime:", "reds:", "vol:")):
+                setup.append(s)
+                continue
             process.append(s)
-        return process, bucket_ex
+        return process, bucket_ex, setup
 
     if tags is not None:
         tag_list: List[str] = []
@@ -1138,7 +1153,7 @@ def update_lesson(
             if s not in tag_list:
                 tag_list.append(s)
         free = [x for x in tag_list if ":" not in x]
-        process, bucket_ex = _split_behaviors(free)
+        process, bucket_ex, setup = _split_behaviors(free + [x for x in tag_list if ":" in x])
         # also read bucket: from provided tags
         for t in tag_list:
             if str(t).lower().startswith("bucket:"):
@@ -1148,14 +1163,23 @@ def update_lesson(
         for s in structured:
             if s not in tag_list:
                 tag_list.append(s)
+        for s in setup:
+            if s not in tag_list:
+                tag_list.append(s)
         tag_list.extend(honest)
         tag_list = rewrite_sym_tags(tag_list)
         tag_list = _apply_bucket(tag_list, bucket_ex, honest)
     elif behaviors is not None:
         # Manual desk edit: user selection wins (do not re-apply OWNER_LESSON_CHIPS)
-        process, bucket_ex = _split_behaviors(behaviors)
+        process, bucket_ex, setup = _split_behaviors(behaviors)
+        drop_pref = ("tf:", "regime:", "reds:", "vol:")
+        kept = [
+            t
+            for t in structured
+            if not str(t).lower().startswith(drop_pref)
+        ]
+        tag_list = kept + setup + sanitize_process_chips(process)
         honest = sanitize_process_chips(process)
-        tag_list = list(structured) + honest
         tag_list = rewrite_sym_tags(tag_list)
         tag_list = _apply_bucket(tag_list, bucket_ex, honest)
     else:

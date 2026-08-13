@@ -115,6 +115,29 @@ class TestIncidentAndFreeze(unittest.TestCase):
         self.assertEqual(view.get("base"), "HFT")
         self.assertEqual(view.get("incident_ts"), 1700000100.0)
 
+    def test_freeze_stamps_clicked_tf_and_reds(self):
+        fake = {"ok": True, "band": "PANIC", "dd_pct": 8, "ad_zone": "at_ad"}
+        with patch(
+            "mexc_bot.learning.cases.build_features_for_event", return_value=fake
+        ):
+            view = freeze_case(
+                self.store,
+                1,
+                symbol="BLUAI_USDT",
+                market="futures",
+                fire_ts=1700000200.0,
+                fire_price=0.01,
+                chips=["tf:4h", "reds:4", "vol:climax", "regime:familiar", "ad_take"],
+                note="clicked stack",
+                source="teach",
+            )
+        feats = view.get("features") or {}
+        self.assertEqual(feats.get("tf_taught"), "4h")
+        self.assertEqual(feats.get("reds_taught"), 4)
+        self.assertEqual(feats.get("vol_taught"), "climax")
+        self.assertEqual(feats.get("regime_taught"), "familiar")
+        self.assertEqual(view.get("tf_hint"), "4h")
+
     def test_normalize_index(self):
         lid = self.store.teach_lesson(
             1,

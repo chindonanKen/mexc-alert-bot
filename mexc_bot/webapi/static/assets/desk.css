@@ -1583,6 +1583,10 @@ tr.row-flash td {
   color: #fbbf24;
   border-color: rgba(251, 191, 36, 0.35);
 }
+.learn-tag.stack {
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.35);
+}
 .chip.chip-bucket {
   border-color: rgba(251, 191, 36, 0.35);
   color: #fbbf24;

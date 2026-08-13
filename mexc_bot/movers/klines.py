@@ -15,10 +15,16 @@ logger = logging.getLogger(__name__)
 
 # interval key -> (spot interval, futures interval)
 _INTERVALS = {
+    "1m": ("1m", "Min1"),
     "5m": ("5m", "Min5"),
     "15m": ("15m", "Min15"),
     "1h": ("60m", "Min60"),
     "4h": ("4h", "Hour4"),
+    "8h": ("8h", "Hour8"),
+    "12h": ("12h", "Hour12"),
+    "1d": ("1d", "Day1"),
+    "1D": ("1d", "Day1"),
+    "1w": ("1w", "Week1"),
 }
 
 CacheKey = Tuple[str, str, str]  # market, symbol, tf

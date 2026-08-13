@@ -25,7 +25,9 @@ test:
 	$$PY tests/test_db_safety.py && \
 	$$PY tests/test_desk_bot_shared_alerts.py && \
 	$$PY tests/test_mw_data_safety.py && \
-	$$PY tests/test_daily_target_report.py
+	$$PY tests/test_daily_target_report.py && \
+	$$PY tests/test_red_streak.py && \
+	$$PY tests/test_p1_retrieve.py
 
 verify:
 	bash scripts/verify_build.sh

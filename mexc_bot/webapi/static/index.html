@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/desk.css?v=bookintel1" />
+  <link rel="stylesheet" href="/assets/desk.css?v=p1polish1" />
 </head>
 <body>
   <div class="bg-orb orb-a"></div>
@@ -172,9 +172,9 @@
             <summary class="learn-guide-sum">How to teach well</summary>
             <ol class="learn-howto">
               <li><strong>Pick</strong> a real trade or fire you remember.</li>
-              <li><strong>Read the snapshot</strong> — drop, band, AD zone, vol (what the agent matches later).</li>
-              <li><strong>Process chips</strong> = how you traded · <strong>AD chips</strong> = did price hit your zone.</li>
-              <li><strong>Note</strong> concrete prices/why — e.g. “wanted 13.0–13.2, low 13.73 — skip · plan_ok + ad_missed”.</li>
+              <li><strong>Read the snapshot</strong> — drop, band, per-TF ADs, reds (1st–5th), vol.</li>
+              <li><strong>Click</strong> the TF you actually read. The candles on that TF are the truth; chips only label the trade.</li>
+              <li><strong>Note</strong> optional color — e.g. wanted 13.0–13.2, low 13.73.</li>
               <li><strong>Save</strong> freezes the case. Bad lesson → Delete below. Voice: “teach me about SYN — plan_ok…”</li>
             </ol>
           </details>
@@ -275,7 +275,47 @@
                 <button type="button" class="chip chip-bucket" data-beh="ad_wait" title="Wait more structure / first candles">ad_wait</button>
                 <button type="button" class="chip chip-bucket" data-beh="ad_skip" title="Skip: no AD, delist, FOMO">ad_skip</button>
               </div>
-              <p class="learn-hint mute">If <code>ad_missed</code>: put zone prices in the note (wanted X–Y, low Z). Bucket defaults from chips if you leave it off.</p>
+              <div class="learn-chip-row">
+                <p class="learn-chip-hint mute">Timeframe you used (click — any interval 1m–1w)</p>
+              </div>
+              <div class="learn-chips" id="learnTfChips" aria-label="Timeframe">
+                <button type="button" class="chip chip-tf" data-tag="tf:1m">1m</button>
+                <button type="button" class="chip chip-tf" data-tag="tf:5m">5m</button>
+                <button type="button" class="chip chip-tf" data-tag="tf:15m">15m</button>
+                <button type="button" class="chip chip-tf" data-tag="tf:1h">1h</button>
+                <button type="button" class="chip chip-tf" data-tag="tf:4h">4h</button>
+                <button type="button" class="chip chip-tf" data-tag="tf:8h">8h</button>
+                <button type="button" class="chip chip-tf" data-tag="tf:12h">12h</button>
+                <button type="button" class="chip chip-tf" data-tag="tf:1d">1d</button>
+                <button type="button" class="chip chip-tf" data-tag="tf:1w">1w</button>
+              </div>
+              <div class="learn-chip-row">
+                <p class="learn-chip-hint mute">Regime · range vs discovery</p>
+              </div>
+              <div class="learn-chips" id="learnRegimeChips" aria-label="Regime">
+                <button type="button" class="chip chip-regime" data-tag="regime:familiar">familiar</button>
+                <button type="button" class="chip chip-regime" data-tag="regime:new_high">new high</button>
+                <button type="button" class="chip chip-regime" data-tag="regime:new_low">new low</button>
+              </div>
+              <div class="learn-chip-row">
+                <p class="learn-chip-hint mute">Reds on the working TF — match what this chart usually did, not a global 3–5 rule</p>
+              </div>
+              <div class="learn-chips" id="learnRedChips" aria-label="Red streak">
+                <button type="button" class="chip chip-red" data-tag="reds:1" title="1st red — often early, not a ban">1st</button>
+                <button type="button" class="chip chip-red" data-tag="reds:2" title="2nd red — usually wait">2nd</button>
+                <button type="button" class="chip chip-red" data-tag="reds:3" title="3rd red">3rd</button>
+                <button type="button" class="chip chip-red" data-tag="reds:4" title="4th red">4th</button>
+                <button type="button" class="chip chip-red" data-tag="reds:5" title="5th red">5th</button>
+                <button type="button" class="chip chip-red" data-tag="reds:6" title="6+ reds — wait deeper">6+</button>
+              </div>
+              <div class="learn-chip-row">
+                <p class="learn-chip-hint mute">Volume on that last red</p>
+              </div>
+              <div class="learn-chips" id="learnVolChips" aria-label="Volume">
+                <button type="button" class="chip chip-vol" data-tag="vol:climax">climax</button>
+                <button type="button" class="chip chip-vol" data-tag="vol:dry">dry</button>
+              </div>
+              <p class="learn-hint mute">Click the TF you read. History on that chart decides the setup; chips = what you see / how you traded.</p>
               <textarea name="text" id="teachText" rows="3" placeholder="This case: e.g. wanted 13.0–13.2, only 13.73 — skipped. plan_ok + ad_missed." required></textarea>
               <div class="row-gap">
                 <button class="btn" type="submit" id="teachSubmit" disabled>Save case + lesson</button>
@@ -397,6 +437,6 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/assets/desk.js?v=watchfix1"></script>
+  <script src="/assets/desk.js?v=p1polish1"></script>
 </body>
 </html>

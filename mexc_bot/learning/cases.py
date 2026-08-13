@@ -1,6 +1,7 @@
 """P1 Case factory — freeze structured setup features for the AD agent.
 
-Features index the setup; owner chips + note annotate judgment.
+Features index **chart history** on the working TF (source of truth).
+Owner chips + note annotate how the trade was taken — they do not overwrite OHLC.
 Never block mover fires: freeze soft-fails and can run async.
 """
 
@@ -108,6 +109,12 @@ def case_public_view(row: dict) -> Dict[str, Any]:
         "ad_ready": feats.get("ad_ready"),
         "vol_flag": feats.get("vol_flag"),
         "vol_ratio": feats.get("vol_ratio"),
+        "regime_guess": feats.get("regime_taught") or feats.get("regime_guess"),
+        "ad_by_tf": feats.get("ad_by_tf") or [],
+        "tf_hint": feats.get("tf_taught") or feats.get("tf_hint"),
+        "tf_hint_reason": feats.get("tf_hint_reason"),
+        "timing_gate": feats.get("timing_gate") or {},
+        "factor_alignment": feats.get("factor_alignment") or {},
         "setup_prior": feats.get("setup_prior"),
         "sharp_score": feats.get("sharp_score"),
         "rsi_now_5m": feats.get("rsi_now_5m"),
@@ -188,6 +195,9 @@ def freeze_case(
             heat_breadth=heat_breadth,
         )
         feats = merge_incident_into_features(feats, inc)
+        from .chart_features import apply_teach_feature_tags
+
+        feats = apply_teach_feature_tags(feats, chips=chips, note=note)
         bucket = infer_case_bucket(chips=chips, features=feats, note=note)
         feats["bucket"] = bucket
     chip_list = list(chips or [])
@@ -333,6 +343,12 @@ def case_preview(
         "ad_ready": feats.get("ad_ready"),
         "vol_flag": feats.get("vol_flag"),
         "vol_ratio": feats.get("vol_ratio"),
+        "regime_guess": feats.get("regime_guess"),
+        "ad_by_tf": feats.get("ad_by_tf") or [],
+        "tf_hint": feats.get("tf_hint"),
+        "tf_hint_reason": feats.get("tf_hint_reason"),
+        "timing_gate": feats.get("timing_gate") or {},
+        "factor_alignment": feats.get("factor_alignment") or {},
         "setup_prior": feats.get("setup_prior"),
         "sharp_score": feats.get("sharp_score"),
         "rsi_now_5m": feats.get("rsi_now_5m"),
