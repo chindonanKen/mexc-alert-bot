@@ -30,6 +30,9 @@ echo "==> Rebuilding and restarting container (bind-mount ./data preserved)..."
 # NOTE: never use `docker compose down -v` here — that would destroy volumes.
 docker compose up -d --build
 
+echo "==> Post-deploy smoke (polling + counts)..."
+bash scripts/post_deploy_smoke.sh --container mexc-alert-bot --db data/alerts.db
+
 echo "==> Recent logs (last 80 lines):"
 docker compose logs --tail 80
 

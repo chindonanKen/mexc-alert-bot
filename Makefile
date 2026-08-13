@@ -1,4 +1,4 @@
-.PHONY: run install test docker-build docker-up docker-down docker-logs docker-staging clean desk-qa db-safety pre-deploy
+.PHONY: run install test docker-build docker-up docker-down docker-logs docker-staging clean desk-qa db-safety pre-deploy smoke smoke-staging
 
 install:
 	python -m venv .venv
@@ -27,7 +27,8 @@ test:
 	$$PY tests/test_mw_data_safety.py && \
 	$$PY tests/test_daily_target_report.py && \
 	$$PY tests/test_red_streak.py && \
-	$$PY tests/test_p1_retrieve.py
+	$$PY tests/test_p1_retrieve.py && \
+	$$PY tests/test_heartbeat.py
 
 verify:
 	bash scripts/verify_build.sh
@@ -38,6 +39,13 @@ db-safety:
 
 pre-deploy:
 	bash scripts/pre_deploy_db_guard.sh
+
+# After a container rebuild: polling + heartbeat + row counts (see docs/PROD_RELIABILITY.md)
+smoke:
+	bash scripts/post_deploy_smoke.sh --container mexc-alert-bot --db data/alerts.db
+
+smoke-staging:
+	bash scripts/post_deploy_smoke.sh --container mexc-alert-bot-staging --db data-staging/alerts.db --skip-watchlist-floor
 
 # Mandatory after AD Desk edits: multi-agent panel + mark pass (see AGENTS.md)
 desk-qa:

@@ -13,11 +13,18 @@ services:
       # Never run `docker compose down -v` on prod (would drop named volumes; keep data/ on host).
       - ./data:/app/data
     healthcheck:
-      test: ["CMD", "python", "-c", "import os,sys; sys.exit(0 if os.path.exists('/app/data/alerts.db') else 1)"]
-      interval: 60s
+      # Must prove the process is polling + cycling — db file existing is not alive.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from mexc_bot.heartbeat import check_alive; raise SystemExit(0 if check_alive('/app/data') else 1)",
+        ]
+      interval: 20s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 45s
 
   # Staging: separate container + data dir + env so you never touch prod alerts.
   # Start: ./scripts/staging_up.sh   OR
@@ -37,11 +44,17 @@ services:
     volumes:
       - ./data-staging:/app/data
     healthcheck:
-      test: ["CMD", "python", "-c", "import os,sys; sys.exit(0 if os.path.exists('/app/data/alerts.db') else 1)"]
-      interval: 60s
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from mexc_bot.heartbeat import check_alive; raise SystemExit(0 if check_alive('/app/data') else 1)",
+        ]
+      interval: 20s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 45s
 
   # V2 AD Desk app
   # HTTP guide (droplet Grok):  ./scripts/desk_up.sh        → http://IP:8080  (no mic)

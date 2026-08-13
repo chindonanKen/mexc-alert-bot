@@ -5,6 +5,8 @@ Local Mac staging was removed as the default path (ISP/MEXC blocks, no Docker on
 
 **Goal:** Run the V4 learning build (and any experimental flags) **without** touching production alerts, prod Telegram bot, or prod SQLite.
 
+**Now mandatory for sensor/init changes** (see [PROD_RELIABILITY.md](PROD_RELIABILITY.md)): deploy staging → `make smoke-staging` → only then prod.
+
 | | Production | Staging |
 |--|------------|---------|
 | Env file | `.env` | `.env.staging` |

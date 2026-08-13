@@ -18,6 +18,7 @@ Grok sessions **do not** sync between Mac mini and MacBook — only **git (GitHu
 | **[docs/V2_BETA.md](docs/V2_BETA.md)** | **AD Desk** web UI beta — overview, intel, agent |
 | **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)** | What shipped recently, prod posture, open work |
 | **[docs/FUTURE_STRATEGY_BOTS.md](docs/FUTURE_STRATEGY_BOTS.md)** | Separate bots *not* built yet |
+| **[docs/PROD_RELIABILITY.md](docs/PROD_RELIABILITY.md)** | **Staging first** for bot-start; post-deploy smoke |
 | **[docs/V3_TESTING_AND_PROMOTION.md](docs/V3_TESTING_AND_PROMOTION.md)** | Staging → droplet deploy |
 
 ---

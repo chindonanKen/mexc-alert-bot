@@ -15,6 +15,7 @@ from typing import Callable, Dict, Optional
 
 from .config import Settings
 from .exchange import PriceProvider
+from .heartbeat import touch_heartbeat
 from .storage import AlertStore
 
 logger = logging.getLogger(__name__)
@@ -290,6 +291,10 @@ class PriceMonitor:
         while not self._stop_event.is_set():
             try:
                 self._check_once()
+                touch_heartbeat(
+                    self.settings.alerts_file_path.parent,
+                    monitor=True,
+                )
             except Exception as e:
                 logger.exception(f"Unexpected error in monitor loop: {e}")
             # Responsive sleep

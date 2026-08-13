@@ -463,6 +463,9 @@ def main() -> None:
 
     logger.info("Starting Telegram bot polling...")
     try:
+        from .heartbeat import touch_heartbeat
+
+        touch_heartbeat(settings.alerts_file_path.parent, polling=True)
         tg_bot.polling(non_stop=True, skip_pending=True)
     except KeyboardInterrupt:
         _shutdown()

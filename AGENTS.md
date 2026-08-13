@@ -3,6 +3,7 @@
 Guide for humans and coding agents. **Read this before changing production behavior.**
 
 **New machine or new Grok chat?** Start with **[START_HERE.md](START_HERE.md)** (clone, tests, bootstrap prompt), then this file, then **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)**.  
+**Prod sensors:** **[docs/PROD_RELIABILITY.md](docs/PROD_RELIABILITY.md)** — staging first for bot-start/init; `make smoke` after every prod rebuild.  
 **How the owner trades (AD, panic, layers, psychology):** **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** — required before building coach / learning / recommendation agents.
 
 **Repo (GitHub):** `https://github.com/chindonanKen/mexc-alert-bot` · branch `main`  

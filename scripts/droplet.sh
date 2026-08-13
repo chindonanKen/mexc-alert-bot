@@ -9,8 +9,9 @@
 #   ./scripts/droplet.sh status
 #   ./scripts/droplet.sh staging-up | staging-down | staging-logs
 #   ./scripts/droplet.sh prod-logs
-#   ./scripts/droplet.sh deploy-staging
-#   ./scripts/droplet.sh deploy-prod     # DESTRUCTIVE to running prod container rebuild — confirm
+#   ./scripts/droplet.sh deploy-staging  # sensor/init changes land here FIRST
+#   ./scripts/droplet.sh smoke-staging | smoke-prod
+#   ./scripts/droplet.sh deploy-prod     # after staging smoke PASS — confirm
 #   ./scripts/droplet.sh ssh             # interactive shell
 #
 # Env:
@@ -59,15 +60,22 @@ case "$CMD" in
     remote "cd $REPO && docker compose --profile staging stop mexc-bot-staging 2>/dev/null; docker stop mexc-alert-bot-staging 2>/dev/null || true; echo 'staging stopped (prod untouched)'; docker ps --filter name=mexc-alert --format 'table {{.Names}}\t{{.Status}}'"
     ;;
   deploy-staging)
-    remote "set -e; cd $REPO; git pull --ff-only origin main; mkdir -p data-staging; docker compose --profile staging up -d --build mexc-bot-staging; docker logs --tail 40 mexc-alert-bot-staging"
+    remote "set -e; cd $REPO; git pull --ff-only origin main; mkdir -p data-staging; if [[ ! -f .env.staging ]]; then echo 'MISSING .env.staging'; exit 1; fi; docker compose --profile staging up -d --build mexc-bot-staging; bash scripts/post_deploy_smoke.sh --container mexc-alert-bot-staging --db data-staging/alerts.db --skip-watchlist-floor; docker logs --tail 40 mexc-alert-bot-staging"
+    ;;
+  smoke-staging)
+    remote "cd $REPO && bash scripts/post_deploy_smoke.sh --container mexc-alert-bot-staging --db data-staging/alerts.db --skip-watchlist-floor"
+    ;;
+  smoke-prod)
+    remote "cd $REPO && bash scripts/post_deploy_smoke.sh --container mexc-alert-bot --db data/alerts.db"
     ;;
   deploy-prod)
     echo "About to rebuild PRODUCTION on $HOST ($REPO)."
-    echo "DB rule: no wipe — pre_deploy_db_guard runs on the droplet first."
+    echo "Sensor/init changes must have passed staging smoke first."
+    echo "DB rule: no wipe — pre_deploy_db_guard + post_deploy_smoke."
     echo "Type yes to continue:"
     read -r ans
     [[ "$ans" == "yes" ]] || { echo "Aborted."; exit 1; }
-    remote "set -e; cd $REPO; bash scripts/pre_deploy_db_guard.sh --strict; git pull --ff-only origin main; bash scripts/pre_deploy_db_guard.sh --strict; docker compose up -d --build mexc-bot; docker logs --tail 40 mexc-alert-bot"
+    remote "set -e; cd $REPO; bash scripts/pre_deploy_db_guard.sh --strict; git pull --ff-only origin main; bash scripts/pre_deploy_db_guard.sh --strict; docker compose up -d --build mexc-bot; bash scripts/post_deploy_smoke.sh --container mexc-alert-bot --db data/alerts.db; docker logs --tail 40 mexc-alert-bot"
     ;;
   verify)
     remote "set -e; cd $REPO; git pull --ff-only origin main 2>/dev/null || true; bash scripts/pre_deploy_db_guard.sh; bash scripts/verify_build.sh"
