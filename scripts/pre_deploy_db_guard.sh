@@ -76,6 +76,12 @@ if wl_rows or snap.get("mover_watchlist") == 0:
     wl.write_text(json.dumps({"ts": ts, "count": len(wl_rows), "rows": wl_rows}, indent=2))
     print(f"Wrote {wl} ({len(wl_rows)} watchlist rows)")
 PY
+  # Host/root writes must stay writable by the container appuser (uid 1000).
+  # A root-owned .safety/schema.lock crash-looped Telegram (2026-08-13).
+  if [[ -d data/.safety ]]; then
+    chown -R 1000:1000 data/.safety 2>/dev/null || true
+    chmod 775 data/.safety 2>/dev/null || true
+  fi
 fi
 
 echo "==> pre_deploy_db_guard PASSED"

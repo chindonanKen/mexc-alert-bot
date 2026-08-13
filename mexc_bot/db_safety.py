@@ -72,18 +72,42 @@ def safety_dir(db_path: Path) -> Path:
 
 
 @contextmanager
-def exclusive_schema_lock(db_path: Path, *, timeout_sec: float = 30.0) -> Iterator[None]:
+def exclusive_schema_lock(
+    db_path: Path, *, timeout_sec: float = 30.0, required: bool = False
+) -> Iterator[None]:
     """Cross-process lock (bot + desk share the data bind-mount).
 
-    Any runtime schema write or table rebuild must hold this. Request-path
-    ``MoverStore()`` init uses it only for CREATE IF NOT EXISTS / snapshot
-    restore — never for DROP.
+    Request-path init must never crash if ``.safety`` is root-owned or
+    unwritable — that took Telegram down (PermissionError on schema.lock).
+    Rebuild scripts may pass ``required=True``.
     """
     import fcntl
 
-    lock_path = safety_dir(db_path) / SCHEMA_LOCK_NAME
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fd = open(lock_path, "a+", encoding="utf-8")
+    candidates = [
+        safety_dir(db_path) / SCHEMA_LOCK_NAME,
+        Path(db_path).resolve().parent / ".schema.lock",
+    ]
+    fd = None
+    lock_path: Optional[Path] = None
+    last_err: Optional[BaseException] = None
+    for cand in candidates:
+        try:
+            cand.parent.mkdir(parents=True, exist_ok=True)
+            fd = open(cand, "a+", encoding="utf-8")
+            lock_path = cand
+            break
+        except OSError as e:
+            last_err = e
+            logger.warning("schema lock path %s unusable: %s", cand, e)
+            fd = None
+    if fd is None or lock_path is None:
+        msg = f"schema lock unavailable ({last_err})"
+        if required:
+            raise SchemaSafetyError(msg)
+        logger.error("%s — continuing without cross-process lock", msg)
+        yield
+        return
+
     deadline = time.monotonic() + max(1.0, float(timeout_sec))
     try:
         while True:
@@ -92,10 +116,16 @@ def exclusive_schema_lock(db_path: Path, *, timeout_sec: float = 30.0) -> Iterat
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
-                    fd.close()
-                    raise SchemaSafetyError(
-                        f"schema lock timeout after {timeout_sec}s ({lock_path})"
-                    )
+                    try:
+                        fd.close()
+                    except OSError:
+                        pass
+                    msg = f"schema lock timeout after {timeout_sec}s ({lock_path})"
+                    if required:
+                        raise SchemaSafetyError(msg)
+                    logger.error("%s — continuing without lock", msg)
+                    yield
+                    return
                 time.sleep(0.05)
         yield
     finally:
@@ -103,7 +133,10 @@ def exclusive_schema_lock(db_path: Path, *, timeout_sec: float = 30.0) -> Iterat
             fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
         except OSError:
             pass
-        fd.close()
+        try:
+            fd.close()
+        except OSError:
+            pass
 
 
 def watchlist_pk_columns(conn: sqlite3.Connection) -> list[str]:
@@ -313,7 +346,7 @@ def safe_rebuild_table(
     ``create_new_ddl`` must create ``{table}{temp_suffix}`` only.
     """
     if lock_path is not None:
-        with exclusive_schema_lock(Path(lock_path)):
+        with exclusive_schema_lock(Path(lock_path), required=True):
             return _safe_rebuild_table_unlocked(
                 conn,
                 table=table,

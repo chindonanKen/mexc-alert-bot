@@ -184,6 +184,29 @@ class TestWatchlistSnapshotAndInitFreeze(unittest.TestCase):
             symbols = {r["symbol"] for r in revived.get_watchlist(u)}
             self.assertIn("BLUAI_USDT", symbols)
 
+    def test_unwritable_safety_dir_does_not_crash_init(self) -> None:
+        """Root-owned .safety must not take Telegram down (live 2026-08-13)."""
+        import os
+        import stat
+
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "t.db"
+            store = MoverStore(path)
+            store.set_watchlist(
+                21, [{"symbol": "BLUAI_USDT", "market": "futures"}]
+            )
+            safety = path.parent / ".safety"
+            safety.mkdir(exist_ok=True)
+            os.chmod(safety, stat.S_IRUSR | stat.S_IXUSR)
+            try:
+                again = MoverStore(path)
+                self.assertEqual(
+                    {r["symbol"] for r in again.get_watchlist(21)},
+                    {"BLUAI_USDT"},
+                )
+            finally:
+                os.chmod(safety, stat.S_IRWXU)
+
     def test_snapshot_roundtrip_helper(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "wl.json"
