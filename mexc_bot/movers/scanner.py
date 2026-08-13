@@ -445,7 +445,8 @@ class MoverScanner:
                     self._empty_watch_warn_mono = mono
                     logger.warning(
                         "Mover set enabled but watchlist EMPTY user=%s set=%s(%s) "
-                        "threshold=%s%% lookback=%ss — no fires until coins are added",
+                        "threshold=%s%% lookback=%ss — no fires until coins are added "
+                        "(restore: python3 scripts/restore_watchlist_from_snapshot.py)",
                         user_id,
                         set_name,
                         set_id,

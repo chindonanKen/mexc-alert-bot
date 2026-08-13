@@ -14,7 +14,21 @@ from pathlib import Path
 from threading import RLock
 from typing import List, Optional
 
-from mexc_bot.db_safety import SchemaSafetyError, ensure_column, safe_rebuild_table
+from mexc_bot.db_safety import (
+    SchemaSafetyError,
+    WATCHLIST_SNAPSHOT_NAME,
+    create_table_if_not_exists,
+    ensure_column,
+    exclusive_schema_lock,
+    read_watchlist_snapshot,
+    row_count,
+    safe_rebuild_table,
+    safety_dir,
+    snapshot_watchlist_rows,
+    table_exists,
+    watchlist_schema_is_final,
+    write_watchlist_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +60,23 @@ class MoverStore:
             self._conn.execute("PRAGMA synchronous=NORMAL;")
         return self._conn
 
+    def _snapshot_path(self) -> Path:
+        return safety_dir(self.db_path) / WATCHLIST_SNAPSHOT_NAME
+
     def _init_db(self) -> None:
+        """Create final schema only. Never DROP / rebuild on the request path.
+
+        Bot and desk both construct ``MoverStore`` on start and every desk
+        watchlist GET. A rebuild here raced the table to 0 rows (Aug 13).
+        PK upgrades belong in ``scripts/migrate_watchlist_schema.py``.
+        """
         conn = self._get_conn()
-        conn.execute(
+        with exclusive_schema_lock(self.db_path):
+            self._init_schema_unlocked(conn)
+
+    def _init_schema_unlocked(self, conn: sqlite3.Connection) -> None:
+        create_table_if_not_exists(
+            conn,
             """
             CREATE TABLE IF NOT EXISTS mover_settings (
                 user_id INTEGER PRIMARY KEY,
@@ -57,22 +85,27 @@ class MoverStore:
                 lookback_seconds INTEGER NOT NULL,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
-            """
+            """,
         )
-        conn.execute(
+        # Final shape. IF NOT EXISTS is a no-op when the live table already
+        # exists (any PK). We never recreate / swap here.
+        create_table_if_not_exists(
+            conn,
             """
             CREATE TABLE IF NOT EXISTS mover_watchlist (
                 user_id INTEGER NOT NULL,
+                set_id INTEGER NOT NULL,
                 symbol TEXT NOT NULL,
                 market TEXT NOT NULL DEFAULT 'futures',
-                PRIMARY KEY (user_id, symbol, market)
+                PRIMARY KEY (set_id, symbol, market)
             )
-            """
+            """,
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_mover_watch_user ON mover_watchlist (user_id)"
         )
-        conn.execute(
+        create_table_if_not_exists(
+            conn,
             """
             CREATE TABLE IF NOT EXISTS mover_sets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,122 +118,188 @@ class MoverStore:
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (user_id, name)
             )
-            """
+            """,
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_mover_sets_user ON mover_sets (user_id)"
         )
-        # Additive set_id on watchlist (nullable until backfill) — never drop data
-        ensure_column(conn, "mover_watchlist", "set_id", "INTEGER")
+        if table_exists(conn, "mover_watchlist"):
+            ensure_column(conn, "mover_watchlist", "set_id", "INTEGER")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_mover_watch_set ON mover_watchlist (set_id)"
         )
-        self._migrate_legacy_to_sets(conn)
-        self._migrate_watchlist_pk(conn)
-        self._migrate_spot_bare_bases(conn)
 
-    def _migrate_spot_bare_bases(self, conn: sqlite3.Connection) -> None:
-        """Spot book ids are BASEUSDT. Fix rows stored as bare bases (OXT → OXTUSDT)."""
+        if not table_exists(conn, "mover_watchlist"):
+            raise SchemaSafetyError(
+                "mover_watchlist missing after CREATE IF NOT EXISTS — "
+                "refusing to invent an empty watchlist"
+            )
+
+        if not watchlist_schema_is_final(conn):
+            logger.error(
+                "mover_watchlist is not final PK (set_id, symbol, market). "
+                "Refusing runtime rebuild. Run: python3 scripts/migrate_watchlist_schema.py"
+            )
+
+        # Additive only — Default set + NULL set_id backfill. No DROP.
+        self._backfill_sets_if_needed(conn)
+        self._rename_bare_spot_if_needed(conn)
+        self._recover_watchlist_from_snapshot_if_empty(conn)
+        n = row_count(conn, "mover_watchlist")
+        if n > 0:
+            self._persist_watchlist_snapshot(conn)
+
+    def _persist_watchlist_snapshot(self, conn: sqlite3.Connection) -> None:
+        try:
+            write_watchlist_snapshot(self._snapshot_path(), snapshot_watchlist_rows(conn))
+        except OSError as e:
+            logger.warning("watchlist snapshot write failed: %s", e)
+
+    def _recover_watchlist_from_snapshot_if_empty(self, conn: sqlite3.Connection) -> int:
+        """If the live table is empty but `.safety` still has coins, put them back.
+
+        This is the wipe recovery path. User `/mw clear` writes an empty snapshot
+        first, so a real clear will not resurrect coins.
+        """
+        n = row_count(conn, "mover_watchlist")
+        if n > 0:
+            return 0
+        snap = read_watchlist_snapshot(self._snapshot_path())
+        if not snap:
+            return 0
+        added = self._insert_snapshot_rows(conn, snap)
+        if added:
+            logger.critical(
+                "mover_watchlist was EMPTY; restored %s coin(s) from %s",
+                added,
+                self._snapshot_path(),
+            )
+        return added
+
+    def _insert_snapshot_rows(
+        self, conn: sqlite3.Connection, rows: List[dict]
+    ) -> int:
+        added = 0
+        for r in rows:
+            sym = str(r.get("symbol") or "").upper().strip()
+            if not sym:
+                continue
+            mkt = str(r.get("market") or "futures").lower()
+            if mkt not in ("spot", "futures"):
+                mkt = "futures"
+            uid = int(r.get("user_id") or 0)
+            if uid <= 0:
+                continue
+            sid = r.get("set_id")
+            if sid is None or int(sid) <= 0:
+                sid = self._ensure_default_set(conn, uid)
+            else:
+                sid = int(sid)
+                own = conn.execute(
+                    "SELECT 1 FROM mover_sets WHERE id = ? AND user_id = ?",
+                    (sid, uid),
+                ).fetchone()
+                if not own:
+                    sid = self._ensure_default_set(conn, uid)
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO mover_watchlist "
+                "(user_id, symbol, market, set_id) VALUES (?, ?, ?, ?)",
+                (uid, sym, mkt, sid),
+            )
+            if cur.rowcount:
+                added += 1
+        return added
+
+    def restore_watchlist_from_snapshot(self) -> dict:
+        """Additive restore from ``data/.safety/watchlist_snapshot.json``."""
+        with self._lock:
+            conn = self._get_conn()
+            snap = read_watchlist_snapshot(self._snapshot_path())
+            if not snap:
+                return {
+                    "ok": False,
+                    "added": 0,
+                    "error": f"no snapshot at {self._snapshot_path()}",
+                }
+            added = self._insert_snapshot_rows(conn, snap)
+            self._persist_watchlist_snapshot(conn)
+            return {
+                "ok": True,
+                "added": added,
+                "candidates": len(snap),
+                "path": str(self._snapshot_path()),
+            }
+
+    def _rename_bare_spot_if_needed(self, conn: sqlite3.Connection) -> None:
+        """OXT → OXTUSDT when the pair row is not already present. No DELETE."""
         try:
             rows = conn.execute(
                 "SELECT user_id, symbol, market, set_id FROM mover_watchlist "
                 "WHERE lower(market) = 'spot'"
             ).fetchall()
-            for r in rows:
-                sym = str(r["symbol"] or "").upper().strip()
-                if not sym or sym.endswith("USDT") or sym.endswith("USDC"):
-                    continue
-                # Skip if already pair-like with underscore non-usdt (rare)
-                if "_" in sym:
-                    continue
-                new_sym = sym + "USDT"
-                set_id = r["set_id"]
-                uid = int(r["user_id"])
-                # Avoid unique conflict if both bare and full exist
-                if set_id is None:
-                    exists = conn.execute(
-                        "SELECT 1 FROM mover_watchlist WHERE user_id = ? AND symbol = ? "
-                        "AND market = 'spot' AND set_id IS NULL",
-                        (uid, new_sym),
-                    ).fetchone()
-                    if exists:
-                        conn.execute(
-                            "DELETE FROM mover_watchlist WHERE user_id = ? AND symbol = ? "
-                            "AND market = 'spot' AND set_id IS NULL",
-                            (uid, sym),
-                        )
-                    else:
-                        conn.execute(
-                            "UPDATE mover_watchlist SET symbol = ? "
-                            "WHERE user_id = ? AND symbol = ? AND market = 'spot' "
-                            "AND set_id IS NULL",
-                            (new_sym, uid, sym),
-                        )
-                else:
-                    exists = conn.execute(
-                        "SELECT 1 FROM mover_watchlist WHERE user_id = ? AND symbol = ? "
-                        "AND market = 'spot' AND set_id = ?",
-                        (uid, new_sym, int(set_id)),
-                    ).fetchone()
-                    if exists:
-                        conn.execute(
-                            "DELETE FROM mover_watchlist WHERE user_id = ? AND symbol = ? "
-                            "AND market = 'spot' AND set_id = ?",
-                            (uid, sym, int(set_id)),
-                        )
-                    else:
-                        conn.execute(
-                            "UPDATE mover_watchlist SET symbol = ? "
-                            "WHERE user_id = ? AND symbol = ? AND market = 'spot' "
-                            "AND set_id = ?",
-                            (new_sym, uid, sym, int(set_id)),
-                        )
         except Exception as e:
-            logger.warning("spot bare base migration: %s", e)
+            logger.warning("spot bare base scan: %s", e)
+            return
+        for r in rows:
+            sym = str(r["symbol"] or "").upper().strip()
+            if not sym or sym.endswith("USDT") or sym.endswith("USDC"):
+                continue
+            if "_" in sym:
+                continue
+            new_sym = sym + "USDT"
+            set_id = r["set_id"]
+            uid = int(r["user_id"])
+            if set_id is None:
+                exists = conn.execute(
+                    "SELECT 1 FROM mover_watchlist WHERE user_id = ? AND symbol = ? "
+                    "AND market = 'spot' AND set_id IS NULL",
+                    (uid, new_sym),
+                ).fetchone()
+                if exists:
+                    continue
+                conn.execute(
+                    "UPDATE mover_watchlist SET symbol = ? "
+                    "WHERE user_id = ? AND symbol = ? AND market = 'spot' "
+                    "AND set_id IS NULL",
+                    (new_sym, uid, sym),
+                )
+            else:
+                exists = conn.execute(
+                    "SELECT 1 FROM mover_watchlist WHERE user_id = ? AND symbol = ? "
+                    "AND market = 'spot' AND set_id = ?",
+                    (uid, new_sym, int(set_id)),
+                ).fetchone()
+                if exists:
+                    continue
+                conn.execute(
+                    "UPDATE mover_watchlist SET symbol = ? "
+                    "WHERE user_id = ? AND symbol = ? AND market = 'spot' "
+                    "AND set_id = ?",
+                    (new_sym, uid, sym, int(set_id)),
+                )
+
+    def _migrate_spot_bare_bases(self, conn: sqlite3.Connection) -> None:
+        """Compat alias — request path no longer deletes duplicate bare rows."""
+        self._rename_bare_spot_if_needed(conn)
 
     def _migrate_watchlist_pk(self, conn: sqlite3.Connection) -> None:
-        """Allow the same symbol in multiple sets: PK (set_id, symbol, market).
+        """Compat no-op. Runtime init must not rebuild. Use upgrade_watchlist_schema()."""
+        if watchlist_schema_is_final(conn):
+            return
+        logger.error(
+            "mover_watchlist PK still legacy — refusing rebuild on init; "
+            "run scripts/migrate_watchlist_schema.py"
+        )
 
-        Uses :func:`mexc_bot.db_safety.safe_rebuild_table` — never drops the live
-        table unless every source row was copied (abort on any row loss).
-        """
-        row = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='mover_watchlist'"
-        ).fetchone()
-        if not row:
-            # Table missing (failed prior migration) — recreate empty shell only
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS mover_watchlist (
-                    user_id INTEGER NOT NULL,
-                    set_id INTEGER NOT NULL,
-                    symbol TEXT NOT NULL,
-                    market TEXT NOT NULL DEFAULT 'futures',
-                    PRIMARY KEY (set_id, symbol, market)
-                )
-                """
+    def upgrade_watchlist_pk(self, conn: sqlite3.Connection) -> bool:
+        """One-shot PK rebuild. Call only from the migrate script or tests."""
+        if watchlist_schema_is_final(conn):
+            return False
+        if not table_exists(conn, "mover_watchlist"):
+            raise SchemaSafetyError(
+                "upgrade_watchlist_pk: mover_watchlist missing — will not create empty"
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mover_watch_user ON mover_watchlist (user_id)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_mover_watch_set ON mover_watchlist (set_id)"
-            )
-            return
-        sql = (row["sql"] if row else "") or ""
-        # Must compact BOTH sides — sql.replace(" ","") never contains "PRIMARY KEY (…"
-        compact = "".join(sql.split())
-        if "PRIMARYKEY(set_id,symbol,market)" in compact:
-            return
-        # pragma is authority (quoted identifiers / pretty-print)
-        pk_cols = [
-            str(r[1])
-            for r in conn.execute("PRAGMA table_info(mover_watchlist)")
-            if int(r[5] or 0) > 0
-        ]
-        if pk_cols == ["set_id", "symbol", "market"]:
-            return
-        self._migrate_legacy_to_sets(conn)
+        self._backfill_sets_if_needed(conn)
 
         def _indexes(c: sqlite3.Connection) -> None:
             c.execute(
@@ -210,7 +309,7 @@ class MoverStore:
                 "CREATE INDEX IF NOT EXISTS idx_mover_watch_set ON mover_watchlist (set_id)"
             )
 
-        try:
+        return bool(
             safe_rebuild_table(
                 conn,
                 table="mover_watchlist",
@@ -223,8 +322,6 @@ class MoverStore:
                     PRIMARY KEY (set_id, symbol, market)
                 )
                 """,
-                # INSERT OR IGNORE only collapses true PK duplicates; count must still
-                # satisfy after >= before or rebuild aborts (no silent wipe).
                 copy_sql="""
                 INSERT OR IGNORE INTO mover_watchlist_new (user_id, set_id, symbol, market)
                 SELECT user_id, COALESCE(set_id, (
@@ -235,12 +332,11 @@ class MoverStore:
                 WHERE symbol IS NOT NULL AND symbol != ''
                 """,
                 after_swap=_indexes,
+                lock_path=self.db_path,
             )
-        except SchemaSafetyError as e:
-            logger.error("mover_watchlist PK migration aborted (data preserved): %s", e)
-            return
+        )
 
-    def _migrate_legacy_to_sets(self, conn: sqlite3.Connection) -> None:
+    def _backfill_sets_if_needed(self, conn: sqlite3.Connection) -> None:
         """Ensure every user with settings/watchlist has a Default set + set_id backfill."""
         user_ids = set()
         for r in conn.execute("SELECT user_id FROM mover_settings"):
@@ -282,6 +378,10 @@ class MoverStore:
                 "WHERE user_id = ? AND (set_id IS NULL OR set_id = 0)",
                 (set_id, uid),
             )
+
+    def _migrate_legacy_to_sets(self, conn: sqlite3.Connection) -> None:
+        """Compat alias for tests / older callers."""
+        self._backfill_sets_if_needed(conn)
 
     def _ensure_default_set(
         self,
@@ -801,6 +901,7 @@ class MoverStore:
                     sid,
                     before,
                 )
+            self._persist_watchlist_snapshot(conn)
             return after
 
     def add_watchlist(
@@ -824,6 +925,7 @@ class MoverStore:
                 "VALUES (?, ?, ?, ?)",
                 (user_id, symbol.upper(), market.lower(), sid),
             )
+            self._persist_watchlist_snapshot(conn)
 
     def remove_from_watchlist(
         self,
@@ -861,6 +963,8 @@ class MoverStore:
                         (user_id, sym),
                     )
                 removed += cur.rowcount
+            if removed:
+                self._persist_watchlist_snapshot(conn)
             return removed
 
     def restore_watchlist_from_recent_fires(
@@ -910,6 +1014,7 @@ class MoverStore:
                 if cur.rowcount:
                     added += 1
                     symbols.append({"symbol": sym, "market": mkt})
+            self._persist_watchlist_snapshot(conn)
             return {
                 "ok": True,
                 "added": added,
@@ -930,6 +1035,7 @@ class MoverStore:
                 cur = conn.execute(
                     "DELETE FROM mover_watchlist WHERE user_id = ?", (user_id,)
                 )
+            self._persist_watchlist_snapshot(conn)
             return cur.rowcount
 
     def get_enabled_users(self) -> List[int]:

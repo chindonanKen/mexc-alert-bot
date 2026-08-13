@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mexc_bot.bot import _parse_mw_token, _strip_mw_token
+from mexc_bot.db_safety import read_watchlist_snapshot, write_watchlist_snapshot
 from mexc_bot.movers.storage import MoverStore
 
 
@@ -112,6 +113,91 @@ class TestWatchlistPkMigrateIdempotent(unittest.TestCase):
             ).fetchone()["sql"]
             compact = "".join(sql.split())
             self.assertIn("PRIMARYKEY(set_id,symbol,market)", compact)
+
+
+class TestWatchlistSnapshotAndInitFreeze(unittest.TestCase):
+    def test_double_init_never_changes_count(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "t.db"
+            store = MoverStore(path)
+            u = 11
+            coins = [{"symbol": f"C{i}_USDT", "market": "futures"} for i in range(20)]
+            store.set_watchlist(u, coins)
+            n = len(store.get_watchlist(u))
+            self.assertEqual(n, 20)
+            for _ in range(5):
+                other = MoverStore(path)
+                self.assertEqual(len(other.get_watchlist(u)), 20)
+
+    def test_wipe_recovers_from_snapshot(self) -> None:
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "t.db"
+            store = MoverStore(path)
+            u = 12
+            store.set_watchlist(
+                u,
+                [
+                    {"symbol": "PI_USDT", "market": "futures"},
+                    {"symbol": "OXTUSDT", "market": "spot"},
+                    {"symbol": "GENIUS_USDT", "market": "futures"},
+                ],
+            )
+            snap = path.parent / ".safety" / "watchlist_snapshot.json"
+            self.assertTrue(snap.is_file())
+            self.assertGreaterEqual(len(read_watchlist_snapshot(snap)), 3)
+            con = sqlite3.connect(path)
+            con.execute("DELETE FROM mover_watchlist")
+            con.commit()
+            con.close()
+            # Simulate bot+desk restart after the PK-race wipe
+            revived = MoverStore(path)
+            symbols = {r["symbol"] for r in revived.get_watchlist(u)}
+            self.assertEqual(symbols, {"PI_USDT", "OXTUSDT", "GENIUS_USDT"})
+
+    def test_user_clear_does_not_resurrect(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "t.db"
+            store = MoverStore(path)
+            u = 13
+            store.set_watchlist(u, [{"symbol": "ACE_USDT", "market": "futures"}])
+            store.clear_watchlist(u)
+            self.assertEqual(store.get_watchlist(u), [])
+            again = MoverStore(path)
+            self.assertEqual(again.get_watchlist(u), [])
+
+    def test_init_never_creates_empty_over_missing_table_with_snapshot(self) -> None:
+        """If someone drops the live table, snapshot coins must come back."""
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "t.db"
+            store = MoverStore(path)
+            u = 14
+            store.set_watchlist(u, [{"symbol": "BLUAI_USDT", "market": "futures"}])
+            con = sqlite3.connect(path)
+            con.execute("DROP TABLE mover_watchlist")
+            con.commit()
+            con.close()
+            revived = MoverStore(path)
+            symbols = {r["symbol"] for r in revived.get_watchlist(u)}
+            self.assertIn("BLUAI_USDT", symbols)
+
+    def test_snapshot_roundtrip_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "wl.json"
+            rows = [
+                {
+                    "user_id": 1,
+                    "symbol": "AAA_USDT",
+                    "market": "futures",
+                    "set_id": 1,
+                }
+            ]
+            write_watchlist_snapshot(p, rows)
+            back = read_watchlist_snapshot(p)
+            self.assertEqual(back[0]["symbol"], "AAA_USDT")
 
 
 class TestBotMwHandlerSourceGuard(unittest.TestCase):

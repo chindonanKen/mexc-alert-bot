@@ -15,8 +15,11 @@ from mexc_bot.db_safety import (
     assert_no_data_loss,
     compare_snapshots,
     ensure_column,
+    read_watchlist_snapshot,
     safe_rebuild_table,
     snapshot_counts,
+    watchlist_schema_is_final,
+    write_watchlist_snapshot,
 )
 from mexc_bot.movers.storage import MoverStore
 
@@ -93,47 +96,60 @@ class TestDbSafetyHelpers(unittest.TestCase):
 
 
 class TestMoverWatchlistMigrationNoWipe(unittest.TestCase):
-    def test_legacy_pk_rebuild_keeps_symbols(self) -> None:
+    def _legacy_db(self, db: Path) -> None:
+        con = sqlite3.connect(db)
+        con.execute(
+            """
+            CREATE TABLE mover_settings (
+                user_id INTEGER PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                threshold_percent REAL NOT NULL,
+                lookback_seconds INTEGER NOT NULL
+            )
+            """
+        )
+        con.execute("INSERT INTO mover_settings VALUES (1, 1, 7.0, 900)")
+        con.execute(
+            """
+            CREATE TABLE mover_watchlist (
+                user_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                market TEXT NOT NULL DEFAULT 'futures',
+                PRIMARY KEY (user_id, symbol, market)
+            )
+            """
+        )
+        for sym in ("BLUAI_USDT", "BTC_USDT", "ETH_USDT"):
+            con.execute(
+                "INSERT INTO mover_watchlist (user_id, symbol, market) VALUES (1, ?, 'futures')",
+                (sym,),
+            )
+        con.commit()
+        con.close()
+
+    def test_init_does_not_wipe_legacy_rows(self) -> None:
+        """Request-path MoverStore() must not rebuild / empty a legacy table."""
         with tempfile.TemporaryDirectory() as td:
             db = Path(td) / "t.db"
-            con = sqlite3.connect(db)
-            con.execute(
-                """
-                CREATE TABLE mover_settings (
-                    user_id INTEGER PRIMARY KEY,
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    threshold_percent REAL NOT NULL,
-                    lookback_seconds INTEGER NOT NULL
-                )
-                """
-            )
-            con.execute(
-                "INSERT INTO mover_settings VALUES (1, 1, 7.0, 900)"
-            )
-            # Old PK without set_id in PK
-            con.execute(
-                """
-                CREATE TABLE mover_watchlist (
-                    user_id INTEGER NOT NULL,
-                    symbol TEXT NOT NULL,
-                    market TEXT NOT NULL DEFAULT 'futures',
-                    PRIMARY KEY (user_id, symbol, market)
-                )
-                """
-            )
-            for sym in ("BLUAI_USDT", "BTC_USDT", "ETH_USDT"):
-                con.execute(
-                    "INSERT INTO mover_watchlist (user_id, symbol, market) VALUES (1, ?, 'futures')",
-                    (sym,),
-                )
-            con.commit()
-            con.close()
-
+            self._legacy_db(db)
             store = MoverStore(db)
             wl = store.get_watchlist(1)
             self.assertGreaterEqual(len(wl), 3)
             symbols = {r["symbol"] for r in wl}
             self.assertIn("BLUAI_USDT", symbols)
+            # Second init (bot + desk) still 3
+            store2 = MoverStore(db)
+            self.assertEqual(len(store2.get_watchlist(1)), 3)
+
+    def test_explicit_upgrade_keeps_symbols(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "t.db"
+            self._legacy_db(db)
+            store = MoverStore(db)
+            self.assertTrue(store.upgrade_watchlist_pk(store._get_conn()))
+            self.assertTrue(watchlist_schema_is_final(store._get_conn()))
+            symbols = {r["symbol"] for r in store.get_watchlist(1)}
+            self.assertEqual(symbols, {"BLUAI_USDT", "BTC_USDT", "ETH_USDT"})
 
 
 class TestStaticGuardScript(unittest.TestCase):

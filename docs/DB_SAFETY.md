@@ -84,7 +84,11 @@ These are intentional product actions. They must never run from `_init_db` / `_m
 
 See `PROTECTED_TABLES` in `mexc_bot/db_safety.py` — includes `alerts`, mover tables, learning/*, journal, cases, news, etc.
 
-Pre-deploy writes `data/.safety/pre_deploy_snapshot.json` (row counts) for forensics.
+Pre-deploy writes `data/.safety/pre_deploy_snapshot.json` (row counts) **and** `data/.safety/watchlist_snapshot.json` (the actual coin list). Counts alone cannot rebuild quiet coins.
+
+**Runtime freeze (2026-08-14):** `MoverStore()` on bot start / desk GET must **never** `DROP` or rebuild `mover_watchlist`. It only `CREATE TABLE IF NOT EXISTS` in the final shape. If the table is empty and a snapshot still has coins, init restores them additively. A real `/mw clear` writes an empty snapshot first, so it will not resurrect.
+
+PK upgrades are **explicit only**: `python3 scripts/migrate_watchlist_schema.py`. Recovery: `python3 scripts/restore_watchlist_from_snapshot.py` (fires-only restore still misses quiet coins).
 
 ---
 
@@ -92,7 +96,7 @@ Pre-deploy writes `data/.safety/pre_deploy_snapshot.json` (row counts) for foren
 
 1. **Do not** re-init an empty DB over a backup.
 2. Restore from host backup of `./data` if you have one.
-3. Movers: desk **Restore from recent fires** or `POST /api/watchlist/restore-from-fires?days=7`.
+3. Movers: `python3 scripts/restore_watchlist_from_snapshot.py` first (full list). Fires-only (`POST /api/watchlist/restore-from-fires`) cannot bring back quiet coins.
 4. Targets: only recoverable from backup / re-entry — treat alerts as sacred.
 
 ---

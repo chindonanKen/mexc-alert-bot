@@ -101,12 +101,13 @@ Stack: long-poll Telegram (`pyTelegramBotAPI`), **public** MEXC REST only (no tr
 | Do | Do not |
 |----|--------|
 | `CREATE TABLE IF NOT EXISTS` / `ensure_column` | Wipe or recreate `alerts.db` on start |
+| Snapshot `data/.safety/watchlist_snapshot.json` (real coin list) | Rebuild `mover_watchlist` inside `MoverStore()` / desk GET |
 | `safe_rebuild_table` (abort if row count would shrink) | Hand-rolled `DROP TABLE` + empty recreate |
 | Bind-mount `./data:/app/data` (already in compose) | `compose down -v`, delete host `./data` |
 | Run `pre_deploy_db_guard` before prod rebuild | Deploy when static scan fails or watchlist empty while movers ON |
 | User-facing single-row deletes (alert/lesson/mw) only in APIs | `DELETE FROM` inside `_migrate*` / `_init_db` bulk wipes |
 
-Incident that forced this rule: empty `mover_watchlist` after an unsafe PK migration → silent miss of real dumps (e.g. BLUAI). Restore: `POST /api/watchlist/restore-from-fires`.
+Incident that forced this rule: empty `mover_watchlist` after an unsafe PK migration (then a desk/bot race on every GET). Restore: `python3 scripts/restore_watchlist_from_snapshot.py` (full list) — fires-only restore misses quiet coins.
 
 ---
 
