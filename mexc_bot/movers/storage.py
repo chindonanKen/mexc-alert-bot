@@ -188,10 +188,17 @@ class MoverStore:
             )
             return
         sql = (row["sql"] if row else "") or ""
-        compact = sql.replace(" ", "")
-        if "PRIMARY KEY (set_id, symbol, market)" in compact:
+        # Must compact BOTH sides — sql.replace(" ","") never contains "PRIMARY KEY (…"
+        compact = "".join(sql.split())
+        if "PRIMARYKEY(set_id,symbol,market)" in compact:
             return
-        if "PRIMARY KEY (set_id" in compact and "symbol, market)" in compact:
+        # pragma is authority (quoted identifiers / pretty-print)
+        pk_cols = [
+            str(r[1])
+            for r in conn.execute("PRAGMA table_info(mover_watchlist)")
+            if int(r[5] or 0) > 0
+        ]
+        if pk_cols == ["set_id", "symbol", "market"]:
             return
         self._migrate_legacy_to_sets(conn)
 

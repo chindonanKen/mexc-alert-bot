@@ -85,6 +85,35 @@ class TestWatchlistNoWipe(unittest.TestCase):
             self.assertEqual(len(store.get_watchlist(u)), before)
 
 
+class TestWatchlistPkMigrateIdempotent(unittest.TestCase):
+    def test_already_new_pk_does_not_rebuild(self) -> None:
+        """Regression: space-stripped SQL never matched 'PRIMARY KEY (…)' so
+        every desk GET rebuilt mover_watchlist and raced it empty."""
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "t.db"
+            store = MoverStore(path)
+            u = 9
+            store.set_watchlist(
+                u,
+                [
+                    {"symbol": "AAA_USDT", "market": "futures"},
+                    {"symbol": "BBB_USDT", "market": "futures"},
+                ],
+            )
+            self.assertEqual(len(store.get_watchlist(u)), 2)
+            store2 = MoverStore(path)
+            self.assertEqual(len(store2.get_watchlist(u)), 2)
+            store2._migrate_watchlist_pk(store2._get_conn())
+            self.assertEqual(len(store2.get_watchlist(u)), 2)
+            sql = store2._get_conn().execute(
+                "SELECT sql FROM sqlite_master WHERE name='mover_watchlist'"
+            ).fetchone()["sql"]
+            compact = "".join(sql.split())
+            self.assertIn("PRIMARYKEY(set_id,symbol,market)", compact)
+
+
 class TestBotMwHandlerSourceGuard(unittest.TestCase):
     """Static: bare symbols must not call set_watchlist; clear needs confirm."""
 
