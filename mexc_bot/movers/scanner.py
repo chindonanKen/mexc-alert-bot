@@ -35,7 +35,7 @@ from .heat import (
     heat_snapshot,
     is_widespread_panic,
 )
-from .history import PriceHistory
+from .history import PriceHistory, wick_drawdown
 from .klines import KlineClient, format_reds_line
 from .storage import MoverStore
 from .velocity import format_velocity_line, score_dump
@@ -111,7 +111,12 @@ class MoverScanner:
         self._volume_by_market: Dict[str, Dict[str, float]] = {}
 
         self._kline_client: Optional[KlineClient] = None
-        if getattr(settings, "mover_enrich_klines", False):
+        self._wick_fire = bool(getattr(settings, "mover_wick_fire", True))
+        self._wick_cache: Dict[Tuple[str, str], list] = {}
+        self._wick_lock = threading.Lock()
+        self._wick_thread: Optional[threading.Thread] = None
+        need_klines = self._wick_fire or getattr(settings, "mover_enrich_klines", False)
+        if need_klines:
             self._kline_client = KlineClient(
                 spot_base=getattr(settings, "mexc_api_base", "https://api.mexc.com/api/v3"),
                 futures_base=getattr(
@@ -252,6 +257,85 @@ class MoverScanner:
         if abs(minutes - round(minutes)) < 1e-6:
             return f"{int(round(minutes))}m"
         return f"{minutes:.1f}m"
+
+    def _wick_bars(self, market: str, symbol: str) -> list:
+        if not self._wick_fire:
+            return []
+        with self._wick_lock:
+            return list(self._wick_cache.get((market.lower(), symbol.upper()), []))
+
+    def _wick_peak(
+        self,
+        market: str,
+        symbol: str,
+        lookback: float,
+        now: float,
+        last_price: float,
+    ):
+        bars = self._wick_bars(market, symbol)
+        if not bars:
+            return None
+        return wick_drawdown(
+            bars,
+            lookback,
+            now=now,
+            extra_prices=[(now, last_price)],
+        )
+
+    def _wick_low(
+        self, market: str, symbol: str, lookback: float, now: float
+    ) -> Optional[float]:
+        bars = self._wick_bars(market, symbol)
+        if not bars:
+            return None
+        window_start = now - lookback
+        lows = []
+        for b in bars:
+            try:
+                ts = float(b["ts"])
+                low = float(b["l"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if low > 0 and ts + 60.0 > window_start and ts <= now:
+                lows.append(low)
+        return min(lows) if lows else None
+
+    def _refresh_one_wick(self, market: str, symbol: str) -> None:
+        if self._kline_client is None:
+            return
+        bars = self._kline_client.fetch_1m_live(market, symbol, limit=20)
+        if not bars:
+            return
+        with self._wick_lock:
+            self._wick_cache[(market.lower(), symbol.upper())] = bars
+
+    def _wick_loop(self) -> None:
+        """Keep 1m OHLC (incl. forming wick) warm for the live watchlist."""
+        while not self._stop_event.is_set():
+            try:
+                pairs: list[Tuple[str, str]] = []
+                seen = set()
+                for scan in self.mover_store.list_enabled_set_scans():
+                    uid = int(scan["user_id"])
+                    sid = int(scan["id"])
+                    for it in self.mover_store.get_watchlist(uid, set_id=sid):
+                        mkt = str(it.get("market") or "futures").lower()
+                        sym = str(it.get("symbol") or "").upper()
+                        if not sym or (mkt, sym) in seen:
+                            continue
+                        seen.add((mkt, sym))
+                        pairs.append((mkt, sym))
+                for mkt, sym in pairs:
+                    if self._stop_event.is_set():
+                        break
+                    try:
+                        self._refresh_one_wick(mkt, sym)
+                    except Exception:
+                        logger.debug("wick refresh failed %s:%s", mkt, sym, exc_info=True)
+                    self._stop_event.wait(0.12)
+            except Exception:
+                logger.debug("wick loop error", exc_info=True)
+            self._stop_event.wait(2.0)
 
     def _recovery_frac(self) -> float:
         raw = getattr(self.settings, "mover_recovery_percent", 3.0)
@@ -542,9 +626,16 @@ class MoverScanner:
 
                 if anchor is None:
                     dd = self.history.peak_drawdown(market, symbol, lookback, now=now)
-                    if dd is None:
+                    wick = self._wick_peak(market, symbol, lookback, now, price_now)
+                    picked = None
+                    for cand in (dd, wick):
+                        if cand is None:
+                            continue
+                        if picked is None or cand[0] < picked[0]:
+                            picked = cand
+                    if picked is None:
                         continue
-                    change, peak_price, hist_now, p_ts = dd
+                    change, peak_price, hist_now, p_ts = picked
                     price_now = float(hist_now)
                     if change > -threshold_frac:
                         continue
@@ -555,6 +646,10 @@ class MoverScanner:
                     peak_price_for_vel = float(peak_price)
                 else:
                     step_change = (price_now - anchor) / anchor
+                    wick_low = self._wick_low(market, symbol, lookback, now)
+                    if wick_low is not None and wick_low < price_now:
+                        step_change = min(step_change, (wick_low - anchor) / anchor)
+                        price_now = wick_low
                     if step_change > -threshold_frac:
                         continue
                     fire_mode = "step"
@@ -712,7 +807,7 @@ class MoverScanner:
                                 symbol=symbol,
                                 market=market,
                                 drop_pct=float(pct),
-                                user_threshold_pct=float(settings["threshold_percent"]),
+                                user_threshold_pct=float(scan["threshold_percent"]),
                                 velocity_band=vel_band,
                                 heat_breadth=heat_dumping_count,
                                 watchlist_count=watchlist_count,
@@ -732,7 +827,7 @@ class MoverScanner:
         poll = max(_MIN_POLL_SECONDS, float(self.settings.mover_poll_seconds))
         logger.info(
             "Mover scanner started (markets=%s lookback=%ss threshold=%s%% poll=%ss "
-            "min_gap=%ss recovery=%s%% heat_auto=%s velocity=%s volume=%s klines=%s)",
+            "min_gap=%ss recovery=%s%% heat_auto=%s velocity=%s volume=%s klines=%s wick=%s)",
             self.settings.mover_markets,
             self.settings.mover_lookback_seconds,
             self.settings.mover_threshold_percent,
@@ -743,6 +838,7 @@ class MoverScanner:
             getattr(self.settings, "mover_enrich_velocity", True),
             getattr(self.settings, "mover_enrich_volume", True),
             getattr(self.settings, "mover_enrich_klines", False),
+            self._wick_fire,
         )
         while not self._stop_event.is_set():
             try:
@@ -762,6 +858,11 @@ class MoverScanner:
         self._stop_event.clear()
         self._thread = threading.Thread(target=self.run, name="mover-scanner", daemon=True)
         self._thread.start()
+        if self._wick_fire and self._kline_client is not None:
+            self._wick_thread = threading.Thread(
+                target=self._wick_loop, name="mover-wicks", daemon=True
+            )
+            self._wick_thread.start()
         return self._thread
 
     def stop(self) -> None:

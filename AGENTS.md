@@ -258,7 +258,7 @@ Visual id in `/l` = 1-based rank by `id ASC`. Monitor removes by **stable_id**. 
 
 ## Mover detection model (do not regress)
 
-1. **First fire (peak):** rolling **high → now** drawdown over lookback ≥ threshold. No candle-close wait.  
+1. **First fire (peak):** rolling **high → later low** in the lookback (last price **and 1m wicks**, including the forming minute). A 1-minute wick that tags −7% and snaps back **must fire**. `MOVER_WICK_FIRE` default ON.
 2. **Cascade (step):** after fire, `anchor = price_now`. Next fire when another full threshold **below anchor**.  
 3. **Min-gap:** `MOVER_COOLDOWN_SECONDS` (default 45s) only blocks rapid double-sends.  
 4. **Recovery:** price ≥ anchor × (1 + recovery%) → clear anchor (skip fire that cycle) → peak mode next.  

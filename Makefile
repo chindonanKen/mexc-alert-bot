@@ -22,6 +22,7 @@ test:
 	$$PY tests/test_webapi.py && \
 	$$PY tests/test_audio_convert.py && \
 	$$PY tests/test_mover_dedupe.py && \
+	$$PY tests/test_mover_wick_fire.py && \
 	$$PY tests/test_db_safety.py && \
 	$$PY tests/test_desk_bot_shared_alerts.py && \
 	$$PY tests/test_mw_data_safety.py && \

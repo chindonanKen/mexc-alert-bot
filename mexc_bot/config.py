@@ -78,6 +78,8 @@ class Settings:
     mover_enrich_velocity: bool
     mover_enrich_volume: bool
     mover_enrich_klines: bool
+    # Core fire path: 1m high → later low (wicks), not last-price only
+    mover_wick_fire: bool
     mover_velocity_panic: float
     mover_velocity_fast: float
     mover_heat_auto: bool
@@ -194,6 +196,7 @@ def load_settings() -> Settings:
         mover_enrich_velocity=_env_bool("MOVER_ENRICH_VELOCITY", True),
         mover_enrich_volume=_env_bool("MOVER_ENRICH_VOLUME", True),
         mover_enrich_klines=_env_bool("MOVER_ENRICH_KLINES", False),
+        mover_wick_fire=_env_bool("MOVER_WICK_FIRE", True),
         mover_velocity_panic=float(os.getenv("MOVER_VELOCITY_PANIC", "2.0")),
         mover_velocity_fast=float(os.getenv("MOVER_VELOCITY_FAST", "0.8")),
         mover_heat_auto=_env_bool("MOVER_HEAT_AUTO", True),

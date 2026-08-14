@@ -88,6 +88,21 @@ class KlineClient:
             logger.debug("get_ohlcv failed %s:%s %s: %s", market, symbol, tf, e)
             return []
 
+    def fetch_1m_live(self, market: str, symbol: str, limit: int = 20) -> List[dict]:
+        """Last N 1m bars **including the forming candle** (running high/low).
+
+        Used for wick-aware mover fires. Soft-fail → [].
+        """
+        try:
+            if market.lower() == "futures":
+                bars = self._fetch_futures_ohlcv(symbol, "1m", limit=limit)
+            else:
+                bars = self._fetch_spot_ohlcv(symbol, "1m", limit=limit)
+            return bars[-max(2, int(limit)) :] if bars else []
+        except Exception as e:
+            logger.debug("fetch_1m_live failed %s:%s: %s", market, symbol, e)
+            return []
+
     def _get_ohlc_closed(
         self, market: str, symbol: str, tf: str
     ) -> List[Tuple[float, float]]:

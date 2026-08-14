@@ -170,6 +170,66 @@ class PriceHistory:
             return None
         return ((price_now - peak) / peak, peak, price_now, peak_ts)
 
+
+def wick_drawdown(
+    bars: list,
+    lookback_seconds: float,
+    now: Optional[float] = None,
+    extra_prices: Optional[list] = None,
+) -> Optional[Tuple[float, float, float, float]]:
+    """Any 7% dump in the window: rolling high → a *later* low (incl. 1m wick).
+
+    Same-bar high then low counts (1-minute wick). A low *before* the high
+    does not count (that is a bounce, not a dump from the peak).
+
+    ``bars`` items: dicts with ``ts`` (bar open unix), ``h``, ``l``.
+    ``extra_prices``: optional [(ts, last_price), ...] from the poller.
+
+    Returns (change_frac, peak, trough, peak_ts) or None.
+    """
+    now = now if now is not None else time.time()
+    window_start = now - max(1.0, float(lookback_seconds))
+    highs: list[Tuple[float, float]] = []
+    lows: list[Tuple[float, float]] = []
+
+    for b in bars or []:
+        try:
+            ts = float(b["ts"])
+            high = float(b["h"])
+            low = float(b["l"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if high <= 0 or low <= 0:
+            continue
+        bar_end = ts + 60.0
+        if bar_end <= window_start or ts > now:
+            continue
+        highs.append((ts, high))
+        # Low is treated as after the high in the same minute
+        lows.append((min(bar_end - 1.0, now), low))
+
+    for item in extra_prices or []:
+        try:
+            ts, px = float(item[0]), float(item[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if px <= 0 or ts < window_start or ts > now:
+            continue
+        highs.append((ts, px))
+        lows.append((ts, px))
+
+    if not highs or not lows:
+        return None
+
+    peak_ts, peak = max(highs, key=lambda x: (x[1], -x[0]))
+    after = [(ts, px) for ts, px in lows if ts >= peak_ts - 1e-9]
+    if not after:
+        return None
+    trough_ts, trough = min(after, key=lambda x: (x[1], x[0]))
+    if peak <= 0:
+        return None
+    return ((trough - peak) / peak, peak, trough, peak_ts)
+
     def tracked_count(self) -> int:
         with self._lock:
             return len(self._series)
