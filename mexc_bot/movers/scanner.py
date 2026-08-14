@@ -620,18 +620,36 @@ class MoverScanner:
 
                 if anchor is not None and recovery_frac > 0:
                     if price_now >= anchor * (1.0 + recovery_frac):
-                        logger.debug(
-                            "Mover anchor cleared (recovery) %s:%s anchor=%s now=%s",
-                            market,
-                            symbol,
-                            anchor,
-                            price_now,
+                        last_dd = self.history.peak_drawdown(
+                            market, symbol, lookback, now=now
                         )
-                        self._anchors.pop(key, None)
-                        self._last_fire_price.pop(key, None)
-                        # Wick fingerprints stay — a bounce must not re-alert
-                        # the same 1m hole every min-gap.
-                        continue
+                        still_in_hole = (
+                            last_dd is not None
+                            and float(last_dd[0]) <= -threshold_frac
+                        )
+                        if still_in_hole:
+                            # Bounce off a deep dump is not a new wave. Stay
+                            # on step until last price is no longer −threshold
+                            # from the 15m high (VELVET/US replay spam).
+                            logger.debug(
+                                "Mover recovery ignored, still in 15m hole "
+                                "%s:%s last_dd=%.2f%%",
+                                market,
+                                symbol,
+                                float(last_dd[0]) * 100.0,
+                            )
+                        else:
+                            logger.debug(
+                                "Mover anchor cleared (recovery) %s:%s "
+                                "anchor=%s now=%s",
+                                market,
+                                symbol,
+                                anchor,
+                                price_now,
+                            )
+                            self._anchors.pop(key, None)
+                            self._last_fire_price.pop(key, None)
+                            continue
 
                 fire_mode: Optional[str] = None  # "peak" | "step"
                 pct: float = 0.0

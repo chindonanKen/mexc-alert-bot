@@ -404,9 +404,9 @@ def test_mover_scanner_recovery_clears_anchor():
         scanner._check_once()
         assert len(notifications) == 1
 
-        # Bounce +3% above anchor 90 → clears anchor
-        fut._prices = {"XYZ_USDT": 93.0}
-        scanner.history.record("futures", "XYZ_USDT", 93.0, ts=time.time())
+        # Bounce enough that last-price is no longer −7% from the 15m high
+        fut._prices = {"XYZ_USDT": 94.0}
+        scanner.history.record("futures", "XYZ_USDT", 94.0, ts=time.time())
         scanner._check_once()
         assert len(notifications) == 1
         assert (u, "futures", "XYZ_USDT") not in scanner._anchors

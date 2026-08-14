@@ -124,6 +124,41 @@ def test_scanner_fires_wick_when_last_price_recovered():
         assert len(notes) == n, "same wick must not spam after bounce"
 
 
+def test_deep_dump_bounce_does_not_repeak():
+    """VELVET-style: −35% then +5% bounce must stay on step, not replay peak."""
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "t.db"
+        store = MoverStore(path)
+        u = 2
+        store.set_params(u, threshold_percent=7.0, lookback_seconds=900, default_enabled=True)
+        store.set_enabled(u, True, 7.0, 900)
+        store.set_watchlist(u, [{"symbol": "VELVETUSDT", "market": "spot"}])
+        notes = []
+
+        def notify(uid, msg, parse_mode=None, reply_markup=None):
+            notes.append(msg)
+
+        now = time.time()
+        scanner = MoverScanner(
+            settings=_settings(mover_wick_fire=False),
+            mover_store=store,
+            notifier=notify,
+            spot_provider=FakePrices({"VELVETUSDT": 0.65}),
+        )
+        scanner.history.record("spot", "VELVETUSDT", 1.00, ts=now - 900)
+        scanner.history.record("spot", "VELVETUSDT", 1.00, ts=now - 800)
+        scanner.history.record("spot", "VELVETUSDT", 0.65, ts=now)
+        scanner._check_once()
+        assert len(notes) == 1
+        # Bounce +5% off the low, still −31% from the 15m high
+        scanner.spot_provider._prices = {"VELVETUSDT": 0.68}
+        scanner.history.record("spot", "VELVETUSDT", 0.68, ts=now + 10)
+        scanner._check_once()
+        scanner._check_once()
+        assert len(notes) == 1, "bounce inside the hole must not re-peak"
+        assert any(k[2] == "spot" and k[3] == "VELVETUSDT" for k in scanner._anchors)
+
+
 def test_stale_wick_does_not_fire():
     now = time.time()
     # Low is 10 minutes old — still in 15m window, but not "the move"
@@ -143,5 +178,6 @@ if __name__ == "__main__":
     test_low_before_high_is_not_a_dump()
     test_acu_1045_manila_wick_would_fire()
     test_scanner_fires_wick_when_last_price_recovered()
+    test_deep_dump_bounce_does_not_repeak()
     test_stale_wick_does_not_fire()
     print("PASS: wick fire")
