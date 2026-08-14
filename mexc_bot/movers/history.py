@@ -170,6 +170,10 @@ class PriceHistory:
             return None
         return ((price_now - peak) / peak, peak, price_now, peak_ts)
 
+    def tracked_count(self) -> int:
+        with self._lock:
+            return len(self._series)
+
 
 def wick_drawdown(
     bars: list,
@@ -185,7 +189,7 @@ def wick_drawdown(
     ``bars`` items: dicts with ``ts`` (bar open unix), ``h``, ``l``.
     ``extra_prices``: optional [(ts, last_price), ...] from the poller.
 
-    Returns (change_frac, peak, trough, peak_ts) or None.
+    Returns (change_frac, peak, trough, peak_ts, trough_ts) or None.
     """
     now = now if now is not None else time.time()
     window_start = now - max(1.0, float(lookback_seconds))
@@ -228,8 +232,4 @@ def wick_drawdown(
     trough_ts, trough = min(after, key=lambda x: (x[1], x[0]))
     if peak <= 0:
         return None
-    return ((trough - peak) / peak, peak, trough, peak_ts)
-
-    def tracked_count(self) -> int:
-        with self._lock:
-            return len(self._series)
+    return ((trough - peak) / peak, peak, trough, peak_ts, trough_ts)

@@ -112,9 +112,12 @@ class MoverScanner:
 
         self._kline_client: Optional[KlineClient] = None
         self._wick_fire = bool(getattr(settings, "mover_wick_fire", True))
+        self._wick_fresh_seconds = float(getattr(settings, "mover_wick_fresh_seconds", 90.0))
         self._wick_cache: Dict[Tuple[str, str], list] = {}
         self._wick_lock = threading.Lock()
         self._wick_thread: Optional[threading.Thread] = None
+        # Do not re-alert the same (peak, trough) after a bounce
+        self._fired_wicks: Dict[Key, Set[Tuple[float, float]]] = {}
         need_klines = self._wick_fire or getattr(settings, "mover_enrich_klines", False)
         if need_klines:
             self._kline_client = KlineClient(
@@ -264,7 +267,10 @@ class MoverScanner:
         with self._wick_lock:
             return list(self._wick_cache.get((market.lower(), symbol.upper()), []))
 
-    def _wick_peak(
+    def _wick_already_fired(self, key: Key, fp: Tuple[float, float]) -> bool:
+        return fp in self._fired_wicks.get(key, set())
+
+    def _fresh_wick(
         self,
         market: str,
         symbol: str,
@@ -272,15 +278,22 @@ class MoverScanner:
         now: float,
         last_price: float,
     ):
+        """Wick dump only if the low printed recently (not a 10-minute-old hole)."""
         bars = self._wick_bars(market, symbol)
         if not bars:
             return None
-        return wick_drawdown(
+        dd = wick_drawdown(
             bars,
             lookback,
             now=now,
             extra_prices=[(now, last_price)],
         )
+        if dd is None:
+            return None
+        trough_ts = float(dd[4]) if len(dd) > 4 else 0.0
+        if now - trough_ts > self._wick_fresh_seconds:
+            return None
+        return dd
 
     def _wick_low(
         self, market: str, symbol: str, lookback: float, now: float
@@ -597,9 +610,10 @@ class MoverScanner:
                         )
                     continue
 
-                price_now = float(book[symbol])
-                if price_now <= 0:
+                book_px = float(book[symbol])
+                if book_px <= 0:
                     continue
+                price_now = book_px
 
                 key: Key = (user_id, set_id, market, symbol)
                 anchor = self._anchors.get(key)
@@ -614,8 +628,9 @@ class MoverScanner:
                             price_now,
                         )
                         self._anchors.pop(key, None)
-                        # New wave allowed: clear same-price lock for this key
                         self._last_fire_price.pop(key, None)
+                        # Wick fingerprints stay — a bounce must not re-alert
+                        # the same 1m hole every min-gap.
                         continue
 
                 fire_mode: Optional[str] = None  # "peak" | "step"
@@ -623,38 +638,50 @@ class MoverScanner:
                 ref_price: float = 0.0
                 peak_ts: Optional[float] = None
                 peak_price_for_vel: Optional[float] = None
+                wick_fp: Optional[Tuple[float, float]] = None
 
                 if anchor is None:
                     dd = self.history.peak_drawdown(market, symbol, lookback, now=now)
-                    wick = self._wick_peak(market, symbol, lookback, now, price_now)
-                    picked = None
-                    for cand in (dd, wick):
-                        if cand is None:
-                            continue
-                        if picked is None or cand[0] < picked[0]:
-                            picked = cand
+                    wick = self._fresh_wick(market, symbol, lookback, now, book_px)
+                    picked = dd
+                    if wick is not None and (picked is None or wick[0] < picked[0]):
+                        picked = wick
+                        wick_fp = (round(float(wick[1]), 8), round(float(wick[2]), 8))
                     if picked is None:
                         continue
-                    change, peak_price, hist_now, p_ts = picked
-                    price_now = float(hist_now)
+                    change, peak_price, hist_now, p_ts = picked[0], picked[1], picked[2], picked[3]
                     if change > -threshold_frac:
                         continue
+                    if wick_fp and self._wick_already_fired(key, wick_fp):
+                        continue
+                    # Alert on the trough, but arm cascade from last *trade*
+                    # so a bounce off the wick does not instantly re-enter peak.
                     fire_mode = "peak"
                     pct = change * 100.0
                     ref_price = float(peak_price)
                     peak_ts = float(p_ts)
                     peak_price_for_vel = float(peak_price)
+                    if wick_fp:
+                        price_now = float(hist_now)
                 else:
-                    step_change = (price_now - anchor) / anchor
-                    wick_low = self._wick_low(market, symbol, lookback, now)
-                    if wick_low is not None and wick_low < price_now:
-                        step_change = min(step_change, (wick_low - anchor) / anchor)
-                        price_now = wick_low
+                    step_change = (book_px - anchor) / anchor
+                    wick = self._fresh_wick(market, symbol, lookback, now, book_px)
+                    if wick is not None:
+                        w_low = float(wick[2])
+                        if w_low < book_px:
+                            w_step = (w_low - anchor) / anchor
+                            if w_step < step_change:
+                                step_change = w_step
+                                wick_fp = (round(float(wick[1]), 8), round(w_low, 8))
                     if step_change > -threshold_frac:
+                        continue
+                    if wick_fp and self._wick_already_fired(key, wick_fp):
                         continue
                     fire_mode = "step"
                     pct = step_change * 100.0
                     ref_price = float(anchor)
+                    if wick_fp:
+                        price_now = wick_fp[1]
                     # Velocity from last fire wall time → now (real cascade pace)
                     peak_price_for_vel = float(anchor)
                     peak_ts = self._last_fire_wall.get(key)
@@ -788,10 +815,12 @@ class MoverScanner:
                         )
                     else:
                         self.notifier(user_id, msg, parse_mode="HTML")
-                    self._anchors[key] = price_now
+                    self._anchors[key] = book_px
                     self._last_fire_mono[key] = time.monotonic()
                     self._last_fire_wall[key] = now
-                    self._last_fire_price[key] = float(price_now)
+                    self._last_fire_price[key] = float(book_px)
+                    if wick_fp:
+                        self._fired_wicks.setdefault(key, set()).add(wick_fp)
                     self._fires_total += 1
                     fired += 1
                     logger.info(

@@ -49,7 +49,7 @@ def test_wick_drawdown_same_bar_counts():
     bars = [{"ts": now - 30, "h": 0.105, "l": 0.096}]  # −8.57% same minute
     dd = wick_drawdown(bars, 900, now=now)
     assert dd is not None
-    change, peak, trough, _ = dd
+    change, peak, trough, _, _trough_ts = dd
     assert abs(peak - 0.105) < 1e-9
     assert abs(trough - 0.096) < 1e-9
     assert change <= -0.07
@@ -63,7 +63,7 @@ def test_low_before_high_is_not_a_dump():
     ]
     dd = wick_drawdown(bars, 900, now=now)
     assert dd is not None
-    change, peak, trough, _ = dd
+    change, peak, trough, _, _ts = dd
     assert abs(peak - 0.12) < 1e-9
     assert change > -0.07  # must not fire on the earlier 0.09
 
@@ -82,7 +82,7 @@ def test_acu_1045_manila_wick_would_fire():
     last = 0.10040  # close bounced — last-price vs 0.10518 = −4.5%
     dd = wick_drawdown(bars, 900, now=now, extra_prices=[(now, last)])
     assert dd is not None
-    change, peak, trough, _ = dd
+    change, peak, trough, _, _ts = dd
     assert peak >= 0.1051
     assert trough <= 0.0973
     assert change <= -0.07, change
@@ -118,6 +118,24 @@ def test_scanner_fires_wick_when_last_price_recovered():
         scanner._check_once()
         assert notes, "wick dump must fire even if last price bounced"
         assert "ACUUSDT" in notes[0]
+        n = len(notes)
+        scanner._check_once()
+        scanner._check_once()
+        assert len(notes) == n, "same wick must not spam after bounce"
+
+
+def test_stale_wick_does_not_fire():
+    now = time.time()
+    # Low is 10 minutes old — still in 15m window, but not "the move"
+    bars = [
+        {"ts": now - 700, "h": 0.105, "l": 0.105},
+        {"ts": now - 600, "h": 0.104, "l": 0.096},
+        {"ts": now - 30, "h": 0.101, "l": 0.100},
+    ]
+    dd = wick_drawdown(bars, 900, now=now)
+    assert dd is not None
+    trough_ts = dd[4]
+    assert now - trough_ts > 90
 
 
 if __name__ == "__main__":
@@ -125,4 +143,5 @@ if __name__ == "__main__":
     test_low_before_high_is_not_a_dump()
     test_acu_1045_manila_wick_would_fire()
     test_scanner_fires_wick_when_last_price_recovered()
+    test_stale_wick_does_not_fire()
     print("PASS: wick fire")
