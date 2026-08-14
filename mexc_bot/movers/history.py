@@ -158,10 +158,8 @@ class PriceHistory:
                     break
 
             for ts, price in series:
-                if ts < window_start:
+                if ts < window_start or ts > now:
                     continue
-                if ts > now:
-                    break
                 if price > peak:
                     peak = float(price)
                     peak_ts = float(ts)

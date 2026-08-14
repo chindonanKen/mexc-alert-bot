@@ -118,14 +118,15 @@ class MoverScanner:
         self._wick_thread: Optional[threading.Thread] = None
         # Do not re-alert the same (peak, trough) after a bounce
         self._fired_wicks: Dict[Key, Set[Tuple[float, float]]] = {}
-        need_klines = self._wick_fire or getattr(settings, "mover_enrich_klines", False)
-        if need_klines:
-            self._kline_client = KlineClient(
-                spot_base=getattr(settings, "mexc_api_base", "https://api.mexc.com/api/v3"),
-                futures_base=getattr(
-                    settings, "mexc_futures_api_base", "https://contract.mexc.com/api/v1"
-                ),
-            )
+        # Always keep 1m highs/closes in the ring buffer so a 15m local-top
+        # dump still fires after a restart (PENGUIN 2026-08-14). Wick-*lows*
+        # as the fire price stay behind mover_wick_fire.
+        self._kline_client = KlineClient(
+            spot_base=getattr(settings, "mexc_api_base", "https://api.mexc.com/api/v3"),
+            futures_base=getattr(
+                settings, "mexc_futures_api_base", "https://contract.mexc.com/api/v1"
+            ),
+        )
 
     def get_health(self) -> dict:
         now = time.monotonic()
@@ -321,6 +322,21 @@ class MoverScanner:
             return
         with self._wick_lock:
             self._wick_cache[(market.lower(), symbol.upper())] = bars
+        # Seed last-price history with 1m high + close (not the wick low).
+        # Gives a real 15m local top after restart without VELVET replay.
+        for b in bars:
+            try:
+                ts = float(b["ts"])
+                high = float(b["h"])
+                close = float(b["c"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if high > 0:
+                self.history.record(market, symbol, high, ts=ts)
+            if close > 0:
+                self.history.record(
+                    market, symbol, close, ts=min(ts + 1.0, time.time())
+                )
 
     def _wick_loop(self) -> None:
         """Keep 1m OHLC (incl. forming wick) warm for the live watchlist."""
@@ -905,9 +921,9 @@ class MoverScanner:
         self._stop_event.clear()
         self._thread = threading.Thread(target=self.run, name="mover-scanner", daemon=True)
         self._thread.start()
-        if self._wick_fire and self._kline_client is not None:
+        if self._kline_client is not None:
             self._wick_thread = threading.Thread(
-                target=self._wick_loop, name="mover-wicks", daemon=True
+                target=self._wick_loop, name="mover-klines", daemon=True
             )
             self._wick_thread.start()
         return self._thread

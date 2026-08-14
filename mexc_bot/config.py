@@ -196,7 +196,7 @@ def load_settings() -> Settings:
         mover_enrich_velocity=_env_bool("MOVER_ENRICH_VELOCITY", True),
         mover_enrich_volume=_env_bool("MOVER_ENRICH_VOLUME", True),
         mover_enrich_klines=_env_bool("MOVER_ENRICH_KLINES", False),
-        mover_wick_fire=_env_bool("MOVER_WICK_FIRE", True),
+        mover_wick_fire=_env_bool("MOVER_WICK_FIRE", False),
         mover_velocity_panic=float(os.getenv("MOVER_VELOCITY_PANIC", "2.0")),
         mover_velocity_fast=float(os.getenv("MOVER_VELOCITY_FAST", "0.8")),
         mover_heat_auto=_env_bool("MOVER_HEAT_AUTO", True),

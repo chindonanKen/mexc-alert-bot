@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from mexc_bot.movers.history import wick_drawdown
+from mexc_bot.movers.history import PriceHistory, wick_drawdown
 from mexc_bot.movers.scanner import MoverScanner
 from mexc_bot.movers.storage import MoverStore
 
@@ -42,6 +42,23 @@ class FakePrices:
 
     def close(self):
         pass
+
+
+def test_seeded_1m_highs_catch_local_top_dump():
+    """PENGUIN-style: spike high then −7% last price, no 15m of poll samples."""
+    h = PriceHistory(max_age_seconds=1200)
+    now = time.time()
+    for i in range(16):
+        ts = now - (15 - i) * 60
+        h.record("spot", "PENGUINUSDT", 0.001020, ts=ts)
+        h.record("spot", "PENGUINUSDT", 0.001018, ts=ts + 30)
+    h.record("spot", "PENGUINUSDT", 0.001357, ts=now - 180)
+    h.record("spot", "PENGUINUSDT", 0.001257, ts=now)
+    dd = h.peak_drawdown("spot", "PENGUINUSDT", 900, now=now)
+    assert dd is not None
+    change, peak, px, _ = dd
+    assert peak >= 0.00135
+    assert change <= -0.07, change
 
 
 def test_wick_drawdown_same_bar_counts():
@@ -174,6 +191,7 @@ def test_stale_wick_does_not_fire():
 
 
 if __name__ == "__main__":
+    test_seeded_1m_highs_catch_local_top_dump()
     test_wick_drawdown_same_bar_counts()
     test_low_before_high_is_not_a_dump()
     test_acu_1045_manila_wick_would_fire()
