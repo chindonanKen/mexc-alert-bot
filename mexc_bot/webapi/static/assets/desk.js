@@ -1593,6 +1593,49 @@
     )}</span><strong class="${cls || ""}">${escHtml(String(v))}</strong></div>`;
   }
 
+  function _visualAdSlotHtml(c) {
+    const vad = c && c.visual_ad;
+    if (!vad || typeof vad !== "object") return "";
+    const bits = [];
+    if (vad.tf) bits.push(String(vad.tf));
+    if (vad.high != null && vad.low != null)
+      bits.push(Number(vad.high) + " → " + Number(vad.low));
+    else if (vad.high != null) bits.push("H " + Number(vad.high));
+    else if (vad.low != null) bits.push("L " + Number(vad.low));
+    if (vad.note) bits.push(String(vad.note));
+    const caption = bits.join(" · ");
+    const canImg = vad.image_relpath && c.id;
+    if (!caption && !canImg) return "";
+    const img = canImg
+      ? `<img class="learn-visual-ad-img" data-visual-ad-case="${Number(
+          c.id
+        )}" alt="Visual AD">`
+      : "";
+    return `<div class="learn-visual-ad">${img}${
+      caption
+        ? `<p class="learn-visual-ad-cap mute">${escHtml(caption)}</p>`
+        : ""
+    }</div>`;
+  }
+
+  function hydrateVisualAdImages(host) {
+    if (!host) return;
+    host.querySelectorAll("img[data-visual-ad-case]").forEach((img) => {
+      const id = img.getAttribute("data-visual-ad-case");
+      if (!id) return;
+      fetch(`/api/learning/cases/${id}/visual-ad/image`, {
+        headers: headers(false),
+      })
+        .then((r) => (r.ok ? r.blob() : Promise.reject()))
+        .then((b) => {
+          img.src = URL.createObjectURL(b);
+        })
+        .catch(() => {
+          img.remove();
+        });
+    });
+  }
+
   function renderCaseSnap(snap, sel) {
     const host = $("#learnCaseSnap");
     if (!host) return;
@@ -1722,12 +1765,14 @@
               .join(" · ")}</p>`
           : ""
       }
+      ${_visualAdSlotHtml(c)}
       <p class="learn-case-foot mute">${
         freeze === "ok"
           ? "Chart history on the TF you click is the truth. Chips record what you see / how you traded — they don’t invent an AD."
           : "Features incomplete — still teach with chips + note. (Setup score is chart structure only — not a recommendation.)"
       }</p>
       <div class="learn-similar mute" hidden></div>`;
+    hydrateVisualAdImages(host);
     try {
       host.scrollIntoView({ block: "nearest", behavior: "smooth" });
     } catch (_) {}

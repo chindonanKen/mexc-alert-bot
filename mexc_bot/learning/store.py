@@ -798,11 +798,19 @@ class EventStore:
                 existing = None
                 if event_id is not None:
                     existing = conn.execute(
-                        "SELECT id FROM agent_setup_cases WHERE user_id = ? AND event_id = ?",
+                        "SELECT id, features_json FROM agent_setup_cases "
+                        "WHERE user_id = ? AND event_id = ?",
                         (int(user_id), int(event_id)),
                     ).fetchone()
                 if existing:
                     cid = int(existing["id"])
+                    feats_store = feats
+                    if feats:
+                        from .visual_ad import preserve_visual_ad_on_features
+
+                        feats_store = preserve_visual_ad_on_features(
+                            feats, existing["features_json"]
+                        )
                     conn.execute(
                         """
                         UPDATE agent_setup_cases SET
@@ -832,7 +840,7 @@ class EventStore:
                             drop_pct,
                             velocity_band,
                             heat_breadth,
-                            json.dumps(feats) if feats else None,
+                            json.dumps(feats_store) if feats_store else None,
                             features_ok,
                             json.dumps(chips) if chips is not None else None,
                             note,
@@ -877,6 +885,45 @@ class EventStore:
         except Exception as e:
             logger.error("upsert_setup_case failed: %s", e)
             return 0
+
+    def merge_visual_ad(
+        self,
+        user_id: int,
+        case_id: int,
+        visual_ad: Dict[str, Any],
+    ) -> Optional[dict]:
+        """Update ONLY visual_ad inside features_json.
+
+        Does not touch chips_json, note, lesson_id, or formula feature keys.
+        """
+        from .visual_ad import merge_visual_ad_into_features, parse_features_json
+
+        try:
+            with self._lock:
+                conn = self._get_conn()
+                row = conn.execute(
+                    "SELECT * FROM agent_setup_cases WHERE id = ? AND user_id = ?",
+                    (int(case_id), int(user_id)),
+                ).fetchone()
+                if not row:
+                    return None
+                feats = parse_features_json(row["features_json"])
+                feats = merge_visual_ad_into_features(feats, visual_ad or {})
+                conn.execute(
+                    "UPDATE agent_setup_cases SET features_json = ? "
+                    "WHERE id = ? AND user_id = ?",
+                    (json.dumps(feats), int(case_id), int(user_id)),
+                )
+                out = conn.execute(
+                    "SELECT * FROM agent_setup_cases WHERE id = ? AND user_id = ?",
+                    (int(case_id), int(user_id)),
+                ).fetchone()
+                return dict(out) if out else None
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.error("merge_visual_ad failed: %s", e)
+            return None
 
     def get_setup_case(
         self,

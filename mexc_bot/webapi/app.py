@@ -196,6 +196,18 @@ class TagTradeBody(BaseModel):
     notes: Optional[str] = None
 
 
+class VisualAdBody(BaseModel):
+    """POST /api/learning/cases/{id}/visual-ad — staff-written visual AD."""
+
+    tf: Optional[str] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    note: Optional[str] = None
+    image_relpath: Optional[str] = None
+    source: Optional[str] = None
+    ts: Optional[float] = None
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="AD Desk", version="2.1.0-beta")
 
@@ -1202,6 +1214,68 @@ def create_app() -> FastAPI:
                 symbol=symbol,
                 market=market,
             )
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/learning/cases/{case_id}/visual-ad")
+    def learning_visual_ad_write(
+        case_id: int, body: VisualAdBody, _: bool = Depends(require_auth)
+    ):
+        """Merge a staff visual AD onto a frozen case. Does not invent one."""
+        from ..learning.cases import case_public_view
+        from .learning_v1 import event_store, uid_or_raise
+
+        payload = (
+            body.model_dump(exclude_none=True)
+            if hasattr(body, "model_dump")
+            else body.dict(exclude_none=True)
+        )
+        if not payload:
+            raise HTTPException(400, "visual_ad needs tf, high, low, note, or image_relpath")
+        try:
+            uid = uid_or_raise()
+            store = event_store()
+            row = store.merge_visual_ad(uid, int(case_id), payload)
+            if not row:
+                raise HTTPException(404, "Case not found")
+            view = case_public_view(row)
+            view["ok"] = True
+            return view
+        except HTTPException:
+            raise
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/learning/cases/{case_id}/visual-ad/image")
+    def learning_visual_ad_image(case_id: int, _: bool = Depends(require_auth)):
+        """Serve a stored visual-AD image from data/.grokbot/visual_ad/ only."""
+        from ..learning.visual_ad import (
+            extract_visual_ad,
+            parse_features_json,
+            resolve_visual_ad_image,
+        )
+        from .learning_v1 import event_store, uid_or_raise
+
+        try:
+            uid = uid_or_raise()
+            store = event_store()
+            row = store.get_setup_case(uid, case_id=int(case_id))
+            if not row:
+                raise HTTPException(404, "No visual AD image")
+            vad = extract_visual_ad(parse_features_json(row.get("features_json")))
+            rel = (vad or {}).get("image_relpath")
+            if not rel:
+                raise HTTPException(404, "No visual AD image")
+            path = resolve_visual_ad_image(store.db_path, str(rel))
+            if not path.is_file():
+                raise HTTPException(404, "No visual AD image")
+            return FileResponse(path)
+        except HTTPException:
+            raise
+        except ValueError:
+            raise HTTPException(404, "No visual AD image")
         except Exception as e:
             raise HTTPException(400, str(e))
 

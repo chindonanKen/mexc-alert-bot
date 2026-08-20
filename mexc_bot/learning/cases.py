@@ -18,6 +18,7 @@ from .chart_features import compute_fire_features
 from .incident import build_incident, merge_incident_into_features
 from .store import EventStore
 from .symbols import learning_base, normalize_learning_symbol
+from .visual_ad import extract_visual_ad
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,7 @@ def case_public_view(row: dict) -> Dict[str, Any]:
         "lesson_id": row.get("lesson_id"),
         "trade_key": row.get("trade_key"),
         "source": row.get("source"),
+        "visual_ad": extract_visual_ad(feats),
         "features": feats,
     }
 
@@ -306,6 +308,7 @@ def case_preview(
             "drop_pct": drop_pct,
             "velocity_band": velocity_band,
             "fire_price": fire_price,
+            "visual_ad": None,
         }
 
     # Live preview (not necessarily persisted until teach/fire freeze)
@@ -354,6 +357,7 @@ def case_preview(
         "rsi_now_5m": feats.get("rsi_now_5m"),
         "div_bull": feats.get("div_bull"),
         "trade_key": trade_key,
+        "visual_ad": None,
         "features": feats,
         "persisted": False,
     }

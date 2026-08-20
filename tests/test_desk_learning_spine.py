@@ -395,6 +395,7 @@ class TestDeskSurfacesStructural(unittest.TestCase):
         self.assertIn("/api/learning/teach", js)
         self.assertIn("/api/learning/ask", js)
         self.assertIn("/api/learning/answer", js)
+        self.assertNotIn("/api/learning/chart", js)
         self.assertIn("Needs you", js)
         self.assertIn("updateLearningNavBadge", js)
         self.assertIn("book_intel", js)

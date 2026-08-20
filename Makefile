@@ -29,6 +29,8 @@ test:
 	$$PY tests/test_daily_target_report.py && \
 	$$PY tests/test_red_streak.py && \
 	$$PY tests/test_p1_retrieve.py && \
+	$$PY tests/test_p1_cases.py && \
+	$$PY tests/test_visual_ad.py && \
 	$$PY tests/test_heartbeat.py
 
 verify:
