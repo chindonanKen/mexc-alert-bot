@@ -1279,6 +1279,39 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(400, str(e))
 
+    @app.get("/api/learning/incident-candles")
+    def learning_incident_candles(
+        case_id: Optional[int] = None,
+        event_id: Optional[int] = None,
+        symbol: Optional[str] = None,
+        market: Optional[str] = None,
+        fire_ts: Optional[float] = None,
+        tf: Optional[str] = None,
+        _: bool = Depends(require_auth),
+    ):
+        """OHLC for that fire/case incident. Not live TV. Does not invent visual_ad."""
+        from ..learning.incident_ohlc import incident_candles
+        from .learning_v1 import event_store, uid_or_raise
+
+        try:
+            uid = uid_or_raise()
+            return incident_candles(
+                event_store(),
+                uid,
+                case_id=case_id,
+                event_id=event_id,
+                symbol=symbol,
+                market=market,
+                fire_ts=fire_ts,
+                tf=tf,
+            )
+        except FileNotFoundError as e:
+            raise HTTPException(404, str(e))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
     @app.get("/api/learning/similar-cases")
     def learning_similar_cases(
         case_id: Optional[int] = None,

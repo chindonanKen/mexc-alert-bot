@@ -421,6 +421,21 @@ class EventStore:
         )
         return eid if ok else None
 
+    def get_event(self, user_id: int, event_id: int) -> Optional[dict]:
+        """One learning event for this user, or None. Does not invent fields."""
+        try:
+            eid = int(event_id)
+        except (TypeError, ValueError):
+            return None
+        if eid <= 0:
+            return None
+        with self._lock:
+            row = self._get_conn().execute(
+                "SELECT * FROM learning_events WHERE id = ? AND user_id = ?",
+                (eid, int(user_id)),
+            ).fetchone()
+            return dict(row) if row else None
+
     def recent_events(self, user_id: int, limit: int = 20) -> List[dict]:
         limit = max(1, min(int(limit), 100))
         with self._lock:

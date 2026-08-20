@@ -88,6 +88,60 @@ class KlineClient:
             logger.debug("get_ohlcv failed %s:%s %s: %s", market, symbol, tf, e)
             return []
 
+    def get_ohlcv_around(
+        self,
+        market: str,
+        symbol: str,
+        tf: str,
+        around_ts: float,
+        lookback_seconds: int = 6 * 3600,
+        lookahead_seconds: int = 2 * 3600,
+        limit: int = 500,
+    ) -> List[dict]:
+        """OHLCV for one incident window (not 'now'). Soft-fail → [].
+
+        Includes the fire's own bar even if it is still forming.
+        Bars outside [around_ts − lookback, around_ts + lookahead] are dropped
+        so a live book cannot masquerade as that dump.
+        """
+        if tf not in _INTERVALS:
+            return []
+        try:
+            center = float(around_ts)
+        except (TypeError, ValueError):
+            return []
+        if center > 1e12:
+            center /= 1000.0
+        if center <= 0:
+            return []
+        start = center - max(60, int(lookback_seconds or 0))
+        end = center + max(0, int(lookahead_seconds or 0))
+        end = min(end, time.time() + 60)
+        try:
+            if market.lower() == "futures":
+                bars = self._fetch_futures_ohlcv(
+                    symbol, tf, limit=limit, start_ts=start, end_ts=end
+                )
+            else:
+                bars = self._fetch_spot_ohlcv(
+                    symbol, tf, limit=limit, start_ts=start, end_ts=end
+                )
+        except Exception as e:
+            logger.debug(
+                "get_ohlcv_around failed %s:%s %s: %s", market, symbol, tf, e
+            )
+            return []
+        out: List[dict] = []
+        lo, hi = start - 1.0, end + 1.0
+        for b in bars or []:
+            try:
+                ts = float(b.get("ts") or 0)
+            except (TypeError, ValueError):
+                continue
+            if lo <= ts <= hi:
+                out.append(b)
+        return out
+
     def fetch_1m_live(self, market: str, symbol: str, limit: int = 20) -> List[dict]:
         """Last N 1m bars **including the forming candle** (running high/low).
 
@@ -125,20 +179,30 @@ class KlineClient:
         return candles
 
     def _fetch_spot_ohlcv(
-        self, symbol: str, tf: str, limit: int = 96
+        self,
+        symbol: str,
+        tf: str,
+        limit: int = 96,
+        start_ts: Optional[float] = None,
+        end_ts: Optional[float] = None,
     ) -> List[dict]:
         spot_iv, _ = _INTERVALS[tf]
         sym = symbol.upper().replace("_", "")
         if not sym.endswith("USDT") and "USDT" not in sym:
             sym = sym + "USDT"
         url = f"{self.spot_base}/klines"
+        params = {
+            "symbol": sym,
+            "interval": spot_iv,
+            "limit": max(10, min(int(limit), 500)),
+        }
+        if start_ts is not None:
+            params["startTime"] = int(float(start_ts) * 1000)
+        if end_ts is not None:
+            params["endTime"] = int(float(end_ts) * 1000)
         resp = self.session.get(
             url,
-            params={
-                "symbol": sym,
-                "interval": spot_iv,
-                "limit": max(10, min(int(limit), 500)),
-            },
+            params=params,
             timeout=self.timeout,
         )
         if resp.status_code != 200:
@@ -164,7 +228,12 @@ class KlineClient:
         return out
 
     def _fetch_futures_ohlcv(
-        self, symbol: str, tf: str, limit: int = 96
+        self,
+        symbol: str,
+        tf: str,
+        limit: int = 96,
+        start_ts: Optional[float] = None,
+        end_ts: Optional[float] = None,
     ) -> List[dict]:
         _, fut_iv = _INTERVALS[tf]
         sym = symbol.upper()
@@ -173,9 +242,14 @@ class KlineClient:
             base = sym[:-4]
             sym = f"{base}_USDT"
         url = f"{self.futures_base}/contract/kline/{sym}"
+        params = {"interval": fut_iv}
+        if start_ts is not None:
+            params["start"] = int(float(start_ts))
+        if end_ts is not None:
+            params["end"] = int(float(end_ts))
         resp = self.session.get(
             url,
-            params={"interval": fut_iv},
+            params=params,
             timeout=self.timeout,
         )
         if resp.status_code != 200:

@@ -1690,6 +1690,8 @@
       });
       hydrateVisualAdImages(slot);
     }
+    if (state.incidentChart) state.incidentChart.clicks = [];
+    paintIncidentChart();
   }
 
   function bindVisualAdWrite(host, c) {
@@ -1740,6 +1742,353 @@
           img.remove();
         });
     });
+  }
+
+  function _incidentDefaultTf(c) {
+    const vad = c && c.visual_ad && typeof c.visual_ad === "object" ? c.visual_ad : {};
+    if (vad.tf) return String(vad.tf);
+    if (c && c.tf_hint) return String(c.tf_hint);
+    return "15m";
+  }
+
+  function _incidentChartTfs(c) {
+    const known = ["1m", "5m", "15m", "1h", "4h"];
+    const extra = [];
+    const inc = c && c.incident;
+    if (inc && Array.isArray(inc.chart_tfs)) extra.push.apply(extra, inc.chart_tfs);
+    if (c && c.tf_hint) extra.push(c.tf_hint);
+    if (c && c.visual_ad && c.visual_ad.tf) extra.push(c.visual_ad.tf);
+    const out = [];
+    known.concat(extra).forEach((t) => {
+      const s = String(t || "").trim();
+      if (s && out.indexOf(s) < 0) out.push(s);
+    });
+    return out;
+  }
+
+  function _incidentChartCanShow(c, sel) {
+    const sym = (c && c.symbol) || (sel && sel.symbol);
+    const ts = (c && (c.fire_ts || c.incident_ts)) || (sel && sel.ts);
+    const eid = (c && c.event_id) || (sel && sel.event_id);
+    const cid = c && c.id;
+    return !!(sym && (ts || eid || cid));
+  }
+
+  function _incidentChartHtml(c, sel) {
+    if (!_incidentChartCanShow(c, sel)) return "";
+    const tf = _incidentDefaultTf(c);
+    const opts = _incidentChartTfs(c)
+      .map(
+        (t) =>
+          `<option value="${escHtml(t)}"${
+            t === tf ? " selected" : ""
+          }>${escHtml(t)}</option>`
+      )
+      .join("");
+    return `<div class="learn-incident-chart" id="learnIncidentChart">
+      <div class="learn-incident-chart-h">
+        <span>Incident candles</span>
+        <span class="mute" id="learnIncidentChartMeta"></span>
+        <label class="learn-incident-chart-tf">TF
+          <select id="learnIncidentTf">${opts}</select>
+        </label>
+      </div>
+      <canvas id="learnIncidentCanvas" width="640" height="220"></canvas>
+      <p class="learn-incident-chart-hint mute" id="learnIncidentChartHint">Click two prices on the dump to mark the AD zone · not live</p>
+    </div>`;
+  }
+
+  function _adPxInput(n) {
+    if (n == null || Number.isNaN(+n)) return "";
+    const x = +n;
+    if (Math.abs(x) >= 1000) return String(Math.round(x * 100) / 100);
+    if (Math.abs(x) >= 1) return String(Math.round(x * 1e6) / 1e6);
+    return String(Number(x.toPrecision(6)));
+  }
+
+  function _chartYRange(bars, extras) {
+    let lo = Infinity;
+    let hi = -Infinity;
+    (bars || []).forEach((b) => {
+      if (b.l != null && +b.l < lo) lo = +b.l;
+      if (b.h != null && +b.h > hi) hi = +b.h;
+    });
+    (extras || []).forEach((p) => {
+      if (p == null || Number.isNaN(+p)) return;
+      lo = Math.min(lo, +p);
+      hi = Math.max(hi, +p);
+    });
+    if (!isFinite(lo) || !isFinite(hi)) return { lo: 0, hi: 1 };
+    if (hi <= lo) {
+      const pad0 = Math.abs(hi) * 0.02 || 1e-8;
+      return { lo: lo - pad0, hi: hi + pad0 };
+    }
+    const pad = (hi - lo) * 0.08;
+    return { lo: lo - pad, hi: hi + pad };
+  }
+
+  function _incidentZonePrices() {
+    const highEl = $("#visualAdHigh");
+    const lowEl = $("#visualAdLow");
+    let high = highEl && String(highEl.value).trim() !== "" ? Number(highEl.value) : null;
+    let low = lowEl && String(lowEl.value).trim() !== "" ? Number(lowEl.value) : null;
+    const vad = state.learnCase && state.learnCase.visual_ad;
+    if ((high == null || Number.isNaN(high)) && vad && vad.high != null) high = Number(vad.high);
+    if ((low == null || Number.isNaN(low)) && vad && vad.low != null) low = Number(vad.low);
+    if (high != null && Number.isNaN(high)) high = null;
+    if (low != null && Number.isNaN(low)) low = null;
+    return { high, low };
+  }
+
+  function paintIncidentChart() {
+    const cv = $("#learnIncidentCanvas");
+    if (!cv) return;
+    const pack = state.incidentChart || {};
+    const bars = pack.bars || [];
+    const host = cv.parentElement;
+    const cssW = Math.max(260, (host && host.clientWidth) || 320);
+    const cssH = 220;
+    const dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(cssW * dpr);
+    cv.height = Math.round(cssH * dpr);
+    cv.style.width = cssW + "px";
+    cv.style.height = cssH + "px";
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.fillRect(0, 0, cssW, cssH);
+    const pad = { l: 52, r: 8, t: 8, b: 22 };
+    const plotW = cssW - pad.l - pad.r;
+    const plotH = cssH - pad.t - pad.b;
+    const zone = _incidentZonePrices();
+    const extras = [pack.fire_price, zone.high, zone.low].concat(pack.clicks || []);
+    const yr = _chartYRange(bars, extras);
+    const yOf = (p) => pad.t + ((yr.hi - p) / (yr.hi - yr.lo)) * plotH;
+    const xOf = (i, n) => pad.l + ((i + 0.5) / Math.max(n, 1)) * plotW;
+
+    ctx.fillStyle = "rgba(255,255,255,0.45)";
+    ctx.font = "10px ui-monospace, IBM Plex Mono, monospace";
+    ctx.textAlign = "right";
+    [yr.hi, (yr.hi + yr.lo) / 2, yr.lo].forEach((p) => {
+      ctx.fillText(fmtPx(p), pad.l - 4, yOf(p) + 3);
+    });
+
+    if (!bars.length) {
+      ctx.fillStyle = "rgba(255,255,255,0.4)";
+      ctx.textAlign = "center";
+      ctx.fillText("No candles for this incident", cssW / 2, cssH / 2);
+      return;
+    }
+
+    const n = bars.length;
+    if (pack.fire_ts) {
+      let fi = 0;
+      let best = Infinity;
+      bars.forEach((b, i) => {
+        const d = Math.abs(b.ts - pack.fire_ts);
+        if (d < best) {
+          best = d;
+          fi = i;
+        }
+      });
+      const x = xOf(fi, n);
+      ctx.strokeStyle = "rgba(34,211,238,0.55)";
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x, pad.t);
+      ctx.lineTo(x, pad.t + plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    if (zone.high != null && zone.low != null) {
+      const y1 = yOf(Math.max(zone.high, zone.low));
+      const y2 = yOf(Math.min(zone.high, zone.low));
+      ctx.fillStyle = "rgba(34,211,238,0.16)";
+      ctx.fillRect(pad.l, y1, plotW, Math.max(2, y2 - y1));
+      ctx.strokeStyle = "rgba(34,211,238,0.7)";
+      ctx.beginPath();
+      ctx.moveTo(pad.l, y1);
+      ctx.lineTo(pad.l + plotW, y1);
+      ctx.moveTo(pad.l, y2);
+      ctx.lineTo(pad.l + plotW, y2);
+      ctx.stroke();
+    } else {
+      (pack.clicks || []).forEach((p) => {
+        const y = yOf(p);
+        ctx.strokeStyle = "rgba(34,211,238,0.5)";
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(pad.l, y);
+        ctx.lineTo(pad.l + plotW, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      });
+    }
+
+    const slot = plotW / n;
+    const bodyW = Math.max(1, Math.min(8, slot * 0.6));
+    bars.forEach((b, i) => {
+      const x = xOf(i, n);
+      const up = b.c >= b.o;
+      ctx.strokeStyle = up ? "#34d399" : "#f87171";
+      ctx.fillStyle = up ? "#34d399" : "#f87171";
+      ctx.beginPath();
+      ctx.moveTo(x, yOf(b.h));
+      ctx.lineTo(x, yOf(b.l));
+      ctx.stroke();
+      const top = yOf(Math.max(b.o, b.c));
+      const bot = yOf(Math.min(b.o, b.c));
+      ctx.fillRect(x - bodyW / 2, top, bodyW, Math.max(1, bot - top));
+    });
+
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.textAlign = "center";
+    [0, Math.floor((n - 1) / 2), n - 1].forEach((i) => {
+      if (!bars[i]) return;
+      ctx.fillText(fmtTime(bars[i].ts), xOf(i, n), cssH - 6);
+    });
+  }
+
+  function _priceAtCanvasY(cv, clientY) {
+    const rect = cv.getBoundingClientRect();
+    const y = clientY - rect.top;
+    const pack = state.incidentChart || {};
+    const bars = pack.bars || [];
+    const pad = { l: 52, r: 8, t: 8, b: 22 };
+    const plotH = rect.height - pad.t - pad.b;
+    const zone = _incidentZonePrices();
+    const extras = [pack.fire_price, zone.high, zone.low].concat(pack.clicks || []);
+    const yr = _chartYRange(bars, extras);
+    const t = (y - pad.t) / Math.max(plotH, 1);
+    return yr.hi - t * (yr.hi - yr.lo);
+  }
+
+  function _onIncidentChartClick(ev) {
+    const cv = ev.currentTarget;
+    const rect = cv.getBoundingClientRect();
+    const y = ev.clientY - rect.top;
+    if (y < 8 || y > rect.height - 22) return;
+    const px = _priceAtCanvasY(cv, ev.clientY);
+    if (px == null || Number.isNaN(px)) return;
+    const pack = state.incidentChart || (state.incidentChart = {});
+    const clicks = pack.clicks || [];
+    if (clicks.length >= 2) clicks.length = 0;
+    clicks.push(px);
+    pack.clicks = clicks;
+    const hint = $("#learnIncidentChartHint");
+    if (clicks.length === 2) {
+      const hi = Math.max(clicks[0], clicks[1]);
+      const lo = Math.min(clicks[0], clicks[1]);
+      const highEl = $("#visualAdHigh");
+      const lowEl = $("#visualAdLow");
+      if (highEl) highEl.value = _adPxInput(hi);
+      if (lowEl) lowEl.value = _adPxInput(lo);
+      if (hint) {
+        hint.textContent =
+          highEl && lowEl
+            ? "Zone set — Save AD to store it"
+            : "Zone marked on this preview — Save AD needs a frozen case";
+      }
+    } else if (hint) {
+      hint.textContent = "Click the other side of the AD zone";
+    }
+    paintIncidentChart();
+  }
+
+  function _incidentCandlesQuery(c, sel, tf) {
+    const q = new URLSearchParams();
+    if (tf) q.set("tf", tf);
+    if (c && c.id != null && c.id !== "") {
+      q.set("case_id", String(c.id));
+      return q;
+    }
+    const eid = (c && c.event_id) || (sel && sel.event_id);
+    if (eid) q.set("event_id", String(eid));
+    const sym = (c && c.symbol) || (sel && sel.symbol);
+    const mkt = (c && c.market) || (sel && sel.market);
+    const ts = (c && (c.fire_ts || c.incident_ts)) || (sel && sel.ts);
+    if (sym) q.set("symbol", sym);
+    if (mkt) q.set("market", mkt);
+    if (ts) q.set("fire_ts", String(ts));
+    return q;
+  }
+
+  async function loadIncidentCandles(c, sel, tf) {
+    const cv = $("#learnIncidentCanvas");
+    if (!cv) return;
+    const useTf = tf || _incidentDefaultTf(c);
+    const q = _incidentCandlesQuery(c, sel, useTf);
+    if (!q.get("case_id") && !q.get("event_id") && !(q.get("symbol") && q.get("fire_ts"))) {
+      return;
+    }
+    const hint = $("#learnIncidentChartHint");
+    if (hint) hint.textContent = "Loading incident candles…";
+    try {
+      const body = await api("/api/learning/incident-candles?" + q.toString());
+      state.incidentChart = state.incidentChart || {};
+      state.incidentChart.bars = (body && body.bars) || [];
+      state.incidentChart.tf = (body && body.tf) || useTf;
+      state.incidentChart.fire_ts = body && body.fire_ts;
+      state.incidentChart.fire_price = body && body.fire_price;
+      state.incidentChart.symbol = body && body.symbol;
+      if (!state.incidentChart.clicks) state.incidentChart.clicks = [];
+      const meta = $("#learnIncidentChartMeta");
+      if (meta) {
+        meta.textContent = ((body && body.tf) || useTf) + " · around fire · not live";
+      }
+      if (hint) {
+        hint.textContent = state.incidentChart.bars.length
+          ? "Click two prices on the dump to mark the AD zone · not live"
+          : "No candles for this incident";
+      }
+      paintIncidentChart();
+    } catch (e) {
+      if (hint) hint.textContent = e.message || "Could not load incident candles";
+      state.incidentChart = state.incidentChart || {};
+      state.incidentChart.bars = [];
+      paintIncidentChart();
+    }
+  }
+
+  function bindIncidentChart(host, c, sel) {
+    const box = host && host.querySelector("#learnIncidentChart");
+    if (!box) return;
+    state.incidentChart = {
+      bars: [],
+      tf: _incidentDefaultTf(c),
+      clicks: [],
+      fire_ts: c && (c.fire_ts || c.incident_ts),
+      fire_price: c && c.fire_price,
+    };
+    const tfSel = box.querySelector("#learnIncidentTf");
+    const writerTf = host.querySelector("#visualAdTf");
+    const syncTf = (next) => {
+      const tf = (next || "").trim() || _incidentDefaultTf(c);
+      if (tfSel && tfSel.value !== tf) {
+        if (![...tfSel.options].some((o) => o.value === tf)) {
+          const opt = document.createElement("option");
+          opt.value = tf;
+          opt.textContent = tf;
+          tfSel.appendChild(opt);
+        }
+        tfSel.value = tf;
+      }
+      if (writerTf && writerTf.value !== tf) writerTf.value = tf;
+      loadIncidentCandles(c, sel, tf);
+    };
+    if (tfSel) tfSel.addEventListener("change", () => syncTf(tfSel.value));
+    if (writerTf) {
+      writerTf.addEventListener("change", () => syncTf(writerTf.value));
+    }
+    const highEl = host.querySelector("#visualAdHigh");
+    const lowEl = host.querySelector("#visualAdLow");
+    if (highEl) highEl.addEventListener("input", () => paintIncidentChart());
+    if (lowEl) lowEl.addEventListener("input", () => paintIncidentChart());
+    const canvas = box.querySelector("#learnIncidentCanvas");
+    if (canvas) canvas.addEventListener("click", _onIncidentChartClick);
+    loadIncidentCandles(c, sel, (tfSel && tfSel.value) || _incidentDefaultTf(c));
   }
 
   function renderCaseSnap(snap, sel) {
@@ -1872,6 +2221,7 @@
           : ""
       }
       <div id="learnVisualAdSlot">${_visualAdSlotHtml(c)}</div>
+      ${_incidentChartHtml(c, sel)}
       ${_visualAdWriteHtml(c)}
       <p class="learn-case-foot mute">${
         freeze === "ok"
@@ -1881,6 +2231,7 @@
       <div class="learn-similar mute" hidden></div>`;
     hydrateVisualAdImages(host);
     bindVisualAdWrite(host, c);
+    bindIncidentChart(host, c, sel);
     try {
       host.scrollIntoView({ block: "nearest", behavior: "smooth" });
     } catch (_) {}

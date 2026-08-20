@@ -1629,6 +1629,56 @@ form.learn-visual-ad-write,
 .learn-visual-ad-write-actions {
   margin-top: 0.35rem;
 }
+.learn-incident-chart {
+  margin: 0.45rem 0 0;
+  padding: 0.35rem 0.4rem 0.4rem;
+  border-radius: 6px;
+  border: 1px solid rgba(34, 211, 238, 0.18);
+  background: rgba(0, 0, 0, 0.22);
+}
+.learn-incident-chart-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sky, #22d3ee);
+}
+.learn-incident-chart-tf {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--mute);
+  text-transform: uppercase;
+}
+.learn-incident-chart-tf select {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  padding: 0.16rem 0.35rem;
+}
+.learn-incident-chart canvas {
+  display: block;
+  width: 100%;
+  height: 220px;
+  border-radius: 4px;
+  cursor: crosshair;
+  background: rgba(0, 0, 0, 0.25);
+}
+.learn-incident-chart-hint {
+  margin: 0.3rem 0 0;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  line-height: 1.3;
+}
 .learn-lesson-tags {
   display: flex;
   flex-wrap: wrap;

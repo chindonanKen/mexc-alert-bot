@@ -375,6 +375,9 @@ class TestDeskJsVisualAd(unittest.TestCase):
         self.assertIn("_visualAdSlotHtml", js)
         self.assertIn("renderCaseSnap", js)
         self.assertNotIn("/api/learning/chart", js)
+        self.assertIn("/api/learning/incident-candles", js)
+        self.assertIn("learnIncidentCanvas", js)
+        self.assertIn("Click two prices", js)
         self.assertIn("/api/learning/case-preview", js)
         # Writer posts to the existing merge pocket only.
         self.assertIn("/api/learning/cases/", js)
@@ -402,13 +405,216 @@ class TestDeskJsVisualAd(unittest.TestCase):
         self.assertIn("visualAdLow", chunk)
         self.assertIn("visualAdNote", chunk)
 
+    def test_chart_html_shows_without_frozen_id(self):
+        js = (ROOT / "mexc_bot/webapi/static/assets/desk.js").read_text()
+        start = js.index("function _incidentChartCanShow")
+        end = js.index("function _incidentChartHtml")
+        chunk = js[start:end]
+        self.assertIn("c.fire_ts || c.incident_ts", chunk)
+        self.assertIn("sel.event_id", chunk)
+        self.assertNotIn("c.id == null", chunk)
+
     def test_css_keeps_write_block_small(self):
         css = (ROOT / "mexc_bot/webapi/static/assets/desk.css").read_text()
         self.assertIn(".learn-visual-ad-write", css)
         self.assertIn(".learn-visual-ad-write-row", css)
         html = (ROOT / "mexc_bot/webapi/static/index.html").read_text()
-        self.assertIn("desk.js?v=visualad1", html)
-        self.assertIn("desk.css?v=visualad1", html)
+        self.assertIn("desk.js?v=incidentohlc1", html)
+        self.assertIn("desk.css?v=incidentohlc1", html)
+        self.assertIn("learn-incident-chart", css)
+
+
+FIRE_TS = 1_700_000_000.0
+FAKE_BARS = [
+    {
+        "ts": FIRE_TS - 6 * 3600 + i * 900,
+        "o": 2.0 + (i % 3) * 0.01,
+        "h": 2.2,
+        "l": 1.7,
+        "c": 1.95,
+        "v": 12.0,
+    }
+    for i in range(40)
+]
+
+
+class TestIncidentOhlc(unittest.TestCase):
+    def test_normalize_tf_rejects_garbage(self):
+        from mexc_bot.learning.incident_ohlc import normalize_tf
+
+        self.assertEqual(normalize_tf("15m"), "15m")
+        self.assertEqual(normalize_tf("1H"), "1h")
+        self.assertEqual(normalize_tf("1D"), "1d")
+        for bad in ("nope", "15min", "../etc", "1;drop", "", None, "hour"):
+            with self.subTest(tf=bad):
+                with self.assertRaises(ValueError):
+                    normalize_tf(bad)
+
+    def test_lookback_keeps_structure_on_htf(self):
+        from mexc_bot.learning.incident_ohlc import lookback_seconds
+
+        self.assertGreaterEqual(lookback_seconds("15m", 6 * 3600), 6 * 3600)
+        self.assertGreaterEqual(lookback_seconds("1h", 6 * 3600), 32 * 3600)
+
+    def test_response_omits_visual_ad(self):
+        from mexc_bot.learning.incident_ohlc import _pack_response
+
+        body = _pack_response(
+            symbol="FOO_USDT",
+            market="futures",
+            tf="15m",
+            fire_ts=FIRE_TS,
+            fire_price=2.0,
+            lookback=21600,
+            bars=FAKE_BARS[:3],
+            case_id=1,
+            event_id=2,
+        )
+        self.assertNotIn("visual_ad", body)
+        self.assertNotIn("ad_median", body)
+        self.assertNotIn("ad_zone", body)
+        self.assertFalse(body.get("live"))
+        self.assertEqual(body["symbol"], "FOO_USDT")
+
+
+class TestIncidentCandlesApi(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Path(self.tmp.name) / "desk.db"
+        os.environ["ALERTS_FILE"] = str(self.db)
+        os.environ["DESK_USER_ID"] = "8630949601"
+        os.environ.pop("DESK_API_TOKEN", None)
+        os.environ.pop("WEB_UI_TOKEN", None)
+        self.uid = 8630949601
+        self.store = EventStore(self.db)
+        from fastapi.testclient import TestClient
+        from mexc_bot.webapi.app import create_app
+
+        self.client = TestClient(create_app())
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _case(self, symbol="BAR_USDT"):
+        eid = self.store.log_event(
+            self.uid,
+            "mover_peak",
+            symbol,
+            "futures",
+            ts=FIRE_TS,
+            price=2.0,
+            drop_pct=-8,
+        )
+        cid = self.store.upsert_setup_case(
+            self.uid,
+            symbol=symbol,
+            market="futures",
+            event_id=eid,
+            fire_ts=FIRE_TS,
+            fire_price=2.0,
+            drop_pct=-8,
+            features={
+                "ok": True,
+                "ad_zone": "at_ad",
+                "dd_pct": 8.0,
+                "ad_median": 6.5,
+                "tf_hint": "15m",
+                "incident": {
+                    "ts": FIRE_TS,
+                    "price": 2.0,
+                    "chart_tfs": ["5m", "15m", "1h"],
+                    "chart_lookback_seconds": 6 * 3600,
+                },
+            },
+            chips=["plan_ok"],
+            note="api case",
+            lesson_id=4,
+            source="teach",
+        )
+        return cid, eid
+
+    def test_get_serves_case_symbol_only_and_skips_visual_ad(self):
+        cid, eid = self._case("BAR_USDT")
+        with patch(
+            "mexc_bot.learning.incident_ohlc.fetch_incident_bars",
+            return_value=FAKE_BARS,
+        ) as fetch:
+            r = self.client.get(
+                f"/api/learning/incident-candles?case_id={cid}"
+                f"&symbol=BTCUSDT&market=spot&tf=15m"
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertTrue(body.get("ok"))
+        self.assertEqual(body["symbol"], "BAR_USDT")
+        self.assertEqual(body["market"], "futures")
+        self.assertEqual(body["tf"], "15m")
+        self.assertEqual(body["fire_ts"], FIRE_TS)
+        self.assertEqual(body["event_id"], eid)
+        self.assertEqual(len(body["bars"]), 40)
+        self.assertEqual(body["bars"][0]["o"], FAKE_BARS[0]["o"])
+        self.assertNotIn("visual_ad", body)
+        self.assertNotIn("ad_median", body)
+        self.assertFalse(body.get("live"))
+        args, kwargs = fetch.call_args
+        self.assertEqual(kwargs["symbol"], "BAR_USDT")
+        self.assertEqual(kwargs["market"], "futures")
+        self.assertEqual(kwargs["tf"], "15m")
+        self.assertEqual(kwargs["fire_ts"], FIRE_TS)
+
+    def test_garbage_tf_rejected(self):
+        cid, _ = self._case()
+        with patch(
+            "mexc_bot.learning.incident_ohlc.fetch_incident_bars",
+            return_value=FAKE_BARS,
+        ):
+            r = self.client.get(
+                f"/api/learning/incident-candles?case_id={cid}&tf=nope"
+            )
+        self.assertEqual(r.status_code, 400, r.text)
+        self.assertIn("tf", (r.json().get("detail") or "").lower())
+
+    def test_event_path_cannot_retarget_symbol(self):
+        _, eid = self._case("BAR_USDT")
+        with patch(
+            "mexc_bot.learning.incident_ohlc.fetch_incident_bars",
+            return_value=FAKE_BARS,
+        ) as fetch:
+            r = self.client.get(
+                f"/api/learning/incident-candles?event_id={eid}&symbol=ETHUSDT"
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["symbol"], "BAR_USDT")
+        self.assertNotIn("visual_ad", body)
+        self.assertEqual(fetch.call_args.kwargs["symbol"], "BAR_USDT")
+
+    def test_unknown_case_404(self):
+        r = self.client.get("/api/learning/incident-candles?case_id=99999&tf=15m")
+        self.assertEqual(r.status_code, 404)
+
+    def test_missing_identity_400(self):
+        r = self.client.get("/api/learning/incident-candles?tf=15m")
+        self.assertEqual(r.status_code, 400)
+
+    def test_save_ad_still_merges_only_visual_ad(self):
+        cid, _ = self._case()
+        r = self.client.post(
+            f"/api/learning/cases/{cid}/visual-ad",
+            json={"tf": "15m", "high": 2.2, "low": 1.9, "note": "staff"},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["visual_ad"]["high"], 2.2)
+        self.assertEqual(body["note"], "api case")
+        self.assertEqual(body["lesson_id"], 4)
+        self.assertEqual(body["chips"], ["plan_ok"])
+        self.assertEqual(body["ad_zone"], "at_ad")
+        row = self.store.get_setup_case(self.uid, case_id=cid)
+        feats = json.loads(row["features_json"])
+        self.assertEqual(feats["ad_zone"], "at_ad")
+        self.assertEqual(feats["ad_median"], 6.5)
+        self.assertEqual(feats["visual_ad"]["low"], 1.9)
 
 
 if __name__ == "__main__":
