@@ -419,9 +419,28 @@ class TestDeskJsVisualAd(unittest.TestCase):
         self.assertIn(".learn-visual-ad-write", css)
         self.assertIn(".learn-visual-ad-write-row", css)
         html = (ROOT / "mexc_bot/webapi/static/index.html").read_text()
-        self.assertIn("desk.js?v=incidentohlc1", html)
-        self.assertIn("desk.css?v=incidentohlc1", html)
+        self.assertIn("desk.js?v=lessonad1", html)
+        self.assertIn("desk.css?v=lessonad1", html)
         self.assertIn("learn-incident-chart", css)
+        self.assertIn("learn-lesson-edit-ad", css)
+
+    def test_lesson_edit_reuses_same_writer(self):
+        js = (ROOT / "mexc_bot/webapi/static/assets/desk.js").read_text()
+        self.assertIn("data-edit-ad", js)
+        self.assertIn("fillLessonEditAd", js)
+        self.assertIn("renderVisualAdTeachTools", js)
+        self.assertIn("function _lessonCanShowAd", js)
+        self.assertIn("case-preview?event_id=", js)
+        can = js[js.index("function _lessonCanShowAd") : js.index("function _lessonAdSel")]
+        self.assertIn("l.case_id", can)
+        self.assertIn("l.event_id", can)
+        save = js.split('$$("[data-save-lesson]"')[1].split(
+            '$$("[data-del-lesson]"'
+        )[0]
+        self.assertIn("/api/learning/lessons/", save)
+        self.assertIn("text, behaviors", save)
+        self.assertNotIn("visual_ad", save)
+        self.assertNotIn("visual-ad", save)
 
 
 FIRE_TS = 1_700_000_000.0
@@ -615,6 +634,181 @@ class TestIncidentCandlesApi(unittest.TestCase):
         self.assertEqual(feats["ad_zone"], "at_ad")
         self.assertEqual(feats["ad_median"], 6.5)
         self.assertEqual(feats["visual_ad"]["low"], 1.9)
+
+
+class TestLessonEditVisualAdApi(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Path(self.tmp.name) / "desk.db"
+        os.environ["ALERTS_FILE"] = str(self.db)
+        os.environ["DESK_USER_ID"] = "8630949601"
+        os.environ.pop("DESK_API_TOKEN", None)
+        os.environ.pop("WEB_UI_TOKEN", None)
+        self.uid = 8630949601
+        self.store = EventStore(self.db)
+        from fastapi.testclient import TestClient
+        from mexc_bot.webapi.app import create_app
+
+        self.client = TestClient(create_app())
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _fire_lesson(self, *, visual=None):
+        eid = self.store.log_event(
+            self.uid, "mover_peak", "FOO_USDT", "futures", price=1.5, drop_pct=-12
+        )
+        lid = self.store.teach_lesson(
+            self.uid,
+            "Took the first layer at AD",
+            tags=[
+                "sym:FOO_USDT",
+                "mkt:futures",
+                f"ev:{eid}",
+                "plan_ok",
+                "ad_met",
+            ],
+            evidence_event_ids=[eid],
+        )
+        feats = {
+            "ok": True,
+            "ad_zone": "at_ad",
+            "dd_pct": 12.0,
+            "tf_hint": "15m",
+        }
+        if visual:
+            feats["visual_ad"] = visual
+        cid = self.store.upsert_setup_case(
+            self.uid,
+            symbol="FOO_USDT",
+            market="futures",
+            event_id=eid,
+            fire_ts=FIRE_TS,
+            fire_price=1.5,
+            drop_pct=-12,
+            features=feats,
+            chips=["plan_ok", "ad_met"],
+            note="classic panic",
+            lesson_id=lid,
+            source="teach",
+        )
+        return lid, cid, eid
+
+    def _lesson_from_home(self, lid):
+        r = self.client.get("/api/learning")
+        self.assertEqual(r.status_code, 200, r.text)
+        rows = (r.json().get("lessons") or [])
+        return next((x for x in rows if int(x.get("id") or 0) == int(lid)), None)
+
+    def test_learning_get_stamps_case_id_and_prefill(self):
+        lid, cid, eid = self._fire_lesson(
+            visual={"tf": "15m", "high": 1.8, "low": 1.4, "note": "marked"}
+        )
+        row = self._lesson_from_home(lid)
+        self.assertIsNotNone(row)
+        self.assertEqual(row.get("event_id"), eid)
+        self.assertEqual(row.get("case_id"), cid)
+        self.assertEqual((row.get("visual_ad") or {}).get("tf"), "15m")
+        self.assertEqual((row.get("case") or {}).get("id"), cid)
+        self.assertEqual(row.get("text"), "Took the first layer at AD")
+        tags = row.get("tags") or []
+        self.assertIn("plan_ok", tags)
+        self.assertIn("ad_met", tags)
+
+    def test_plain_lesson_has_no_case_or_zone(self):
+        lid = self.store.teach_lesson(
+            self.uid, "Never chase a bounce", tags=["plan_ok"]
+        )
+        row = self._lesson_from_home(lid)
+        self.assertIsNotNone(row)
+        self.assertIsNone(row.get("case_id"))
+        self.assertIsNone(row.get("event_id"))
+        self.assertIsNone(row.get("visual_ad"))
+        self.assertFalse(row.get("case"))
+
+    def test_event_without_case_stays_ungated_for_save_ad(self):
+        eid = self.store.log_event(
+            self.uid, "mover_peak", "BAZ_USDT", "futures", price=3.0, drop_pct=-9
+        )
+        lid = self.store.teach_lesson(
+            self.uid,
+            "Need to mark AD later",
+            tags=["sym:BAZ_USDT", "mkt:futures", f"ev:{eid}"],
+            evidence_event_ids=[eid],
+        )
+        row = self._lesson_from_home(lid)
+        self.assertIsNotNone(row)
+        self.assertEqual(row.get("event_id"), eid)
+        self.assertIsNone(row.get("case_id"))
+        self.assertIsNone(row.get("visual_ad"))
+
+    def test_post_visual_ad_does_not_clobber_lesson_or_chips(self):
+        lid, cid, eid = self._fire_lesson()
+        r = self.client.post(
+            f"/api/learning/cases/{cid}/visual-ad",
+            json={"tf": "5m", "high": 1.7, "low": 1.35, "note": "from edit"},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["visual_ad"]["tf"], "5m")
+        self.assertEqual(body["note"], "classic panic")
+        self.assertEqual(body["lesson_id"], lid)
+        self.assertEqual(body["chips"], ["plan_ok", "ad_met"])
+        self.assertEqual(body["ad_zone"], "at_ad")
+
+        lesson = self.store.get_lesson(self.uid, lid)
+        self.assertEqual(lesson["text"], "Took the first layer at AD")
+        tags = json.loads(lesson["tags_json"] or "[]")
+        self.assertIn("plan_ok", tags)
+        self.assertIn("ad_met", tags)
+
+        case = self.store.get_setup_case(self.uid, case_id=cid)
+        self.assertEqual(case.get("note"), "classic panic")
+        self.assertEqual(case.get("lesson_id"), lid)
+        self.assertEqual(json.loads(case["chips_json"]), ["plan_ok", "ad_met"])
+        feats = json.loads(case["features_json"])
+        self.assertEqual(feats["ad_zone"], "at_ad")
+        self.assertEqual(feats["dd_pct"], 12.0)
+        self.assertEqual(feats["visual_ad"]["low"], 1.35)
+
+        home = self._lesson_from_home(lid)
+        self.assertEqual(home.get("case_id"), cid)
+        self.assertEqual(home.get("text"), "Took the first layer at AD")
+        self.assertEqual((home.get("visual_ad") or {}).get("high"), 1.7)
+
+        patch = self.client.patch(
+            f"/api/learning/lessons/{lid}",
+            json={"text": "Took the first layer at AD — edited", "behaviors": ["hesitant", "ad_missed"]},
+        )
+        self.assertEqual(patch.status_code, 200, patch.text)
+        after = self.store.get_lesson(self.uid, lid)
+        self.assertEqual(after["text"], "Took the first layer at AD — edited")
+        case2 = self.store.get_setup_case(self.uid, case_id=cid)
+        feats2 = json.loads(case2["features_json"])
+        self.assertEqual(feats2["visual_ad"]["tf"], "5m")
+        self.assertEqual(feats2["ad_zone"], "at_ad")
+
+    def test_lookup_by_lesson_id_without_ev_tag(self):
+        eid = self.store.log_event(
+            self.uid, "mover_peak", "Q_USDT", "futures", price=2.0, drop_pct=-8
+        )
+        lid = self.store.teach_lesson(
+            self.uid, "Linked only via case.lesson_id", tags=["sym:Q_USDT"]
+        )
+        cid = self.store.upsert_setup_case(
+            self.uid,
+            symbol="Q_USDT",
+            market="futures",
+            event_id=eid,
+            fire_price=2.0,
+            features={"ok": True, "ad_zone": "approach"},
+            lesson_id=lid,
+        )
+        row = self.store.get_setup_case(self.uid, lesson_id=lid)
+        self.assertIsNotNone(row)
+        self.assertEqual(int(row["id"]), cid)
+        home = self._lesson_from_home(lid)
+        self.assertEqual(home.get("case_id"), cid)
 
 
 if __name__ == "__main__":

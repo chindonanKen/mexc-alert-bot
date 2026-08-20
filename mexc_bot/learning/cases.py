@@ -130,6 +130,101 @@ def case_public_view(row: dict) -> Dict[str, Any]:
     }
 
 
+def _slim_case_for_lesson(view: Dict[str, Any]) -> Dict[str, Any]:
+    """Enough for lesson Edit to reuse the snapshot AD writer. No invented zone."""
+    return {
+        "id": view.get("id"),
+        "event_id": view.get("event_id"),
+        "symbol": view.get("symbol"),
+        "market": view.get("market"),
+        "fire_ts": view.get("fire_ts"),
+        "fire_price": view.get("fire_price"),
+        "incident_ts": view.get("incident_ts"),
+        "incident_price": view.get("incident_price"),
+        "incident": view.get("incident"),
+        "tf_hint": view.get("tf_hint"),
+        "visual_ad": view.get("visual_ad"),
+    }
+
+
+def stamp_lessons_with_cases(
+    store: EventStore,
+    user_id: int,
+    lessons: List[dict],
+) -> List[dict]:
+    """Attach case_id / visual_ad from frozen cases. Never invent a zone."""
+    if not lessons:
+        return lessons
+    lids: List[int] = []
+    eids: List[int] = []
+    cids: List[int] = []
+    for lesson in lessons:
+        if lesson.get("id") is not None:
+            try:
+                lids.append(int(lesson["id"]))
+            except (TypeError, ValueError):
+                pass
+        if lesson.get("event_id") is not None:
+            try:
+                eids.append(int(lesson["event_id"]))
+            except (TypeError, ValueError):
+                pass
+        if lesson.get("case_id") is not None:
+            try:
+                cids.append(int(lesson["case_id"]))
+            except (TypeError, ValueError):
+                pass
+    try:
+        rows = store.lookup_setup_cases_for_lessons(
+            user_id, lesson_ids=lids, event_ids=eids, case_ids=cids
+        )
+    except Exception:
+        rows = []
+    by_lesson: Dict[int, Dict[str, Any]] = {}
+    by_event: Dict[int, Dict[str, Any]] = {}
+    by_id: Dict[int, Dict[str, Any]] = {}
+    for row in rows:
+        view = case_public_view(row)
+        if view.get("id") is not None:
+            by_id[int(view["id"])] = view
+        if row.get("lesson_id") is not None:
+            try:
+                by_lesson[int(row["lesson_id"])] = view
+            except (TypeError, ValueError):
+                pass
+        if row.get("event_id") is not None:
+            try:
+                by_event[int(row["event_id"])] = view
+            except (TypeError, ValueError):
+                pass
+    for lesson in lessons:
+        view = None
+        if lesson.get("case_id") is not None:
+            try:
+                view = by_id.get(int(lesson["case_id"]))
+            except (TypeError, ValueError):
+                view = None
+        if view is None and lesson.get("id") is not None:
+            try:
+                view = by_lesson.get(int(lesson["id"]))
+            except (TypeError, ValueError):
+                pass
+        if view is None and lesson.get("event_id") is not None:
+            try:
+                view = by_event.get(int(lesson["event_id"]))
+            except (TypeError, ValueError):
+                pass
+        if view and view.get("id") is not None:
+            lesson["case_id"] = view.get("id")
+            lesson["visual_ad"] = view.get("visual_ad")
+            lesson["case"] = _slim_case_for_lesson(view)
+        else:
+            if not lesson.get("case_id"):
+                lesson["case_id"] = None
+            lesson.setdefault("visual_ad", None)
+    return lessons
+
+
 def build_features_for_event(
     *,
     market: str,

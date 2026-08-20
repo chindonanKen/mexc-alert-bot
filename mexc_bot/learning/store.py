@@ -946,6 +946,7 @@ class EventStore:
         *,
         case_id: Optional[int] = None,
         event_id: Optional[int] = None,
+        lesson_id: Optional[int] = None,
     ) -> Optional[dict]:
         with self._lock:
             conn = self._get_conn()
@@ -959,9 +960,48 @@ class EventStore:
                     "SELECT * FROM agent_setup_cases WHERE event_id = ? AND user_id = ?",
                     (int(event_id), int(user_id)),
                 ).fetchone()
+            elif lesson_id is not None:
+                row = conn.execute(
+                    "SELECT * FROM agent_setup_cases WHERE lesson_id = ? AND user_id = ? "
+                    "ORDER BY frozen_at DESC LIMIT 1",
+                    (int(lesson_id), int(user_id)),
+                ).fetchone()
             else:
                 return None
             return dict(row) if row else None
+
+    def lookup_setup_cases_for_lessons(
+        self,
+        user_id: int,
+        *,
+        lesson_ids: Optional[List[int]] = None,
+        event_ids: Optional[List[int]] = None,
+        case_ids: Optional[List[int]] = None,
+    ) -> List[dict]:
+        """One query: cases linked by lesson_id, event_id, or case id."""
+        lids = [int(x) for x in (lesson_ids or []) if x is not None]
+        eids = [int(x) for x in (event_ids or []) if x is not None]
+        cids = [int(x) for x in (case_ids or []) if x is not None]
+        if not lids and not eids and not cids:
+            return []
+        parts: List[str] = []
+        params: List[Any] = [int(user_id)]
+        if lids:
+            parts.append(f"lesson_id IN ({','.join('?' * len(lids))})")
+            params.extend(lids)
+        if eids:
+            parts.append(f"event_id IN ({','.join('?' * len(eids))})")
+            params.extend(eids)
+        if cids:
+            parts.append(f"id IN ({','.join('?' * len(cids))})")
+            params.extend(cids)
+        sql = (
+            "SELECT * FROM agent_setup_cases WHERE user_id = ? AND ("
+            + " OR ".join(parts)
+            + ")"
+        )
+        with self._lock:
+            return [dict(r) for r in self._get_conn().execute(sql, params).fetchall()]
 
     def list_setup_cases(self, user_id: int, *, limit: int = 40) -> List[dict]:
         limit = max(1, min(int(limit), 100))

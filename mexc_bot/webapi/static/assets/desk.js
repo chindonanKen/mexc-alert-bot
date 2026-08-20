@@ -1651,12 +1651,17 @@
     </form>`;
   }
 
-  function _visualAdPayloadFromForm() {
+  function _visualAdFormRoot(root) {
+    return root || state.visualAdHost || document;
+  }
+
+  function _visualAdPayloadFromForm(root) {
+    const el = _visualAdFormRoot(root);
     const payload = {};
-    const tf = ($("#visualAdTf") && $("#visualAdTf").value.trim()) || "";
-    const note = ($("#visualAdNote") && $("#visualAdNote").value.trim()) || "";
-    const highRaw = $("#visualAdHigh") && $("#visualAdHigh").value;
-    const lowRaw = $("#visualAdLow") && $("#visualAdLow").value;
+    const tf = ($("#visualAdTf", el) && $("#visualAdTf", el).value.trim()) || "";
+    const note = ($("#visualAdNote", el) && $("#visualAdNote", el).value.trim()) || "";
+    const highRaw = $("#visualAdHigh", el) && $("#visualAdHigh", el).value;
+    const lowRaw = $("#visualAdLow", el) && $("#visualAdLow", el).value;
     if (tf) payload.tf = tf.slice(0, 24);
     if (note) payload.note = note.slice(0, 280);
     if (highRaw != null && String(highRaw).trim() !== "") {
@@ -1673,14 +1678,34 @@
   function _applyVisualAdView(c, view) {
     const vad = view && view.visual_ad ? view.visual_ad : null;
     if (c) c.visual_ad = vad;
-    if (state.learnCase) state.learnCase.visual_ad = vad;
+    if (
+      state.learnCase &&
+      c &&
+      state.learnCase.id != null &&
+      c.id != null &&
+      Number(state.learnCase.id) === Number(c.id)
+    ) {
+      state.learnCase.visual_ad = vad;
+    }
     const sel = state.learnSel;
     const cacheKey = _learnSnapKey(sel);
     if (cacheKey && state.learnSnapCache && state.learnSnapCache[cacheKey]) {
       state.learnSnapCache[cacheKey].visual_ad = vad;
     }
-    if (sel && sel.case) sel.case.visual_ad = vad;
-    const slot = $("#learnVisualAdSlot");
+    if (sel && sel.case && c && Number(sel.case.id) === Number(c.id)) {
+      sel.case.visual_ad = vad;
+    }
+    if (Array.isArray(state.learnLessons) && c && c.id != null) {
+      state.learnLessons.forEach((L) => {
+        if (L && L.case_id != null && Number(L.case_id) === Number(c.id)) {
+          L.visual_ad = vad;
+          if (L.case) L.case.visual_ad = vad;
+        }
+      });
+    }
+    const host = state.visualAdHost;
+    const slot =
+      (host && $("#learnVisualAdSlot", host)) || $("#learnVisualAdSlot");
     if (slot) {
       slot.innerHTML = _visualAdSlotHtml({
         ...(c || {}),
@@ -1698,9 +1723,10 @@
     const form = host && host.querySelector("#visualAdForm");
     const btn = host && host.querySelector("#visualAdSave");
     if (!form || !c || c.id == null || c.id === "") return;
+    state.visualAdHost = host;
     form.addEventListener("submit", async (ev) => {
       ev.preventDefault();
-      const payload = _visualAdPayloadFromForm();
+      const payload = _visualAdPayloadFromForm(form);
       if (
         payload.tf == null &&
         payload.high == null &&
@@ -1828,8 +1854,9 @@
   }
 
   function _incidentZonePrices() {
-    const highEl = $("#visualAdHigh");
-    const lowEl = $("#visualAdLow");
+    const el = _visualAdFormRoot();
+    const highEl = $("#visualAdHigh", el);
+    const lowEl = $("#visualAdLow", el);
     let high = highEl && String(highEl.value).trim() !== "" ? Number(highEl.value) : null;
     let low = lowEl && String(lowEl.value).trim() !== "" ? Number(lowEl.value) : null;
     const vad = state.learnCase && state.learnCase.visual_ad;
@@ -1841,7 +1868,9 @@
   }
 
   function paintIncidentChart() {
-    const cv = $("#learnIncidentCanvas");
+    const root = _visualAdFormRoot();
+    const cv =
+      (root && $("#learnIncidentCanvas", root)) || $("#learnIncidentCanvas");
     if (!cv) return;
     const pack = state.incidentChart || {};
     const bars = pack.bars || [];
@@ -1977,12 +2006,18 @@
     if (clicks.length >= 2) clicks.length = 0;
     clicks.push(px);
     pack.clicks = clicks;
-    const hint = $("#learnIncidentChartHint");
+    const root =
+      (cv &&
+        (cv.closest("[data-edit-ad]") ||
+          cv.closest(".learn-visual-ad-teach") ||
+          cv.closest("#learnCaseSnap"))) ||
+      _visualAdFormRoot();
+    const hint = $("#learnIncidentChartHint", root);
     if (clicks.length === 2) {
       const hi = Math.max(clicks[0], clicks[1]);
       const lo = Math.min(clicks[0], clicks[1]);
-      const highEl = $("#visualAdHigh");
-      const lowEl = $("#visualAdLow");
+      const highEl = $("#visualAdHigh", root);
+      const lowEl = $("#visualAdLow", root);
       if (highEl) highEl.value = _adPxInput(hi);
       if (lowEl) lowEl.value = _adPxInput(lo);
       if (hint) {
@@ -2016,14 +2051,16 @@
   }
 
   async function loadIncidentCandles(c, sel, tf) {
-    const cv = $("#learnIncidentCanvas");
+    const root = _visualAdFormRoot();
+    const cv =
+      (root && $("#learnIncidentCanvas", root)) || $("#learnIncidentCanvas");
     if (!cv) return;
     const useTf = tf || _incidentDefaultTf(c);
     const q = _incidentCandlesQuery(c, sel, useTf);
     if (!q.get("case_id") && !q.get("event_id") && !(q.get("symbol") && q.get("fire_ts"))) {
       return;
     }
-    const hint = $("#learnIncidentChartHint");
+    const hint = $("#learnIncidentChartHint", root) || $("#learnIncidentChartHint");
     if (hint) hint.textContent = "Loading incident candles…";
     try {
       const body = await api("/api/learning/incident-candles?" + q.toString());
@@ -2034,7 +2071,8 @@
       state.incidentChart.fire_price = body && body.fire_price;
       state.incidentChart.symbol = body && body.symbol;
       if (!state.incidentChart.clicks) state.incidentChart.clicks = [];
-      const meta = $("#learnIncidentChartMeta");
+      const meta =
+        $("#learnIncidentChartMeta", root) || $("#learnIncidentChartMeta");
       if (meta) {
         meta.textContent = ((body && body.tf) || useTf) + " · around fire · not live";
       }
@@ -2055,6 +2093,7 @@
   function bindIncidentChart(host, c, sel) {
     const box = host && host.querySelector("#learnIncidentChart");
     if (!box) return;
+    state.visualAdHost = host;
     state.incidentChart = {
       bars: [],
       tf: _incidentDefaultTf(c),
@@ -2089,6 +2128,85 @@
     const canvas = box.querySelector("#learnIncidentCanvas");
     if (canvas) canvas.addEventListener("click", _onIncidentChartClick);
     loadIncidentCandles(c, sel, (tfSel && tfSel.value) || _incidentDefaultTf(c));
+  }
+
+  function renderVisualAdTeachTools(host, c, sel) {
+    if (!host) return;
+    state.visualAdHost = host;
+    host.innerHTML =
+      `<div id="learnVisualAdSlot">${_visualAdSlotHtml(c)}</div>` +
+      _incidentChartHtml(c, sel) +
+      _visualAdWriteHtml(c);
+    hydrateVisualAdImages(host);
+    bindVisualAdWrite(host, c);
+    bindIncidentChart(host, c, sel);
+  }
+
+  function _lessonCanShowAd(l) {
+    if (!l) return false;
+    if (l.case_id || (l.case && l.case.id)) return true;
+    if (l.event_id) return true;
+    return false;
+  }
+
+  function _lessonAdSel(l) {
+    const tags = Array.isArray(l.tags) ? l.tags : [];
+    const symTag = tags.find(
+      (x) => typeof x === "string" && x.startsWith("sym:")
+    );
+    const caseRow = l.case || {};
+    return {
+      type: "fire",
+      event_id: l.event_id || caseRow.event_id || null,
+      symbol:
+        l.symbol_norm ||
+        caseRow.symbol ||
+        (symTag ? symTag.slice(4) : "") ||
+        "",
+      market: l.market || caseRow.market || "futures",
+      ts: l.incident_ts || caseRow.fire_ts || caseRow.incident_ts || null,
+      price:
+        l.incident_price || caseRow.fire_price || caseRow.incident_price || null,
+      case: l.case || null,
+    };
+  }
+
+  async function fillLessonEditAd(adHost, l) {
+    if (!adHost || !_lessonCanShowAd(l)) {
+      if (adHost) {
+        adHost.hidden = true;
+        adHost.innerHTML = "";
+      }
+      return;
+    }
+    adHost.hidden = false;
+    const sel = _lessonAdSel(l);
+    let c = l.case ? Object.assign({}, l.case) : null;
+    if (c && l.visual_ad && !c.visual_ad) c.visual_ad = l.visual_ad;
+    if (l.event_id && (!c || c.id == null || c.id === "")) {
+      try {
+        const prev = await api(
+          "/api/learning/case-preview?event_id=" +
+            encodeURIComponent(l.event_id)
+        );
+        if (prev && (prev.id != null || prev.symbol || prev.event_id)) {
+          c = prev;
+        }
+      } catch (_) {}
+    }
+    if (!c) {
+      c = {
+        event_id: l.event_id,
+        symbol: sel.symbol,
+        market: sel.market,
+        fire_ts: l.incident_ts,
+        fire_price: l.incident_price,
+        incident_ts: l.incident_ts,
+        incident_price: l.incident_price,
+        visual_ad: l.visual_ad || null,
+      };
+    }
+    renderVisualAdTeachTools(adHost, c, sel);
   }
 
   function renderCaseSnap(snap, sel) {
@@ -2220,18 +2338,14 @@
               .join(" · ")}</p>`
           : ""
       }
-      <div id="learnVisualAdSlot">${_visualAdSlotHtml(c)}</div>
-      ${_incidentChartHtml(c, sel)}
-      ${_visualAdWriteHtml(c)}
+      <div class="learn-visual-ad-teach"></div>
       <p class="learn-case-foot mute">${
         freeze === "ok"
           ? "Chart history on the TF you click is the truth. Chips record what you see / how you traded — they don’t invent an AD."
           : "Features incomplete — still teach with chips + note. (Setup score is chart structure only — not a recommendation.)"
       }</p>
       <div class="learn-similar mute" hidden></div>`;
-    hydrateVisualAdImages(host);
-    bindVisualAdWrite(host, c);
-    bindIncidentChart(host, c, sel);
+    renderVisualAdTeachTools(host.querySelector(".learn-visual-ad-teach"), c, sel);
     try {
       host.scrollIntoView({ block: "nearest", behavior: "smooth" });
     } catch (_) {}
@@ -2415,6 +2529,7 @@
       2
     );
     const lessons = bundle.lessons || [];
+    state.learnLessons = lessons;
     const stats = bundle.stats || {};
     const fires = bundle.fires || [];
     const trades = bundle.trades || [];
@@ -2902,7 +3017,14 @@
                   </div>
                 </div>
                 <div class="learn-lesson-edit" hidden data-edit-panel="${l.id}">
-                  <p class="learn-panel-hint mute">Edit text, process chips, and the chart stack (TF / reds / vol). History stays on the candles.</p>
+                  <p class="learn-panel-hint mute">Edit text, process chips, and the chart stack (TF / reds / vol). History stays on the candles.${
+                    l.event_id || l.case_id
+                      ? " Mark Actual AD on this fire’s candles — Save AD is its own merge."
+                      : ""
+                  }</p>
+                  <div class="learn-lesson-edit-ad" hidden data-edit-ad="${
+                    l.id
+                  }"></div>
                   <textarea class="learn-edit-text" data-edit-text="${
                     l.id
                   }" rows="4">${escHtml(fullText)}</textarea>
@@ -2935,20 +3057,47 @@
           );
 
       const openEdit = (id) => {
-        const row = lesEl.querySelector(`[data-lesson-id="${id}"]`);
-        if (!row) return;
-        const view = row.querySelector(".learn-lesson-view");
-        const edit = row.querySelector(`[data-edit-panel="${id}"]`);
-        if (view) view.hidden = true;
-        if (edit) edit.hidden = false;
+        $$("[data-lesson-id]", lesEl).forEach((row) => {
+          const rid = +row.dataset.lessonId;
+          const view = row.querySelector(".learn-lesson-view");
+          const edit = row.querySelector(`[data-edit-panel="${rid}"]`);
+          const ad = row.querySelector(`[data-edit-ad="${rid}"]`);
+          if (rid === id) {
+            if (view) view.hidden = true;
+            if (edit) edit.hidden = false;
+          } else {
+            if (view) view.hidden = false;
+            if (edit) edit.hidden = true;
+            if (ad) {
+              ad.hidden = true;
+              ad.innerHTML = "";
+            }
+          }
+        });
+        const lesson = (lessons || []).find((x) => +x.id === +id);
+        const ad = lesEl.querySelector(`[data-edit-ad="${id}"]`);
+        fillLessonEditAd(ad, lesson);
       };
       const closeEdit = (id) => {
         const row = lesEl.querySelector(`[data-lesson-id="${id}"]`);
         if (!row) return;
         const view = row.querySelector(".learn-lesson-view");
         const edit = row.querySelector(`[data-edit-panel="${id}"]`);
+        const ad = row.querySelector(`[data-edit-ad="${id}"]`);
         if (view) view.hidden = false;
         if (edit) edit.hidden = true;
+        if (ad) {
+          ad.hidden = true;
+          ad.innerHTML = "";
+        }
+        if (state.learnCase && $("#learnCaseSnap")) {
+          const snapAd = $("#learnCaseSnap").querySelector(
+            ".learn-visual-ad-teach"
+          );
+          if (snapAd && state.learnSel) {
+            renderVisualAdTeachTools(snapAd, state.learnCase, state.learnSel);
+          }
+        }
       };
 
       $$("[data-edit-lesson]", lesEl).forEach((b) =>

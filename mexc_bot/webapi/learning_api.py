@@ -1262,6 +1262,14 @@ def update_lesson(
         row = enrich_lesson_row(dict(row))
     except Exception:
         pass
+    try:
+        from ..learning.cases import stamp_lessons_with_cases
+
+        stamped = stamp_lessons_with_cases(store, uid, [row] if row else [])
+        if stamped:
+            row = stamped[0]
+    except Exception:
+        pass
     return {
         "ok": True,
         "lesson": row,

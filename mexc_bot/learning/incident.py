@@ -94,6 +94,23 @@ def enrich_lesson_row(row: dict) -> dict:
     out["incident_ts"] = inc.get("incident_ts") or row.get("created_at")
     out["incident_price"] = inc.get("incident_price")
     out["event_id"] = inc.get("event_id")
+    if out["event_id"] is None:
+        raw_ev = row.get("evidence_event_ids_json")
+        evid = []
+        if isinstance(raw_ev, list):
+            evid = raw_ev
+        elif isinstance(raw_ev, str):
+            try:
+                import json
+
+                evid = json.loads(raw_ev or "[]")
+            except Exception:
+                evid = []
+        if evid:
+            try:
+                out["event_id"] = int(evid[0])
+            except (TypeError, ValueError):
+                pass
     out["case_id"] = inc.get("case_id")
     out["bucket"] = normalize_bucket(inc.get("bucket"))
     out["symbol_norm"] = inc.get("symbol")

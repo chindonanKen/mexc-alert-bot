@@ -351,6 +351,13 @@ body::before {
   border: 1px solid rgba(125, 211, 252, 0.18);
   background: rgba(0, 0, 0, 0.22);
 }
+.learn-lesson-edit-ad {
+  margin: 0 0 0.55rem;
+}
+.learn-lesson-edit-ad .learn-incident-chart,
+.learn-lesson-edit-ad .learn-visual-ad-write {
+  margin-top: 0.35rem;
+}
 .learn-edit-text {
   width: 100%;
   min-height: 4.5rem;

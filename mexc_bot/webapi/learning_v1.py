@@ -38,6 +38,12 @@ def what_have_you_learned(
         lessons = [enrich_lesson_row(L) for L in lessons_raw]
     except Exception:
         lessons = lessons_raw
+    try:
+        from ..learning.cases import stamp_lessons_with_cases
+
+        lessons = stamp_lessons_with_cases(store, uid, lessons)
+    except Exception:
+        pass
     stats = store.learning_stats(uid)
     trades = list_money_reviews(
         uid, closed_only=True, teach_only=True, limit=5, store=store
