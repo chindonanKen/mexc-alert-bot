@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mexc_bot.learning.cases import case_public_view, freeze_case
 from mexc_bot.learning.store import EventStore
