@@ -406,6 +406,9 @@ class TestDeskJsVisualAd(unittest.TestCase):
         css = (ROOT / "mexc_bot/webapi/static/assets/desk.css").read_text()
         self.assertIn(".learn-visual-ad-write", css)
         self.assertIn(".learn-visual-ad-write-row", css)
+        html = (ROOT / "mexc_bot/webapi/static/index.html").read_text()
+        self.assertIn("desk.js?v=visualad1", html)
+        self.assertIn("desk.css?v=visualad1", html)
 
 
 if __name__ == "__main__":
