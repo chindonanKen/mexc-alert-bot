@@ -1618,6 +1618,112 @@
     }</div>`;
   }
 
+  function _visualAdAttr(val) {
+    if (val == null || val === "") return "";
+    return escHtml(String(val));
+  }
+
+  function _visualAdWriteHtml(c) {
+    // Live preview has no frozen id — do not pretend Save AD works.
+    if (!c || c.id == null || c.id === "") return "";
+    const vad = c.visual_ad && typeof c.visual_ad === "object" ? c.visual_ad : {};
+    return `<form class="learn-visual-ad-write" id="visualAdForm" data-visual-ad-write="${Number(
+      c.id
+    )}">
+      <p class="learn-visual-ad-write-h">Actual AD</p>
+      <div class="learn-visual-ad-write-row">
+        <label>TF<input type="text" id="visualAdTf" maxlength="24" placeholder="15m" autocomplete="off" value="${_visualAdAttr(
+          vad.tf
+        )}"></label>
+        <label>High<input type="number" id="visualAdHigh" step="any" inputmode="decimal" placeholder="high" value="${_visualAdAttr(
+          vad.high
+        )}"></label>
+        <label>Low<input type="number" id="visualAdLow" step="any" inputmode="decimal" placeholder="low" value="${_visualAdAttr(
+          vad.low
+        )}"></label>
+      </div>
+      <label class="learn-visual-ad-write-note">Note<input type="text" id="visualAdNote" maxlength="280" placeholder="optional" autocomplete="off" value="${_visualAdAttr(
+        vad.note
+      )}"></label>
+      <div class="learn-visual-ad-write-actions">
+        <button type="submit" class="btn sm" id="visualAdSave">Save AD</button>
+      </div>
+    </form>`;
+  }
+
+  function _visualAdPayloadFromForm() {
+    const payload = {};
+    const tf = ($("#visualAdTf") && $("#visualAdTf").value.trim()) || "";
+    const note = ($("#visualAdNote") && $("#visualAdNote").value.trim()) || "";
+    const highRaw = $("#visualAdHigh") && $("#visualAdHigh").value;
+    const lowRaw = $("#visualAdLow") && $("#visualAdLow").value;
+    if (tf) payload.tf = tf.slice(0, 24);
+    if (note) payload.note = note.slice(0, 280);
+    if (highRaw != null && String(highRaw).trim() !== "") {
+      const high = Number(highRaw);
+      if (!Number.isNaN(high)) payload.high = high;
+    }
+    if (lowRaw != null && String(lowRaw).trim() !== "") {
+      const low = Number(lowRaw);
+      if (!Number.isNaN(low)) payload.low = low;
+    }
+    return payload;
+  }
+
+  function _applyVisualAdView(c, view) {
+    const vad = view && view.visual_ad ? view.visual_ad : null;
+    if (c) c.visual_ad = vad;
+    if (state.learnCase) state.learnCase.visual_ad = vad;
+    const sel = state.learnSel;
+    const cacheKey = _learnSnapKey(sel);
+    if (cacheKey && state.learnSnapCache && state.learnSnapCache[cacheKey]) {
+      state.learnSnapCache[cacheKey].visual_ad = vad;
+    }
+    if (sel && sel.case) sel.case.visual_ad = vad;
+    const slot = $("#learnVisualAdSlot");
+    if (slot) {
+      slot.innerHTML = _visualAdSlotHtml({
+        ...(c || {}),
+        ...(view || {}),
+        visual_ad: vad,
+        id: (view && view.id) || (c && c.id),
+      });
+      hydrateVisualAdImages(slot);
+    }
+  }
+
+  function bindVisualAdWrite(host, c) {
+    const form = host && host.querySelector("#visualAdForm");
+    const btn = host && host.querySelector("#visualAdSave");
+    if (!form || !c || c.id == null || c.id === "") return;
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const payload = _visualAdPayloadFromForm();
+      if (
+        payload.tf == null &&
+        payload.high == null &&
+        payload.low == null &&
+        payload.note == null
+      ) {
+        toast("Need TF, high, low, or a short note");
+        return;
+      }
+      if (btn) btn.disabled = true;
+      try {
+        const view = await api(`/api/learning/cases/${Number(c.id)}/visual-ad`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        _applyVisualAdView(c, view);
+        toast("AD saved");
+      } catch (e) {
+        toast(e.message);
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    });
+  }
+
   function hydrateVisualAdImages(host) {
     if (!host) return;
     host.querySelectorAll("img[data-visual-ad-case]").forEach((img) => {
@@ -1765,7 +1871,8 @@
               .join(" · ")}</p>`
           : ""
       }
-      ${_visualAdSlotHtml(c)}
+      <div id="learnVisualAdSlot">${_visualAdSlotHtml(c)}</div>
+      ${_visualAdWriteHtml(c)}
       <p class="learn-case-foot mute">${
         freeze === "ok"
           ? "Chart history on the TF you click is the truth. Chips record what you see / how you traded — they don’t invent an AD."
@@ -1773,6 +1880,7 @@
       }</p>
       <div class="learn-similar mute" hidden></div>`;
     hydrateVisualAdImages(host);
+    bindVisualAdWrite(host, c);
     try {
       host.scrollIntoView({ block: "nearest", behavior: "smooth" });
     } catch (_) {}

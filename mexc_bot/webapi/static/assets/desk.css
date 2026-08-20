@@ -1579,6 +1579,56 @@ tr.row-flash td {
   font-size: 0.68rem;
   line-height: 1.3;
 }
+form.learn-visual-ad-write,
+.learn-visual-ad-write {
+  margin: 0.4rem 0 0;
+  padding: 0.35rem 0.4rem 0.4rem;
+  border-radius: 6px;
+  border: 1px dashed rgba(34, 211, 238, 0.28);
+  background: rgba(34, 211, 238, 0.03);
+}
+.learn-visual-ad-write-h {
+  margin: 0 0 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sky, #22d3ee);
+}
+.learn-visual-ad-write-row {
+  display: grid;
+  grid-template-columns: 4.2rem 1fr 1fr;
+  gap: 0.3rem;
+}
+.learn-visual-ad-write label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--mute);
+  min-width: 0;
+}
+.learn-visual-ad-write input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.28rem 0.4rem;
+}
+.learn-visual-ad-write-note {
+  margin-top: 0.3rem;
+}
+.learn-visual-ad-write-actions {
+  margin-top: 0.35rem;
+}
 .learn-lesson-tags {
   display: flex;
   flex-wrap: wrap;

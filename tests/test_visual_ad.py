@@ -376,6 +376,36 @@ class TestDeskJsVisualAd(unittest.TestCase):
         self.assertIn("renderCaseSnap", js)
         self.assertNotIn("/api/learning/chart", js)
         self.assertIn("/api/learning/case-preview", js)
+        # Writer posts to the existing merge pocket only.
+        self.assertIn("/api/learning/cases/", js)
+        self.assertIn("/visual-ad", js)
+        self.assertIn("_visualAdWriteHtml", js)
+        self.assertIn("visualAdSave", js)
+        # Live preview (no frozen id) must not pretend Save AD works.
+        self.assertIn("Live preview has no frozen id", js)
+        # Lesson save stays independent of a visual AD mark.
+        self.assertIn('await api("/api/learning/teach"', js)
+        teach = js.split('await api("/api/learning/teach"')[1].split("});")[0]
+        self.assertNotIn("visual_ad", teach)
+        self.assertNotIn("visual-ad", teach)
+        self.assertNotIn("visualAd", teach)
+
+    def test_write_html_gated_on_case_id(self):
+        js = (ROOT / "mexc_bot/webapi/static/assets/desk.js").read_text()
+        start = js.index("function _visualAdWriteHtml")
+        end = js.index("function _visualAdPayloadFromForm")
+        chunk = js[start:end]
+        self.assertIn('if (!c || c.id == null || c.id === "") return ""', chunk)
+        self.assertIn("Save AD", chunk)
+        self.assertIn("visualAdTf", chunk)
+        self.assertIn("visualAdHigh", chunk)
+        self.assertIn("visualAdLow", chunk)
+        self.assertIn("visualAdNote", chunk)
+
+    def test_css_keeps_write_block_small(self):
+        css = (ROOT / "mexc_bot/webapi/static/assets/desk.css").read_text()
+        self.assertIn(".learn-visual-ad-write", css)
+        self.assertIn(".learn-visual-ad-write-row", css)
 
 
 if __name__ == "__main__":
