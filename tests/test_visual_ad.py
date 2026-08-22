@@ -419,8 +419,8 @@ class TestDeskJsVisualAd(unittest.TestCase):
         self.assertIn(".learn-visual-ad-write", css)
         self.assertIn(".learn-visual-ad-write-row", css)
         html = (ROOT / "mexc_bot/webapi/static/index.html").read_text()
-        self.assertIn("desk.js?v=slicelab1", html)
-        self.assertIn("desk.css?v=slicelab1", html)
+        self.assertIn("desk.js?v=slicelab2", html)
+        self.assertIn("desk.css?v=slicelab2", html)
         self.assertIn("learn-incident-chart", css)
         self.assertIn("learn-lesson-edit-ad", css)
 

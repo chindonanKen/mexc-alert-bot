@@ -68,8 +68,8 @@ class TestDeskSlice1Search(unittest.TestCase):
         self.assertIn("system-ui", CSS)
 
     def test_cache_bust_slice_token(self):
-        self.assertIn("desk.js?v=slicelab1", HTML)
-        self.assertIn("desk.css?v=slicelab1", HTML)
+        self.assertIn("desk.js?v=slicelab2", HTML)
+        self.assertIn("desk.css?v=slicelab2", HTML)
         self.assertNotIn("desk.js?v=lessonad1", HTML)
 
     def test_no_new_order_or_schema_paths(self):

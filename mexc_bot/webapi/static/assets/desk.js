@@ -723,14 +723,23 @@
     return "—";
   }
 
-  function _fillUsd(o) {
-    const q =
-      o.quote_qty != null
-        ? Number(o.quote_qty)
-        : o.price != null && o.qty != null
-          ? Number(o.price) * Number(o.qty)
-          : null;
-    return q != null && !Number.isNaN(q) ? "$" + q.toFixed(0) : "—";
+  function posBookOf(p) {
+    const x = String((p && (p.book || p.market)) || "spot").toLowerCase();
+    return x === "futures" ? "futures" : "spot";
+  }
+
+  function _fillUsd(o, p) {
+    const book = posBookOf(p || {});
+    const cs =
+      book === "futures" ? Number((p && p.contract_size) || 1) || 1 : 1;
+    if (o.quote_qty != null && !Number.isNaN(Number(o.quote_qty))) {
+      return "$" + Number(o.quote_qty).toFixed(0);
+    }
+    if (o.price != null && o.qty != null) {
+      const q = Number(o.price) * Number(o.qty) * cs;
+      return !Number.isNaN(q) ? "$" + q.toFixed(0) : "—";
+    }
+    return "—";
   }
 
   function posCardHtml(p) {
@@ -810,7 +819,8 @@
       .map(
         (o) =>
           `<div class="pos-layer buy"><span>BUY</span><span class="pos-layer-usd">${_fillUsd(
-            o
+            o,
+            p
           )}</span><span>@ ${
             o.price != null ? fmtPx(o.price) : "—"
           }</span><span class="mute">${fmtTime(o.ts)}</span></div>`
@@ -820,7 +830,8 @@
       .map(
         (o) =>
           `<div class="pos-layer sell"><span>SELL</span><span class="pos-layer-usd">${_fillUsd(
-            o
+            o,
+            p
           )}</span><span>@ ${
             o.price != null ? fmtPx(o.price) : "—"
           }</span><span class="mute">${fmtTime(o.ts)}</span></div>`
@@ -879,7 +890,11 @@
             : p.position_side === "long"
               ? " · long"
               : ""
-        }${p.leverage != null ? " · " + p.leverage + "x" : ""}`
+        }${p.leverage != null ? " · " + p.leverage + "x" : ""}${
+          posBookOf(p) === "futures" && p.contract_size != null
+            ? " · cs " + p.contract_size
+            : ""
+        }`
       : `${entry != null ? fmtPx(entry) : "—"} → ${
           exit_ != null ? fmtPx(exit_) : "—"
         }`;
@@ -918,7 +933,7 @@
           <div class="pos-flow-cell"><span class="pos-flow-k">${flow3k}</span><span class="pos-flow-v">${flow3v}</span></div>
         </div>
         <div class="pos-meta">${when}${layers ? " · " + layers : ""}</div>
-        <div class="pos-tags">${posMarketPill(p.market)}${truth}</div>
+        <div class="pos-tags">${posMarketPill(p.book || p.market)}${truth}</div>
         <span class="pos-chev" aria-hidden="true">▾</span>
       </summary>
       <div class="pos-detail">
@@ -1150,27 +1165,53 @@
           : ""
       } · hold bags excluded from AD learning</div>`;
     }
-    let html = "";
-    if (riskOpens.length) {
-      html += `<div class="pos-band-h">AD open risk <span class="pos-band-n">${riskOpens.length}</span></div>`;
-      html += riskOpens.map(posCardHtml).join("");
-    } else {
-      html += `<div class="pos-band-h mute">No AD open risk</div>`;
+    function bandsFor(rows) {
+      const opensB = rows.filter((p) => p.status === "open" || p.is_open);
+      const closedB = rows.filter((p) => !(p.status === "open" || p.is_open));
+      const holdB = opensB.filter(isHoldP);
+      const adB = opensB.filter((p) => !isHoldP(p));
+      adB.sort((a, b) => {
+        const ra = a.free_coins ? 0 : a.free_coins_status === "near_free" ? 1 : 2;
+        const rb = b.free_coins ? 0 : b.free_coins_status === "near_free" ? 1 : 2;
+        return ra - rb;
+      });
+      const freeB = adB.filter((p) => p.free_coins);
+      const riskB = adB.filter((p) => !p.free_coins);
+      let inner = "";
+      if (riskB.length) {
+        inner += `<div class="pos-band-h">AD open risk <span class="pos-band-n">${riskB.length}</span></div>`;
+        inner += riskB.map(posCardHtml).join("");
+      } else {
+        inner += `<div class="pos-band-h mute">No AD open risk</div>`;
+      }
+      if (freeB.length) {
+        inner += `<div class="pos-band-h free">Free coins <span class="pos-band-n">${freeB.length}</span></div>`;
+        inner += freeB.map(posCardHtml).join("");
+      }
+      if (holdB.length) {
+        inner += `<div class="pos-band-h hold">Long-term hold <span class="pos-band-n">${holdB.length}</span></div>`;
+        inner += `<p class="pos-band-hint mute">Invest bags — not used for AD bulk teach / agent cases.</p>`;
+        inner += holdB.map(posCardHtml).join("");
+      }
+      if (closedB.length) {
+        inner += `<div class="pos-band-h closed">Closed <span class="pos-band-n">${closedB.length}</span></div>`;
+        inner += closedB.map(posCardHtml).join("");
+      }
+      if (!opensB.length && !closedB.length) {
+        inner = `<div class="pos-band-h mute">None</div>`;
+      }
+      return inner;
     }
-    if (freeOpens.length) {
-      html += `<div class="pos-band-h free">Free coins <span class="pos-band-n">${freeOpens.length}</span></div>`;
-      html += freeOpens.map(posCardHtml).join("");
-    }
-    if (holdOpens.length) {
-      html += `<div class="pos-band-h hold">Long-term hold <span class="pos-band-n">${holdOpens.length}</span></div>`;
-      html += `<p class="pos-band-hint mute">Invest bags — not used for AD bulk teach / agent cases.</p>`;
-      html += holdOpens.map(posCardHtml).join("");
-    }
-    if (closed.length) {
-      html += `<div class="pos-band-h closed">Closed <span class="pos-band-n">${closed.length}</span></div>`;
-      html += closed.map(posCardHtml).join("");
-    }
-    host.innerHTML = html;
+
+    const fut = positions.filter((p) => posBookOf(p) === "futures");
+    const spot = positions.filter((p) => posBookOf(p) === "spot");
+    host.innerHTML =
+      `<div class="pos-book pos-book-fut"><div class="pos-book-h">Futures</div>${bandsFor(
+        fut
+      )}</div>` +
+      `<div class="pos-book pos-book-spot"><div class="pos-book-h">Spot</div>${bandsFor(
+        spot
+      )}</div>`;
   }
 
   function wirePosTableOnce() {

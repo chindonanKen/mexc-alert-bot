@@ -147,7 +147,11 @@ def segment_positions_from_fills(
     (success/miss on realized PnL). Next buy starts a new position.
     Returns newest-first.
     """
-    all_fills = _all_fills_chronological(fills, symbol=symbol, market=market)
+    from ..webapi.position_math import fully_filled_orders
+
+    # One row per fully filled order. In-progress partials never open a cycle.
+    walk = fully_filled_orders(list(fills or []))
+    all_fills = _all_fills_chronological(walk, symbol=symbol, market=market)
     positions: List[Dict[str, Any]] = []
     qty = 0.0
     cost = 0.0

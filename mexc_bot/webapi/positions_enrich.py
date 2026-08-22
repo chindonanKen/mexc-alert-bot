@@ -7,6 +7,7 @@ import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from . import db
+from .position_math import apply_open_mark_math, fully_filled_orders, tag_book
 from .prices import ensure_ticker_book, ticker_24h
 
 logger = logging.getLogger(__name__)
@@ -198,39 +199,17 @@ def list_position_entities(
                 d["hold_seconds"] = max(0.0, now - float(d["opened_at"]))
                 d["hold_hours"] = round(d["hold_seconds"] / 3600.0, 2)
             _attach_mark(d)
-            # Futures: exchange uPnL is vs residual holdAvg (not funding-adjusted)
-            if (
-                (d.get("market") or "").lower() == "futures"
-                and d.get("unrealized_pnl") is not None
-                and d.get("size_remaining")
-            ):
+            apply_open_mark_math(d)
+            if d.get("upnl_usd_est") is not None:
                 try:
-                    inv = float(d.get("hold_avg") or d.get("entry_display") or 0)
-                    live = float(d.get("entry_display") or inv)
-                    rem = float(d["size_remaining"])
-                    upnl = float(d["unrealized_pnl"])
-                    d["upnl_usd_est"] = round(upnl, 4)
-                    if rem > 0 and inv > 0:
-                        if d.get("position_type") == 2:
-                            d["mark_price"] = inv - upnl / rem
-                        else:
-                            d["mark_price"] = inv + upnl / rem
-                        # % vs live avg (funding-adjusted) when we show that as entry
-                        if live > 0:
-                            d["upnl_pct"] = round(
-                                (float(d["mark_price"]) - live) / live * 100.0, 3
-                            )
-                        d["mark_source"] = "mexc_position"
-                except Exception:
+                    d["upnl_usd_est"] = round(float(d["upnl_usd_est"]), 4)
+                except (TypeError, ValueError):
                     pass
-            # Dollar held at mark
-            try:
-                rem = float(d.get("size_remaining") or 0)
-                mark = float(d.get("mark_price") or 0)
-                if rem > 0 and mark > 0:
-                    d["remaining_mark_usd"] = round(rem * mark, 4)
-            except Exception:
-                pass
+            if d.get("remaining_mark_usd") is not None:
+                try:
+                    d["remaining_mark_usd"] = round(float(d["remaining_mark_usd"]), 4)
+                except (TypeError, ValueError):
+                    pass
             # Spot residual cost / mark for free-coin math if missing
             if d.get("bought_usd") is None and d.get("size_qty") and d.get("entry_display"):
                 try:
@@ -240,6 +219,7 @@ def list_position_entities(
                     pass
             d["outcome"] = d.get("outcome") or "open"
         else:
+            tag_book(d)
             d["mark_price"] = d.get("mark_price")
             d["upnl_pct"] = None
             if d.get("outcome") in (None, "flat") and d.get("realized_pnl_pct") is not None:
@@ -677,6 +657,8 @@ def _reconcile_futures_with_exchange(
             "hold_fee": hold_fee,
             "close_profit_loss": fo.get("close_profit_loss"),
             "unrealized_pnl": fo.get("unrealized_pnl"),
+            "contract_size": fo.get("contract_size") or 1.0,
+            "raw": fo.get("raw") if isinstance(fo.get("raw"), dict) else {},
             "position_type": fo.get("position_type"),
             "position_side": (
                 "long"
@@ -721,8 +703,7 @@ def _attach_fills_window(
         if o <= 0 or c <= 0:
             return
     mwant = (market or "futures").lower()
-    buys: List[dict] = []
-    sells: List[dict] = []
+    matched: List[dict] = []
     for f in fills_all:
         fm = (f.get("market") or "").lower() or "spot"
         # spot fills often market=spot or empty
@@ -736,11 +717,38 @@ def _attach_fills_window(
         ts = float(f.get("ts") or 0)
         if ts < o - pad_s or ts > c + pad_s:
             continue
+        matched.append(f)
+    # One layer per fully filled order. Partial in-progress orders stay off the card.
+    cs = 1.0
+    if mwant == "futures":
+        try:
+            cs = float(ent.get("contract_size") or 0) or 1.0
+        except (TypeError, ValueError):
+            cs = 1.0
+    buys: List[dict] = []
+    sells: List[dict] = []
+    for f in fully_filled_orders(matched):
+        ts = float(f.get("ts") or 0)
+        qty = f.get("qty")
+        px = f.get("price")
+        qq = f.get("quote_qty")
+        if qq in (None, "") and px is not None and qty is not None:
+            try:
+                qq = float(px) * float(qty) * (cs if mwant == "futures" else 1.0)
+            except (TypeError, ValueError):
+                qq = None
+        elif mwant == "futures" and qq not in (None, "") and cs != 1.0:
+            try:
+                qq = float(qq) * cs
+            except (TypeError, ValueError):
+                pass
         layer = {
-            "price": f.get("price"),
-            "qty": f.get("qty"),
+            "price": px,
+            "qty": qty,
+            "quote_qty": qq,
             "ts": ts,
             "side": f.get("side"),
+            "order_id": f.get("_order_id") or f.get("order_id"),
         }
         if (f.get("side") or "").lower() == "buy":
             buys.append(layer)
@@ -834,16 +842,9 @@ def _attach_mark(d: dict) -> None:
         d["upnl_pct"] = round(
             (float(mark) - float(entry)) / float(entry) * 100.0, 3
         )
-        rem = d.get("size_remaining")
-        if rem:
-            d["upnl_usd_est"] = round(
-                (float(mark) - float(entry)) * float(rem), 4
-            )
-        else:
-            d["upnl_usd_est"] = None
     else:
         d["upnl_pct"] = None
-        d["upnl_usd_est"] = None
+    # Dollar notional / uPnL: apply_open_mark_math (never rem×mark on futures).
 
 
 def _fallback_journal(user_id: int, include_closed: bool) -> List[dict]:
@@ -900,6 +901,9 @@ def _fallback_from_rows(rows: List[dict]) -> List[dict]:
             if d.get("opened_at"):
                 d["hold_hours"] = round((now - float(d["opened_at"])) / 3600.0, 2)
             _attach_mark(d)
+            apply_open_mark_math(d)
+        else:
+            tag_book(d)
         out.append(d)
     return out
 
