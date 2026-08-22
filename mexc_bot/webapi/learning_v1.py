@@ -84,6 +84,57 @@ def what_have_you_learned(
     }
 
 
+def overview_learning_strip(user_id: Optional[int] = None) -> Dict[str, Any]:
+    """Overview Needs-you + memory strip — not the full Learning home.
+
+    `/api/learning` stays on learning_home_v1 (lessons, trades, cases).
+    Overview only paints pending (max 2) + the first ~420 chars of the
+    memory strip. Building the 640KB home (list_money_reviews ×2, cases,
+    lesson enrich) was the Overview first-paint wait — do not call it here.
+    """
+    uid = int(user_id or uid_or_raise())
+    store = event_store()
+
+    pending_raw = store.list_pending_questions(uid, status="open", limit=10)
+    pending_all: List[dict] = []
+    for p in pending_raw:
+        row = dict(p)
+        try:
+            from ..learning.trades import enrich_pending_row
+
+            row = enrich_pending_row(store, p)
+        except Exception:
+            pass
+        pending_all.append(row)
+    pending = pending_all[:2]
+
+    lessons: List[dict] = []
+    try:
+        lessons = store.list_lessons(uid, approved_only=True, limit=12)
+    except Exception:
+        lessons = []
+
+    lines: List[str] = []
+    if lessons:
+        lines.append("Lessons I store:")
+        for L in lessons[:12]:
+            lines.append(f"  · {(L.get('text') or '')[:160]}")
+    else:
+        lines.append("No durable lessons yet — teach me a rule.")
+    reply = "\n".join(lines)
+
+    return {
+        "needs_you": {
+            "pending_questions": pending,
+            "count": len(pending_all),
+            "has_lessons": bool(lessons),
+        },
+        "agent_summary": reply,
+        "what_learned_reply": reply,
+        "stats": {},
+    }
+
+
 def learning_home_v1(user_id: Optional[int] = None) -> Dict[str, Any]:
     """Single payload for Learning view + voice context."""
     uid = int(user_id or uid_or_raise())
@@ -170,6 +221,57 @@ def learning_home_v1(user_id: Optional[int] = None) -> Dict[str, Any]:
         "fires": fires,
         "cases": cases,
         "agent_summary": learned.get("reply") or "",
+        "lesson_span": store.lesson_id_span(uid),
+    }
+
+
+def _public_lesson(store: EventStore, uid: int, raw: dict) -> dict:
+    """Read-only enrich for desk cards. Does not write lessons."""
+    try:
+        from ..learning.incident import enrich_lesson_row
+
+        lesson = enrich_lesson_row(dict(raw))
+    except Exception:
+        lesson = dict(raw)
+    try:
+        from ..learning.cases import stamp_lessons_with_cases
+
+        stamped = stamp_lessons_with_cases(store, uid, [lesson])
+        if stamped:
+            lesson = stamped[0]
+    except Exception:
+        pass
+    return lesson
+
+
+def get_lesson_v1(
+    lesson_id: int, user_id: Optional[int] = None
+) -> Optional[Dict[str, Any]]:
+    """Fetch one lesson by id (including lesson 1). Read-only."""
+    uid = int(user_id or uid_or_raise())
+    store = event_store()
+    raw = store.get_lesson(uid, int(lesson_id))
+    if not raw:
+        return None
+    return {"ok": True, "lesson": _public_lesson(store, uid, raw)}
+
+
+def search_lessons_v1(
+    q: str,
+    user_id: Optional[int] = None,
+    *,
+    limit: int = 30,
+) -> Dict[str, Any]:
+    """Search / jump helper. Empty or '1' / 'first' reaches lesson 1."""
+    uid = int(user_id or uid_or_raise())
+    store = event_store()
+    raws = store.search_lessons(uid, q, limit=limit)
+    lessons = [_public_lesson(store, uid, r) for r in raws]
+    return {
+        "ok": True,
+        "q": q,
+        "lessons": lessons,
+        "lesson_span": store.lesson_id_span(uid),
     }
 
 

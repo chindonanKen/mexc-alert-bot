@@ -21,6 +21,11 @@
     busy: false,
     speakingHeard: false,
     silenceMs: 0,
+    selectedSymbol: "",
+    selectedSymbolRaw: "",
+    lastFired: null,
+    lastSeenNewsId: 0,
+    learnLessons: [],
   };
 
   // VAD: commit after real speech + sustained silence.
@@ -210,6 +215,133 @@
     );
   }
 
+  function normDeskSym(s) {
+    return String(s || "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
+  }
+
+  function deskRowSelectedClass(sym) {
+    const want = state.selectedSymbol;
+    return want && normDeskSym(sym) === want ? " is-desk-selected" : "";
+  }
+
+  function setSelectedSymbol(sym) {
+    const raw = String(sym || "").trim();
+    const n = normDeskSym(raw);
+    if (!n) return;
+    state.selectedSymbol = n;
+    state.selectedSymbolRaw = raw;
+    try {
+      localStorage.setItem("desk_selected_symbol", raw);
+    } catch (_) {}
+    applySelectedSymbol();
+  }
+
+  function applySelectedSymbol() {
+    const want = state.selectedSymbol;
+    $$("[data-desk-sym]").forEach((el) => {
+      el.classList.toggle(
+        "is-desk-selected",
+        !!(want && normDeskSym(el.getAttribute("data-desk-sym")) === want)
+      );
+    });
+    const chip = $("#deskFocusChip");
+    if (chip) {
+      if (want) {
+        chip.hidden = false;
+        chip.textContent = "Focus " + (state.selectedSymbolRaw || want);
+      } else {
+        chip.hidden = true;
+        chip.textContent = "";
+      }
+    }
+  }
+
+  function rememberLastFired(a) {
+    if (!a || !a.symbol) return;
+    state.lastFired = {
+      id: a.id != null ? +a.id : null,
+      source: a.source || "",
+      symbol: a.symbol,
+      market: a.market || "",
+      price: a.price,
+      drop_pct: a.drop_pct,
+      ts: a.ts,
+      mode: a.mode || "",
+    };
+    try {
+      localStorage.setItem("desk_last_fired", JSON.stringify(state.lastFired));
+    } catch (_) {}
+    renderLastFiredStrip();
+  }
+
+  function renderLastFiredStrip() {
+    const el = $("#lastFiredStrip");
+    if (!el) return;
+    const a = state.lastFired;
+    if (!a || !a.symbol) {
+      paintIfChanged(
+        el,
+        `<span class="last-fired-empty">Last fire — none yet</span>`,
+        "lastFiredStrip",
+        "empty"
+      );
+      return;
+    }
+    const src = String(a.source || "");
+    const kind =
+      src === "target" || src.includes("target")
+        ? "TARGET"
+        : "MOVER";
+    const drop =
+      a.drop_pct != null && !Number.isNaN(Number(a.drop_pct))
+        ? Number(a.drop_pct).toFixed(1) + "%"
+        : "";
+    const px = a.price != null ? fmtPx(a.price) : "";
+    const when = a.ts ? fmtTime(a.ts) : "";
+    const html = `<span class="last-fired-k">Last fire</span><span class="last-fired-sym" data-desk-sym="${escHtml(
+      String(a.symbol)
+    )}">${escHtml(String(a.symbol))}</span> · ${kind}${
+      drop ? " · " + drop : ""
+    }${px ? " · " + px : ""}${a.mode ? " · " + a.mode : ""}${
+      when ? " · " + when : ""
+    }`;
+    paintIfChanged(el, html, "lastFiredStrip", [
+      a.id,
+      a.symbol,
+      a.source,
+      a.ts,
+      a.drop_pct,
+      a.price,
+      a.mode,
+    ]);
+  }
+
+  try {
+    const savedFocus = localStorage.getItem("desk_selected_symbol") || "";
+    if (savedFocus) {
+      state.selectedSymbol = normDeskSym(savedFocus);
+      state.selectedSymbolRaw = savedFocus;
+    }
+    const savedFire = localStorage.getItem("desk_last_fired");
+    if (savedFire) {
+      const parsed = JSON.parse(savedFire);
+      if (parsed && parsed.symbol) state.lastFired = parsed;
+    }
+  } catch (_) {}
+
+  try {
+    window.__deskFocus = {
+      getSelected: () => state.selectedSymbol,
+      setSelected: setSelectedSymbol,
+      apply: applySelectedSymbol,
+      getLastFired: () => state.lastFired,
+      rememberLastFired,
+      renderLastFiredStrip,
+    };
+  } catch (_) {}
+
   function setView(name) {
     state.view = name;
     $$(".view").forEach((v) => v.classList.remove("on"));
@@ -383,7 +515,7 @@
         paintIfChanged(
           newsEl,
           `<div class="ov-news-h">Book intel · bad news</div>` +
-            rankEmpty("No delist/scam/hack items in cache yet — open Intel radar"),
+            rankEmpty("No delist/hack/halt news on your book (watch · targets · positions)."),
           "ovBookNews",
           "empty"
         );
@@ -392,7 +524,7 @@
         const newsHtml =
           `<div class="panel-h ov-news-head">
             <h3 class="ov-news-h">Book intel · bad news</h3>
-            <span class="mute sm">Top 5 · delist/scam/hack · even if old</span>
+            <span class="mute sm">Book only · devastating classes</span>
             <button type="button" class="btn soft sm" data-jump="intel">All intel</button>
           </div>` +
           bn
@@ -473,7 +605,9 @@
       tt.length
         ? tt
             .map(
-              (a, i) => `<div class="cmd-row">
+              (a, i) => `<div class="cmd-row${deskRowSelectedClass(
+                a.symbol
+              )}" data-desk-sym="${escHtml(String(a.symbol || ""))}">
             <div class="cmd-row-main">
               <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
               <div>
@@ -506,7 +640,9 @@
       tm.length
         ? tm
             .map(
-              (e, i) => `<div class="cmd-row hot">
+              (e, i) => `<div class="cmd-row hot${deskRowSelectedClass(
+                e.symbol
+              )}" data-desk-sym="${escHtml(String(e.symbol || ""))}">
             <div class="cmd-row-main">
               <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
               <div>
@@ -568,7 +704,9 @@
               ]
                 .filter(Boolean)
                 .join(" · ");
-              return `<div class="cmd-row pos">
+              return `<div class="cmd-row pos${deskRowSelectedClass(
+                p.symbol
+              )}" data-desk-sym="${escHtml(String(p.symbol || ""))}">
             <div class="cmd-row-main">
               <div>
                 <div class="cmd-sym">${escHtml(String(p.symbol || ""))} ${free}</div>
@@ -667,6 +805,72 @@
         paintIfChanged(learnedEl, "", "ovAgentLearned", "empty");
       }
     }
+    applySelectedSymbol();
+    loadHunt();
+  }
+
+  function huntNameChip(row) {
+    const rank =
+      row.rank == null || row.rank === ""
+        ? "unranked"
+        : "#" + String(row.rank);
+    return `<span class="hunt-name" data-desk-sym="${escHtml(
+      String(row.symbol || "")
+    )}"><span>${escHtml(String(row.symbol || ""))}</span><span class="hunt-rank">${escHtml(
+      rank
+    )}</span><button type="button" class="btn soft sm hunt-mark" data-hunt-mark="${escHtml(
+      String(row.symbol || "")
+    )}" data-hunt-mkt="${escHtml(String(row.market || "futures"))}">Mark</button></span>`;
+  }
+
+  function paintHuntList(el, rows) {
+    if (!el) return;
+    const list = Array.isArray(rows) ? rows : [];
+    const html = list.length
+      ? list.map(huntNameChip).join("")
+      : `<span class="mute">—</span>`;
+    const sig = list.map((r) => [r.symbol, r.market, r.rank]);
+    if (paintIfChanged(el, html, el.id || "hunt", sig)) {
+      $$("[data-hunt-mark]", el).forEach((b) => {
+        b.addEventListener("click", async (ev) => {
+          ev.stopPropagation();
+          const raw = prompt("Hunt rank 1–99 (name only — not an AD)", "");
+          if (raw == null || !String(raw).trim()) return;
+          const n = parseInt(String(raw).trim(), 10);
+          if (!n || n < 1 || n > 99) {
+            toast("Rank must be 1–99");
+            return;
+          }
+          try {
+            await api("/api/hunt/mark", {
+              method: "POST",
+              body: JSON.stringify({
+                symbol: b.dataset.huntMark,
+                market: b.dataset.huntMkt || "futures",
+                rank: n,
+              }),
+            });
+            loadHunt();
+          } catch (e) {
+            toast(e.message);
+          }
+        });
+      });
+    }
+  }
+
+  async function loadHunt() {
+    let d = {};
+    try {
+      d = await api("/api/hunt");
+    } catch (_) {
+      return;
+    }
+    paintHuntList($("#huntStillUp"), d.still_up || []);
+    paintHuntList($("#huntAlreadyOff"), d.already_off || []);
+    paintHuntList($("#huntStillUpMovers"), d.still_up || []);
+    paintHuntList($("#huntAlreadyOffMovers"), d.already_off || []);
+    applySelectedSymbol();
   }
 
   function posOutcomeBadge(p) {
@@ -723,14 +927,23 @@
     return "—";
   }
 
-  function _fillUsd(o) {
-    const q =
-      o.quote_qty != null
-        ? Number(o.quote_qty)
-        : o.price != null && o.qty != null
-          ? Number(o.price) * Number(o.qty)
-          : null;
-    return q != null && !Number.isNaN(q) ? "$" + q.toFixed(0) : "—";
+  function posBookOf(p) {
+    const x = String((p && (p.book || p.market)) || "spot").toLowerCase();
+    return x === "futures" ? "futures" : "spot";
+  }
+
+  function _fillUsd(o, p) {
+    const book = posBookOf(p || {});
+    const cs =
+      book === "futures" ? Number((p && p.contract_size) || 1) || 1 : 1;
+    if (o.quote_qty != null && !Number.isNaN(Number(o.quote_qty))) {
+      return "$" + Number(o.quote_qty).toFixed(0);
+    }
+    if (o.price != null && o.qty != null) {
+      const q = Number(o.price) * Number(o.qty) * cs;
+      return !Number.isNaN(q) ? "$" + q.toFixed(0) : "—";
+    }
+    return "—";
   }
 
   function posCardHtml(p) {
@@ -810,7 +1023,8 @@
       .map(
         (o) =>
           `<div class="pos-layer buy"><span>BUY</span><span class="pos-layer-usd">${_fillUsd(
-            o
+            o,
+            p
           )}</span><span>@ ${
             o.price != null ? fmtPx(o.price) : "—"
           }</span><span class="mute">${fmtTime(o.ts)}</span></div>`
@@ -820,7 +1034,8 @@
       .map(
         (o) =>
           `<div class="pos-layer sell"><span>SELL</span><span class="pos-layer-usd">${_fillUsd(
-            o
+            o,
+            p
           )}</span><span>@ ${
             o.price != null ? fmtPx(o.price) : "—"
           }</span><span class="mute">${fmtTime(o.ts)}</span></div>`
@@ -879,7 +1094,11 @@
             : p.position_side === "long"
               ? " · long"
               : ""
-        }${p.leverage != null ? " · " + p.leverage + "x" : ""}`
+        }${p.leverage != null ? " · " + p.leverage + "x" : ""}${
+          posBookOf(p) === "futures" && p.contract_size != null
+            ? " · cs " + p.contract_size
+            : ""
+        }`
       : `${entry != null ? fmtPx(entry) : "—"} → ${
           exit_ != null ? fmtPx(exit_) : "—"
         }`;
@@ -898,7 +1117,11 @@
       (p.outcome || (isOpen ? "open" : "flat")).toLowerCase()
     }${p.free_coins && !isHold ? " is-free" : ""}${
       p.free_coins_status === "near_free" && !isHold ? " is-near" : ""
-    }${isHold ? " is-hold" : ""}" data-pos-id="${String(posId).replace(/"/g, "")}">
+    }${isHold ? " is-hold" : ""}${deskRowSelectedClass(
+      p.symbol
+    )}" data-pos-id="${String(posId).replace(/"/g, "")}" data-desk-sym="${escHtml(
+      String(p.symbol || "")
+    )}">
       <summary class="pos-sum">
         <div class="pos-id"><span class="pos-sym">${escHtml(
           String(p.symbol || "")
@@ -918,7 +1141,7 @@
           <div class="pos-flow-cell"><span class="pos-flow-k">${flow3k}</span><span class="pos-flow-v">${flow3v}</span></div>
         </div>
         <div class="pos-meta">${when}${layers ? " · " + layers : ""}</div>
-        <div class="pos-tags">${posMarketPill(p.market)}${truth}</div>
+        <div class="pos-tags">${posMarketPill(p.book || p.market)}${truth}</div>
         <span class="pos-chev" aria-hidden="true">▾</span>
       </summary>
       <div class="pos-detail">
@@ -1150,27 +1373,54 @@
           : ""
       } · hold bags excluded from AD learning</div>`;
     }
-    let html = "";
-    if (riskOpens.length) {
-      html += `<div class="pos-band-h">AD open risk <span class="pos-band-n">${riskOpens.length}</span></div>`;
-      html += riskOpens.map(posCardHtml).join("");
-    } else {
-      html += `<div class="pos-band-h mute">No AD open risk</div>`;
+    function bandsFor(rows) {
+      const opensB = rows.filter((p) => p.status === "open" || p.is_open);
+      const closedB = rows.filter((p) => !(p.status === "open" || p.is_open));
+      const holdB = opensB.filter(isHoldP);
+      const adB = opensB.filter((p) => !isHoldP(p));
+      adB.sort((a, b) => {
+        const ra = a.free_coins ? 0 : a.free_coins_status === "near_free" ? 1 : 2;
+        const rb = b.free_coins ? 0 : b.free_coins_status === "near_free" ? 1 : 2;
+        return ra - rb;
+      });
+      const freeB = adB.filter((p) => p.free_coins);
+      const riskB = adB.filter((p) => !p.free_coins);
+      let inner = "";
+      if (riskB.length) {
+        inner += `<div class="pos-band-h">AD open risk <span class="pos-band-n">${riskB.length}</span></div>`;
+        inner += riskB.map(posCardHtml).join("");
+      } else {
+        inner += `<div class="pos-band-h mute">No AD open risk</div>`;
+      }
+      if (freeB.length) {
+        inner += `<div class="pos-band-h free">Free coins <span class="pos-band-n">${freeB.length}</span></div>`;
+        inner += freeB.map(posCardHtml).join("");
+      }
+      if (holdB.length) {
+        inner += `<div class="pos-band-h hold">Long-term hold <span class="pos-band-n">${holdB.length}</span></div>`;
+        inner += `<p class="pos-band-hint mute">Invest bags — not used for AD bulk teach / agent cases.</p>`;
+        inner += holdB.map(posCardHtml).join("");
+      }
+      if (closedB.length) {
+        inner += `<div class="pos-band-h closed">Closed <span class="pos-band-n">${closedB.length}</span></div>`;
+        inner += closedB.map(posCardHtml).join("");
+      }
+      if (!opensB.length && !closedB.length) {
+        inner = `<div class="pos-band-h mute">None</div>`;
+      }
+      return inner;
     }
-    if (freeOpens.length) {
-      html += `<div class="pos-band-h free">Free coins <span class="pos-band-n">${freeOpens.length}</span></div>`;
-      html += freeOpens.map(posCardHtml).join("");
-    }
-    if (holdOpens.length) {
-      html += `<div class="pos-band-h hold">Long-term hold <span class="pos-band-n">${holdOpens.length}</span></div>`;
-      html += `<p class="pos-band-hint mute">Invest bags — not used for AD bulk teach / agent cases.</p>`;
-      html += holdOpens.map(posCardHtml).join("");
-    }
-    if (closed.length) {
-      html += `<div class="pos-band-h closed">Closed <span class="pos-band-n">${closed.length}</span></div>`;
-      html += closed.map(posCardHtml).join("");
-    }
-    host.innerHTML = html;
+
+    const fut = positions.filter((p) => posBookOf(p) === "futures");
+    const spot = positions.filter((p) => posBookOf(p) === "spot");
+    host.innerHTML =
+      `<div class="pos-book pos-book-fut"><div class="pos-book-h">Futures</div>${bandsFor(
+        fut
+      )}</div>` +
+      `<div class="pos-book pos-book-spot"><div class="pos-book-h">Spot</div>${bandsFor(
+        spot
+      )}</div>`;
+    applySelectedSymbol();
   }
 
   function wirePosTableOnce() {
@@ -1561,9 +1811,12 @@
       _fillMoverSetSelect(d.sets || [], d.active_set_id ?? _activeMoverSetId);
       if (_activeMoverSetId != null && d.active_set_id == null) {
         const d2 = await api(`/api/watchlist?set_id=${_activeMoverSetId}`);
-        return _renderMovers(d2, soft);
+        _renderMovers(d2, soft);
+        loadHunt();
+        return;
       }
       _renderMovers(d, soft);
+      loadHunt();
     } catch (e) {
       if (!soft) toast(e.message || String(e));
     }
@@ -1648,7 +1901,9 @@
                 ? "peak"
                 : lf.source || "")
           : "";
-        return `<tr class="${lf && lf.id === state.lastAlarmFlashId ? "row-flash" : ""}">
+        return `<tr class="${lf && lf.id === state.lastAlarmFlashId ? "row-flash" : ""}${deskRowSelectedClass(
+          w.symbol
+        )}" data-desk-sym="${escHtml(String(w.symbol || ""))}">
           <td>${w.market === "futures" ? "F" : "S"}</td>
           <td>${w.symbol}</td>
           <td>${t ? fmtPx(t.price) : "—"}</td>
@@ -1705,6 +1960,7 @@
         );
       }
       _applyMoversFilter();
+      applySelectedSymbol();
     }
   }
 
@@ -1719,23 +1975,38 @@
     }
     const alerts = d.alerts || [];
     const rows = alerts
-      .map(
-        (a) => `<tr>
+      .map((a) => {
+        const dist =
+          a.distance_pct != null && !Number.isNaN(Number(a.distance_pct))
+            ? Number(a.distance_pct)
+            : null;
+        const distCls =
+          dist == null ? "mute" : dist >= 0 ? "up" : "dn";
+        const distLabel =
+          dist == null
+            ? "—"
+            : (dist >= 0 ? "+" : "") + dist.toFixed(2) + "%";
+        return `<tr class="${deskRowSelectedClass(a.symbol)}" data-desk-sym="${escHtml(
+          String(a.symbol || "")
+        )}" data-distance-pct="${dist == null ? "" : dist}">
         <td>#${a.visual_id}</td>
         <td>${a.market === "futures" ? "F" : "S"}</td>
         <td>${a.symbol}</td>
         <td>${fmtPx(a.price)}</td>
+        <td class="tgt-dist ${distCls}" title="${
+          a.mark != null ? "mark " + fmtPx(a.mark) : "no mark"
+        }">${distLabel}</td>
         <td>${a.enabled ? "on" : "off"}</td>
         <td>
           <button type="button" class="btn soft sm" data-tog="${a.stable_id}" data-en="${a.enabled ? 0 : 1}">${a.enabled ? "Disable" : "Enable"}</button>
           <button type="button" class="btn soft sm" data-del="${a.stable_id}">Delete</button>
         </td>
-      </tr>`
-      )
+      </tr>`;
+      })
       .join("");
     const painted = paintIfChanged(
       $("#alertsTable"),
-      table(["#", "M", "Symbol", "Target", "State", ""], rows),
+      table(["#", "M", "Symbol", "Target", "To fire", "State", ""], rows),
       "alertsTable",
       alerts.map((a) => [
         a.stable_id,
@@ -1744,6 +2015,8 @@
         a.market,
         a.price,
         a.enabled ? 1 : 0,
+        a.mark,
+        a.distance_pct,
       ])
     );
     if (painted) {
@@ -1774,6 +2047,7 @@
       );
     }
     _applyTargetsFilter();
+    applySelectedSymbol();
   }
 
   // Learning P1 — case factory: pick → snapshot → chips + note
@@ -2641,19 +2915,522 @@
     }
   }
 
-  function setLearnSelection(sel) {
+  const LEARN_SETUP_TF = [
+    "tf:1m",
+    "tf:5m",
+    "tf:15m",
+    "tf:1h",
+    "tf:4h",
+    "tf:8h",
+    "tf:12h",
+    "tf:1d",
+    "tf:1w",
+  ];
+  const LEARN_SETUP_REGIME = [
+    "regime:familiar",
+    "regime:new_high",
+    "regime:new_low",
+  ];
+  const LEARN_SETUP_REDS = [
+    "reds:1",
+    "reds:2",
+    "reds:3",
+    "reds:4",
+    "reds:5",
+    "reds:6",
+  ];
+  const LEARN_SETUP_VOL = ["vol:climax", "vol:dry"];
+  const LEARN_SETUP_ALL = [
+    ...LEARN_SETUP_TF,
+    ...LEARN_SETUP_REGIME,
+    ...LEARN_SETUP_REDS,
+    ...LEARN_SETUP_VOL,
+  ];
+  const LEARN_PROCESS_CHIPS = [
+    "plan_ok",
+    "greed",
+    "fomo",
+    "hesitant",
+    "pride",
+    "rule_break",
+    "process_skip",
+    "false_panic",
+    "free_coins",
+    "free_tp_ok",
+    "free_tp_greed",
+  ];
+  const LEARN_AD_CHIPS = ["ad_met", "ad_missed"];
+  const LEARN_BUCKET_CHIPS = ["ad_take", "ad_press", "ad_wait", "ad_skip"];
+
+  function learnStackLabel(t) {
+    if (t.startsWith("tf:")) return t.slice(3);
+    if (t.startsWith("regime:")) return t.slice(7).replace("_", " ");
+    if (t.startsWith("reds:")) {
+      const n = t.slice(5);
+      return n === "6"
+        ? "6+ reds"
+        : n + (n === "1" ? "st" : n === "2" ? "nd" : n === "3" ? "rd" : "th");
+    }
+    if (t.startsWith("vol:")) return t.slice(4);
+    return t;
+  }
+
+  function parseLessonJump(raw) {
+    const s = String(raw || "").trim();
+    if (!s || /^(first|oldest|#?1|lesson\s*#?1)$/i.test(s)) return 1;
+    const m = s.match(/^\s*#?\s*(\d+)\s*$/i) || s.match(/^\s*lesson\s*#?\s*(\d+)\s*$/i);
+    return m ? parseInt(m[1], 10) : 0;
+  }
+
+  function captureLearnEditorDraft() {
+    const teach = $("#teachText");
+    const form = $("#teachForm");
+    const lesEl = $("#learnLessons");
+    const open = lesEl && lesEl.querySelector(".learn-lesson-edit:not([hidden])");
+    const lid = open ? +open.getAttribute("data-edit-panel") : 0;
+    const ta = open && open.querySelector("textarea");
+    const lessonChips = open
+      ? $$(".chip.on", open)
+          .map((c) => c.dataset.editChip)
+          .filter(Boolean)
+      : [];
+    const teachOn = form
+      ? $$(".chip.on", form).map(
+          (c) => c.dataset.beh || c.dataset.tag || c.dataset.ad || c.textContent
+        )
+      : [];
+    return {
+      teachText: teach ? teach.value : "",
+      teachOn,
+      lessonId: lid,
+      lessonText: ta ? ta.value : "",
+      lessonChips,
+      learnSel: state.learnSel,
+    };
+  }
+
+  function restoreLearnEditorDraft(draft) {
+    if (!draft) return;
+    const teach = $("#teachText");
+    if (teach && draft.teachText != null) teach.value = draft.teachText;
+    const form = $("#teachForm");
+    if (form && draft.teachOn && draft.teachOn.length) {
+      $$(".chip", form).forEach((c) => {
+        const key = c.dataset.beh || c.dataset.tag || c.dataset.ad || c.textContent;
+        c.classList.toggle("on", draft.teachOn.indexOf(key) !== -1);
+      });
+    }
+    if (draft.lessonId) {
+      const row =
+        $("#learnLessons") &&
+        $("#learnLessons").querySelector(`[data-lesson-id="${draft.lessonId}"]`);
+      const edit = row && row.querySelector(`[data-edit-panel="${draft.lessonId}"]`);
+      const view = row && row.querySelector(".learn-lesson-view");
+      if (edit) {
+        edit.hidden = false;
+        if (view) view.hidden = true;
+        const ta = edit.querySelector("textarea");
+        if (ta && draft.lessonText != null) ta.value = draft.lessonText;
+        if (draft.lessonChips) {
+          $$(".chip", edit).forEach((c) => {
+            c.classList.toggle(
+              "on",
+              draft.lessonChips.indexOf(c.dataset.editChip) !== -1
+            );
+          });
+        }
+      }
+    }
+  }
+
+  function highlightLessonRow(id) {
+    const lesEl = $("#learnLessons");
+    if (!lesEl) return;
+    $$("[data-lesson-id]", lesEl).forEach((row) => {
+      row.classList.toggle("is-lesson-jump", +row.dataset.lessonId === +id);
+    });
+  }
+
+  function lessonCardHtml(l) {
+    const tags = (() => {
+      if (Array.isArray(l.tags)) return l.tags;
+      try {
+        return JSON.parse(l.tags_json || "[]");
+      } catch (_) {
+        return [];
+      }
+    })();
+    const symTag = (tags || []).find(
+      (x) => typeof x === "string" && x.startsWith("sym:")
+    );
+    const bucketTag = (tags || []).find(
+      (x) => typeof x === "string" && x.startsWith("bucket:")
+    );
+    const about = l.symbol_norm
+      ? l.symbol_norm
+      : symTag
+        ? symTag.slice(4)
+        : (l.text || "").startsWith("[")
+          ? "linked"
+          : "general";
+    const chipTags = (tags || []).filter(
+      (x) => typeof x === "string" && !x.includes(":") && x.length < 24
+    );
+    const stackTags = (tags || []).filter(
+      (x) => typeof x === "string" && LEARN_SETUP_ALL.includes(x.toLowerCase())
+    );
+    const bucket = l.bucket || (bucketTag ? bucketTag.slice(7) : "") || "";
+    const when =
+      l.incident_iso ||
+      (l.incident_ts
+        ? fmtTime(l.incident_ts)
+        : l.created_at
+          ? fmtTime(l.created_at)
+          : "");
+    const px =
+      l.incident_price != null && !Number.isNaN(+l.incident_price)
+        ? fmtPx(l.incident_price)
+        : "";
+    const metaBits = [
+      when ? `incident ${when}` : "",
+      px ? `@ ${px}` : "",
+      bucket ? bucket : "",
+      l.event_id ? `ev ${l.event_id}` : "",
+    ].filter(Boolean);
+    const metaHtml = metaBits.length
+      ? `<div class="learn-lesson-incident mute">${escHtml(
+          metaBits.join(" · ")
+        )}</div>`
+      : "";
+    const tagHtml =
+      chipTags.length || bucket || stackTags.length
+        ? `<div class="learn-lesson-tags">${chipTags
+            .map((t) => {
+              const ad = t === "ad_met" || t === "ad_missed";
+              return `<span class="learn-tag ${ad ? "ad" : "beh"}">${escHtml(
+                t
+              )}</span>`;
+            })
+            .join("")}${stackTags
+            .map(
+              (t) =>
+                `<span class="learn-tag stack">${escHtml(
+                  learnStackLabel(t.toLowerCase())
+                )}</span>`
+            )
+            .join("")}${
+            bucket
+              ? `<span class="learn-tag bucket">${escHtml(bucket)}</span>`
+              : ""
+          }</div>`
+        : "";
+    const fullText = l.text || "";
+    const activeBucket = bucket || "";
+    const chipBtns = [...LEARN_PROCESS_CHIPS, ...LEARN_AD_CHIPS, ...LEARN_BUCKET_CHIPS]
+      .map((c) => {
+        const on = chipTags.includes(c) || c === activeBucket ? " on" : "";
+        const ad = LEARN_AD_CHIPS.includes(c) ? " chip-ad" : "";
+        const bk = LEARN_BUCKET_CHIPS.includes(c) ? " chip-bucket" : "";
+        return `<button type="button" class="chip sm${ad}${bk}${on}" data-edit-chip="${c}" data-lid="${
+          l.id
+        }">${c}</button>`;
+      })
+      .join("");
+    const setupBtns = (codes, kind) =>
+      codes
+        .map((c) => {
+          const on = stackTags.includes(c) ? " on" : "";
+          return `<button type="button" class="chip sm chip-setup chip-${kind}${on}" data-edit-chip="${c}" data-setup="${kind}" data-lid="${
+            l.id
+          }">${escHtml(learnStackLabel(c))}</button>`;
+        })
+        .join("");
+    return `<div class="learn-lesson" data-lesson-id="${l.id}" data-incident-ts="${
+      l.incident_ts != null ? l.incident_ts : ""
+    }" data-base="${escHtml(l.base || "")}">
+                <div class="learn-lesson-view">
+                  <div class="learn-lesson-main">
+                    <span class="learn-about">${escHtml(about)}</span>
+                    ${metaHtml}
+                    <span class="learn-lesson-text">${escHtml(fullText)}</span>
+                    ${tagHtml}
+                  </div>
+                  <div class="learn-lesson-actions">
+                    <button type="button" class="btn soft sm" data-edit-lesson="${
+                      l.id
+                    }" title="Edit this lesson">Edit</button>
+                    <button type="button" class="btn soft sm learn-del" data-del-lesson="${
+                      l.id
+                    }" title="Remove this lesson">Delete</button>
+                  </div>
+                </div>
+                <div class="learn-lesson-edit" hidden data-edit-panel="${l.id}">
+                  <p class="learn-panel-hint mute">Edit text, process chips, and the chart stack (TF / reds / vol). History stays on the candles.${
+                    l.event_id || l.case_id
+                      ? " Mark Actual AD on this fire’s candles — Save AD is its own merge."
+                      : ""
+                  }</p>
+                  <div class="learn-lesson-edit-ad" hidden data-edit-ad="${
+                    l.id
+                  }"></div>
+                  <textarea class="learn-edit-text" data-edit-text="${
+                    l.id
+                  }" rows="4">${escHtml(fullText)}</textarea>
+                  <div class="learn-chips learn-edit-chips" data-edit-chips="${
+                    l.id
+                  }">${chipBtns}
+                    <span class="learn-chip-hint mute" style="width:100%">Stack · TF</span>
+                    ${setupBtns(LEARN_SETUP_TF, "tf")}
+                    <span class="learn-chip-hint mute" style="width:100%">Regime</span>
+                    ${setupBtns(LEARN_SETUP_REGIME, "regime")}
+                    <span class="learn-chip-hint mute" style="width:100%">Reds</span>
+                    ${setupBtns(LEARN_SETUP_REDS, "red")}
+                    <span class="learn-chip-hint mute" style="width:100%">Vol</span>
+                    ${setupBtns(LEARN_SETUP_VOL, "vol")}
+                  </div>
+                  <div class="row-gap">
+                    <button type="button" class="btn sm" data-save-lesson="${
+                      l.id
+                    }">Save changes</button>
+                    <button type="button" class="btn soft sm" data-cancel-edit="${
+                      l.id
+                    }">Cancel</button>
+                  </div>
+                </div>
+              </div>`;
+  }
+
+  function openLessonEdit(id) {
+    const lesEl = $("#learnLessons");
+    if (!lesEl) return;
+    $$("[data-lesson-id]", lesEl).forEach((row) => {
+      const rid = +row.dataset.lessonId;
+      const view = row.querySelector(".learn-lesson-view");
+      const edit = row.querySelector(`[data-edit-panel="${rid}"]`);
+      const ad = row.querySelector(`[data-edit-ad="${rid}"]`);
+      if (rid === id) {
+        if (view) view.hidden = true;
+        if (edit) edit.hidden = false;
+      } else {
+        if (view) view.hidden = false;
+        if (edit) edit.hidden = true;
+        if (ad) {
+          ad.hidden = true;
+          ad.innerHTML = "";
+        }
+      }
+    });
+    const lesson = (state.learnLessons || []).find((x) => +x.id === +id);
+    const ad = lesEl.querySelector(`[data-edit-ad="${id}"]`);
+    fillLessonEditAd(ad, lesson);
+  }
+
+  function closeLessonEdit(id) {
+    const lesEl = $("#learnLessons");
+    const row = lesEl && lesEl.querySelector(`[data-lesson-id="${id}"]`);
+    if (!row) return;
+    const view = row.querySelector(".learn-lesson-view");
+    const edit = row.querySelector(`[data-edit-panel="${id}"]`);
+    const ad = row.querySelector(`[data-edit-ad="${id}"]`);
+    if (view) view.hidden = false;
+    if (edit) edit.hidden = true;
+    if (ad) {
+      ad.hidden = true;
+      ad.innerHTML = "";
+    }
+    if (state.learnCase && $("#learnCaseSnap")) {
+      const snapAd = $("#learnCaseSnap").querySelector(".learn-visual-ad-teach");
+      if (snapAd && state.learnSel) {
+        renderVisualAdTeachTools(snapAd, state.learnCase, state.learnSel);
+      }
+    }
+  }
+
+  function bindLessonList(lesEl, only) {
+    const scope = only || lesEl;
+    if (!scope) return;
+    $$("[data-edit-lesson]", scope).forEach((b) => {
+      if (b.dataset.bound) return;
+      b.dataset.bound = "1";
+      b.addEventListener("click", () => openLessonEdit(+b.dataset.editLesson));
+    });
+    $$("[data-cancel-edit]", scope).forEach((b) => {
+      if (b.dataset.bound) return;
+      b.dataset.bound = "1";
+      b.addEventListener("click", () => {
+        closeLessonEdit(+b.dataset.cancelEdit);
+        loadMemory();
+      });
+    });
+    $$("[data-edit-chip]", scope).forEach((b) => {
+      if (b.dataset.bound) return;
+      b.dataset.bound = "1";
+      b.addEventListener("click", () => {
+        const code = b.dataset.editChip;
+        const panel = b.closest("[data-edit-chips]");
+        if (code === "ad_met" || code === "ad_missed") {
+          $$(".chip-ad", panel).forEach((c) => {
+            if (c !== b) c.classList.remove("on");
+          });
+        }
+        if (LEARN_BUCKET_CHIPS.includes(code)) {
+          $$(".chip-bucket", panel).forEach((c) => {
+            if (c !== b) c.classList.remove("on");
+          });
+        }
+        const setupKind = b.dataset.setup;
+        if (setupKind) {
+          $$(`[data-setup="${setupKind}"]`, panel).forEach((c) => {
+            if (c !== b) c.classList.remove("on");
+          });
+        }
+        b.classList.toggle("on");
+      });
+    });
+    $$("[data-save-lesson]", scope).forEach((b) => {
+      if (b.dataset.bound) return;
+      b.dataset.bound = "1";
+      b.addEventListener("click", async () => {
+        const id = +b.dataset.saveLesson;
+        const ta = lesEl.querySelector(`[data-edit-text="${id}"]`);
+        const chipRoot = lesEl.querySelector(`[data-edit-chips="${id}"]`);
+        const text = (ta && ta.value.trim()) || "";
+        if (!text) {
+          toast("Lesson text cannot be empty");
+          return;
+        }
+        const behaviors = $$(".chip.on", chipRoot).map((c) => c.dataset.editChip);
+        try {
+          b.disabled = true;
+          await api(`/api/learning/lessons/${id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ text, behaviors }),
+          });
+          toast("Lesson updated");
+          loadMemory();
+        } catch (err) {
+          toast(err.message);
+          b.disabled = false;
+        }
+      });
+    });
+    $$("[data-del-lesson]", scope).forEach((b) => {
+      if (b.dataset.bound) return;
+      b.dataset.bound = "1";
+      b.addEventListener("click", async () => {
+        const id = +b.dataset.delLesson;
+        if (!id) return;
+        if (
+          !confirm(
+            "Delete this lesson? The agent will no longer use it in memory."
+          )
+        )
+          return;
+        try {
+          await api(`/api/learning/lessons/${id}`, { method: "DELETE" });
+          toast("Lesson deleted");
+          loadMemory();
+        } catch (err) {
+          toast(err.message);
+        }
+      });
+    });
+  }
+
+  async function jumpToLesson(raw, prefetched) {
+    const id = parseLessonJump(raw);
+    if (!id) {
+      toast("Enter a lesson id — 1 is the first lesson");
+      return { ok: false };
+    }
+    const draft = captureLearnEditorDraft();
+    const lesEl = $("#learnLessons");
+    let row = lesEl && lesEl.querySelector(`[data-lesson-id="${id}"]`);
+    if (!row) {
+      let lesson = prefetched && +prefetched.id === +id ? prefetched : null;
+      if (!lesson) {
+        lesson = (state.learnLessons || []).find((x) => +x.id === +id) || null;
+      }
+      if (!lesson) {
+        try {
+          const r = await api(`/api/learning/lessons/${id}`);
+          lesson = r.lesson || null;
+        } catch (e) {
+          toast(e.message || "Lesson not found");
+          restoreLearnEditorDraft(draft);
+          return { ok: false };
+        }
+      }
+      if (!lesson || lesson.id == null) {
+        toast("Lesson " + id + " not found");
+        restoreLearnEditorDraft(draft);
+        return { ok: false };
+      }
+      if (!(state.learnLessons || []).some((x) => +x.id === +id)) {
+        state.learnLessons = [lesson].concat(state.learnLessons || []);
+      }
+      if (lesEl && !lesEl.querySelector(`[data-lesson-id="${id}"]`)) {
+        const wrap = document.createElement("div");
+        wrap.innerHTML = lessonCardHtml(lesson);
+        const node = wrap.firstElementChild;
+        if (node) {
+          if (+id === 1) lesEl.prepend(node);
+          else lesEl.appendChild(node);
+          bindLessonList(lesEl, node);
+          row = node;
+        }
+      }
+    }
+    highlightLessonRow(id);
+    restoreLearnEditorDraft(draft);
+    const target =
+      $("#learnLessons") &&
+      $("#learnLessons").querySelector(`[data-lesson-id="${id}"]`);
+    if (target && target.scrollIntoView) {
+      target.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+    return { ok: true, id };
+  }
+
+  async function searchOrJumpLessons(raw) {
+    const s = String(raw || "").trim();
+    const asId = parseLessonJump(s);
+    if (!s) return jumpToLesson("1");
+    if (asId) return jumpToLesson(String(asId));
+    try {
+      const r = await api(
+        `/api/learning/lessons/search?q=${encodeURIComponent(s)}`
+      );
+      const hits = r.lessons || [];
+      if (!hits.length) {
+        toast("No lesson match");
+        return { ok: false };
+      }
+      const first = hits.find((x) => +x.id === 1) || hits[0];
+      return jumpToLesson(String(first.id), first);
+    } catch (e) {
+      toast(e.message);
+      return { ok: false };
+    }
+  }
+
+  function setLearnSelection(sel, opts) {
+    const keepEditor = !!(opts && opts.keepEditor);
+    const draft = keepEditor ? captureLearnEditorDraft() : null;
     state.learnSel = sel;
-    state.learnBehaviors = [];
-    $$(".chip", $("#learnBehaviorChips")).forEach((c) =>
-      c.classList.remove("on")
-    );
-    $$(".chip-ad", $("#learnAdChips")).forEach((c) => c.classList.remove("on"));
-    $$(".chip-bucket", $("#learnBucketChips")).forEach((c) =>
-      c.classList.remove("on")
-    );
-    $$(".chip[data-tag]", $("#teachForm")).forEach((c) =>
-      c.classList.remove("on")
-    );
+    if (!keepEditor) {
+      state.learnBehaviors = [];
+      $$(".chip", $("#learnBehaviorChips")).forEach((c) =>
+        c.classList.remove("on")
+      );
+      $$(".chip-ad", $("#learnAdChips")).forEach((c) => c.classList.remove("on"));
+      $$(".chip-bucket", $("#learnBucketChips")).forEach((c) =>
+        c.classList.remove("on")
+      );
+      $$(".chip[data-tag]", $("#teachForm")).forEach((c) =>
+        c.classList.remove("on")
+      );
+    }
     const bar = $("#learnContextBar");
     const det = $("#learnContextDetail");
     const sub = $("#teachSubmit");
@@ -2709,6 +3486,7 @@
     if (ev) ev.value = sel.event_id != null ? String(sel.event_id) : "";
     if (ct) ct.value = sel.type || "";
     loadCasePreview(sel);
+    if (keepEditor) restoreLearnEditorDraft(draft);
   }
 
   async function loadMemory() {
@@ -2977,7 +3755,7 @@
         ? fires
             .slice(0, 20)
             .map((e, i) => {
-              return `<div class="learn-card learn-pick" data-pick-fire="${e.id}" data-i="${i}">
+              return `<div class="learn-card learn-pick" data-pick-fire="${e.id}" data-teach-this-fire="${e.id}" data-i="${i}">
                 <div class="learn-card-h">#${e.id} ${escHtml(
                 e.symbol
               )} · ${escHtml(e.velocity_band || "—")} · ${
@@ -2989,7 +3767,7 @@
                 <div class="row-gap mt">
                   <button type="button" class="btn sm" data-pick-fire-btn="${
                     e.id
-                  }" data-i="${i}">Teach about this fire</button>
+                  }" data-teach-this-fire="${e.id}" data-i="${i}">Teach-this-fire</button>
                 </div>
               </div>`;
             })
@@ -2999,24 +3777,30 @@
       const pickFire = (i) => {
         const e = fl[i];
         if (!e) return;
-        setLearnSelection({
-          type: "fire",
-          symbol: e.symbol,
-          market: e.market || "futures",
-          entity_key: "",
-          event_id: e.id,
-          price: e.price,
-          drop_pct: e.drop_pct,
-          velocity_band: e.velocity_band,
-          ts: e.ts,
-          case: e.case || null,
-          label: `FIRE ${e.symbol} #${e.id} · ${e.velocity_band || ""} · ${
-            e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : ""
-          }`,
-          detail: `Fire @ ${e.price ?? "—"} · ${fmtTime(e.ts)} · action ${
-            e.last_action || "unlabeled"
-          }${e.has_case ? " · case frozen" : ""}`,
-        });
+        setLearnSelection(
+          {
+            type: "fire",
+            symbol: e.symbol,
+            market: e.market || "futures",
+            entity_key: "",
+            event_id: e.id,
+            price: e.price,
+            drop_pct: e.drop_pct,
+            velocity_band: e.velocity_band,
+            ts: e.ts,
+            case: e.case || null,
+            label: `FIRE ${e.symbol} #${e.id} · ${e.velocity_band || ""} · ${
+              e.drop_pct != null ? Number(e.drop_pct).toFixed(1) + "%" : ""
+            }`,
+            detail: `Fire @ ${e.price ?? "—"} · ${fmtTime(e.ts)} · action ${
+              e.last_action || "unlabeled"
+            }${e.has_case ? " · case frozen" : ""}`,
+          },
+          { keepEditor: true }
+        );
+        $$(".learn-pick", fireList).forEach((el) =>
+          el.classList.toggle("selected", el.dataset.i === String(i))
+        );
       };
       $$("[data-pick-fire-btn]", fireList).forEach((b) =>
         b.addEventListener("click", (ev) => {
@@ -3024,361 +3808,37 @@
           pickFire(+b.dataset.i);
         })
       );
+      $$("[data-pick-fire]", fireList).forEach((el) =>
+        el.addEventListener("click", () => pickFire(+el.dataset.i))
+      );
     }
 
-    // 4 Lessons with about context + delete
-    const SETUP_TF = [
-      "tf:1m",
-      "tf:5m",
-      "tf:15m",
-      "tf:1h",
-      "tf:4h",
-      "tf:8h",
-      "tf:12h",
-      "tf:1d",
-      "tf:1w",
-    ];
-    const SETUP_REGIME = ["regime:familiar", "regime:new_high", "regime:new_low"];
-    const SETUP_REDS = [
-      "reds:1",
-      "reds:2",
-      "reds:3",
-      "reds:4",
-      "reds:5",
-      "reds:6",
-    ];
-    const SETUP_VOL = ["vol:climax", "vol:dry"];
-    const SETUP_ALL = [
-      ...SETUP_TF,
-      ...SETUP_REGIME,
-      ...SETUP_REDS,
-      ...SETUP_VOL,
-    ];
-    const stackLabel = (t) => {
-      if (t.startsWith("tf:")) return t.slice(3);
-      if (t.startsWith("regime:")) return t.slice(7).replace("_", " ");
-      if (t.startsWith("reds:")) {
-        const n = t.slice(5);
-        return n === "6" ? "6+ reds" : n + (n === "1" ? "st" : n === "2" ? "nd" : n === "3" ? "rd" : "th");
-      }
-      if (t.startsWith("vol:")) return t.slice(4);
-      return t;
-    };
-    const PROCESS_CHIPS = [
-      "plan_ok",
-      "greed",
-      "fomo",
-      "hesitant",
-      "pride",
-      "rule_break",
-      "process_skip",
-      "false_panic",
-      "free_coins",
-      "free_tp_ok",
-      "free_tp_greed",
-    ];
-    const AD_CHIPS = ["ad_met", "ad_missed"];
-    const BUCKET_CHIPS = ["ad_take", "ad_press", "ad_wait", "ad_skip"];
+    // 4 Lessons — remount preserves teach + open edit drafts
+    const incoming = lessons || [];
+    const extras = (state.learnLessons || []).filter(
+      (l) => l && l.id != null && !incoming.some((x) => +x.id === +l.id)
+    );
+    const paint = extras.concat(incoming);
+    state.learnLessons = paint;
 
     const lesEl = $("#learnLessons");
     if (lesEl) {
-      lesEl.innerHTML = lessons.length
-        ? lessons
-            .map((l) => {
-              const tags = (() => {
-                if (Array.isArray(l.tags)) return l.tags;
-                try {
-                  return JSON.parse(l.tags_json || "[]");
-                } catch (_) {
-                  return [];
-                }
-              })();
-              const symTag = (tags || []).find(
-                (x) => typeof x === "string" && x.startsWith("sym:")
-              );
-              const bucketTag = (tags || []).find(
-                (x) => typeof x === "string" && x.startsWith("bucket:")
-              );
-              const about = l.symbol_norm
-                ? l.symbol_norm
-                : symTag
-                  ? symTag.slice(4)
-                  : (l.text || "").startsWith("[")
-                    ? "linked"
-                    : "general";
-              const chipTags = (tags || []).filter(
-                (x) =>
-                  typeof x === "string" &&
-                  !x.includes(":") &&
-                  x.length < 24
-              );
-              const stackTags = (tags || []).filter(
-                (x) =>
-                  typeof x === "string" &&
-                  SETUP_ALL.includes(x.toLowerCase())
-              );
-              const bucket =
-                l.bucket ||
-                (bucketTag ? bucketTag.slice(7) : "") ||
-                "";
-              const when =
-                l.incident_iso ||
-                (l.incident_ts
-                  ? fmtTime(l.incident_ts)
-                  : l.created_at
-                    ? fmtTime(l.created_at)
-                    : "");
-              const px =
-                l.incident_price != null && !Number.isNaN(+l.incident_price)
-                  ? fmtPx(l.incident_price)
-                  : "";
-              const metaBits = [
-                when ? `incident ${when}` : "",
-                px ? `@ ${px}` : "",
-                bucket ? bucket : "",
-                l.event_id ? `ev ${l.event_id}` : "",
-              ].filter(Boolean);
-              const metaHtml = metaBits.length
-                ? `<div class="learn-lesson-incident mute">${escHtml(
-                    metaBits.join(" · ")
-                  )}</div>`
-                : "";
-              const tagHtml =
-                chipTags.length || bucket || stackTags.length
-                  ? `<div class="learn-lesson-tags">${chipTags
-                      .map((t) => {
-                        const ad = t === "ad_met" || t === "ad_missed";
-                        return `<span class="learn-tag ${
-                          ad ? "ad" : "beh"
-                        }">${escHtml(t)}</span>`;
-                      })
-                      .join("")}${stackTags
-                      .map(
-                        (t) =>
-                          `<span class="learn-tag stack">${escHtml(
-                            stackLabel(t.toLowerCase())
-                          )}</span>`
-                      )
-                      .join("")}${
-                      bucket
-                        ? `<span class="learn-tag bucket">${escHtml(
-                            bucket
-                          )}</span>`
-                        : ""
-                    }</div>`
-                  : "";
-              const fullText = l.text || "";
-              const activeBucket = bucket || "";
-              const chipBtns = [
-                ...PROCESS_CHIPS,
-                ...AD_CHIPS,
-                ...BUCKET_CHIPS,
-              ]
-                .map((c) => {
-                  const on =
-                    chipTags.includes(c) || c === activeBucket ? " on" : "";
-                  const ad = AD_CHIPS.includes(c) ? " chip-ad" : "";
-                  const bk = BUCKET_CHIPS.includes(c) ? " chip-bucket" : "";
-                  return `<button type="button" class="chip sm${ad}${bk}${on}" data-edit-chip="${c}" data-lid="${
-                    l.id
-                  }">${c}</button>`;
-                })
-                .join("");
-              const setupBtns = (codes, kind) =>
-                codes
-                  .map((c) => {
-                    const on = stackTags.includes(c) ? " on" : "";
-                    return `<button type="button" class="chip sm chip-setup chip-${kind}${on}" data-edit-chip="${c}" data-setup="${kind}" data-lid="${
-                      l.id
-                    }">${escHtml(stackLabel(c))}</button>`;
-                  })
-                  .join("");
-              return `<div class="learn-lesson" data-lesson-id="${l.id}" data-incident-ts="${
-                l.incident_ts != null ? l.incident_ts : ""
-              }" data-base="${escHtml(l.base || "")}">
-                <div class="learn-lesson-view">
-                  <div class="learn-lesson-main">
-                    <span class="learn-about">${escHtml(about)}</span>
-                    ${metaHtml}
-                    <span class="learn-lesson-text">${escHtml(fullText)}</span>
-                    ${tagHtml}
-                  </div>
-                  <div class="learn-lesson-actions">
-                    <button type="button" class="btn soft sm" data-edit-lesson="${
-                      l.id
-                    }" title="Edit this lesson">Edit</button>
-                    <button type="button" class="btn soft sm learn-del" data-del-lesson="${
-                      l.id
-                    }" title="Remove this lesson">Delete</button>
-                  </div>
-                </div>
-                <div class="learn-lesson-edit" hidden data-edit-panel="${l.id}">
-                  <p class="learn-panel-hint mute">Edit text, process chips, and the chart stack (TF / reds / vol). History stays on the candles.${
-                    l.event_id || l.case_id
-                      ? " Mark Actual AD on this fire’s candles — Save AD is its own merge."
-                      : ""
-                  }</p>
-                  <div class="learn-lesson-edit-ad" hidden data-edit-ad="${
-                    l.id
-                  }"></div>
-                  <textarea class="learn-edit-text" data-edit-text="${
-                    l.id
-                  }" rows="4">${escHtml(fullText)}</textarea>
-                  <div class="learn-chips learn-edit-chips" data-edit-chips="${
-                    l.id
-                  }">${chipBtns}
-                    <span class="learn-chip-hint mute" style="width:100%">Stack · TF</span>
-                    ${setupBtns(SETUP_TF, "tf")}
-                    <span class="learn-chip-hint mute" style="width:100%">Regime</span>
-                    ${setupBtns(SETUP_REGIME, "regime")}
-                    <span class="learn-chip-hint mute" style="width:100%">Reds</span>
-                    ${setupBtns(SETUP_REDS, "red")}
-                    <span class="learn-chip-hint mute" style="width:100%">Vol</span>
-                    ${setupBtns(SETUP_VOL, "vol")}
-                  </div>
-                  <div class="row-gap">
-                    <button type="button" class="btn sm" data-save-lesson="${
-                      l.id
-                    }">Save changes</button>
-                    <button type="button" class="btn soft sm" data-cancel-edit="${
-                      l.id
-                    }">Cancel</button>
-                  </div>
-                </div>
-              </div>`;
-            })
-            .join("")
+      const editorDraft = captureLearnEditorDraft();
+      lesEl.innerHTML = paint.length
+        ? paint.map((l) => lessonCardHtml(l)).join("")
         : rankEmpty(
             "No cases yet. Pick a trade or fire → snapshot → chips + note → Save."
           );
-
-      const openEdit = (id) => {
-        $$("[data-lesson-id]", lesEl).forEach((row) => {
-          const rid = +row.dataset.lessonId;
-          const view = row.querySelector(".learn-lesson-view");
-          const edit = row.querySelector(`[data-edit-panel="${rid}"]`);
-          const ad = row.querySelector(`[data-edit-ad="${rid}"]`);
-          if (rid === id) {
-            if (view) view.hidden = true;
-            if (edit) edit.hidden = false;
-          } else {
-            if (view) view.hidden = false;
-            if (edit) edit.hidden = true;
-            if (ad) {
-              ad.hidden = true;
-              ad.innerHTML = "";
-            }
-          }
-        });
-        const lesson = (lessons || []).find((x) => +x.id === +id);
-        const ad = lesEl.querySelector(`[data-edit-ad="${id}"]`);
-        fillLessonEditAd(ad, lesson);
-      };
-      const closeEdit = (id) => {
-        const row = lesEl.querySelector(`[data-lesson-id="${id}"]`);
-        if (!row) return;
-        const view = row.querySelector(".learn-lesson-view");
-        const edit = row.querySelector(`[data-edit-panel="${id}"]`);
-        const ad = row.querySelector(`[data-edit-ad="${id}"]`);
-        if (view) view.hidden = false;
-        if (edit) edit.hidden = true;
-        if (ad) {
-          ad.hidden = true;
-          ad.innerHTML = "";
-        }
-        if (state.learnCase && $("#learnCaseSnap")) {
-          const snapAd = $("#learnCaseSnap").querySelector(
-            ".learn-visual-ad-teach"
-          );
-          if (snapAd && state.learnSel) {
-            renderVisualAdTeachTools(snapAd, state.learnCase, state.learnSel);
-          }
-        }
-      };
-
-      $$("[data-edit-lesson]", lesEl).forEach((b) =>
-        b.addEventListener("click", () => openEdit(+b.dataset.editLesson))
-      );
-      $$("[data-cancel-edit]", lesEl).forEach((b) =>
-        b.addEventListener("click", () => {
-          closeEdit(+b.dataset.cancelEdit);
-          loadMemory();
-        })
-      );
-      $$("[data-edit-chip]", lesEl).forEach((b) =>
-        b.addEventListener("click", () => {
-          const code = b.dataset.editChip;
-          const panel = b.closest("[data-edit-chips]");
-          if (code === "ad_met" || code === "ad_missed") {
-            $$(".chip-ad", panel).forEach((c) => {
-              if (c !== b) c.classList.remove("on");
-            });
-          }
-          if (BUCKET_CHIPS.includes(code)) {
-            $$(".chip-bucket", panel).forEach((c) => {
-              if (c !== b) c.classList.remove("on");
-            });
-          }
-          const setupKind = b.dataset.setup;
-          if (setupKind) {
-            $$(`[data-setup="${setupKind}"]`, panel).forEach((c) => {
-              if (c !== b) c.classList.remove("on");
-            });
-          }
-          b.classList.toggle("on");
-        })
-      );
-      $$("[data-save-lesson]", lesEl).forEach((b) =>
-        b.addEventListener("click", async () => {
-          const id = +b.dataset.saveLesson;
-          const ta = lesEl.querySelector(`[data-edit-text="${id}"]`);
-          const chipRoot = lesEl.querySelector(`[data-edit-chips="${id}"]`);
-          const text = (ta && ta.value.trim()) || "";
-          if (!text) {
-            toast("Lesson text cannot be empty");
-            return;
-          }
-          const behaviors = $$(".chip.on", chipRoot).map(
-            (c) => c.dataset.editChip
-          );
-          try {
-            b.disabled = true;
-            await api(`/api/learning/lessons/${id}`, {
-              method: "PATCH",
-              body: JSON.stringify({ text, behaviors }),
-            });
-            toast("Lesson updated");
-            loadMemory();
-          } catch (err) {
-            toast(err.message);
-            b.disabled = false;
-          }
-        })
-      );
-      $$("[data-del-lesson]", lesEl).forEach((b) =>
-        b.addEventListener("click", async () => {
-          const id = +b.dataset.delLesson;
-          if (!id) return;
-          if (
-            !confirm(
-              "Delete this lesson? The agent will no longer use it in memory."
-            )
-          )
-            return;
-          try {
-            await api(`/api/learning/lessons/${id}`, { method: "DELETE" });
-            toast("Lesson deleted");
-            loadMemory();
-          } catch (err) {
-            toast(err.message);
-          }
-        })
-      );
+      bindLessonList(lesEl);
+      restoreLearnEditorDraft(editorDraft);
     }
 
-    // restore selection highlight after re-render
-    if (state.learnSel && state.learnSel.entity_key) {
-      setLearnSelection(state.learnSel);
+    // restore selection highlight after re-render (fires have empty entity_key)
+    if (
+      state.learnSel &&
+      (state.learnSel.entity_key || state.learnSel.event_id || state.learnSel.type)
+    ) {
+      setLearnSelection(state.learnSel, { keepEditor: true });
     }
   }
 
@@ -3531,6 +3991,24 @@
       wl.dataset.bound = "1";
       wl.addEventListener("click", () => loadMemory());
     }
+    const searchInp = $("#learnLessonSearch");
+    const jumpBtn = $("#learnJumpLesson");
+    if (searchInp && !searchInp.dataset.bound) {
+      searchInp.dataset.bound = "1";
+      searchInp.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          searchOrJumpLessons(searchInp.value);
+        }
+      });
+    }
+    if (jumpBtn && !jumpBtn.dataset.bound) {
+      jumpBtn.dataset.bound = "1";
+      jumpBtn.addEventListener("click", () => {
+        const q = searchInp ? searchInp.value : "1";
+        searchOrJumpLessons(q || "1");
+      });
+    }
     const af = $("#agentRecallForm");
     if (af && !af.dataset.bound) {
       af.dataset.bound = "1";
@@ -3564,7 +4042,9 @@
     if (newsHost) {
       const items = news.news || [];
       if (!items.length) {
-        newsHost.innerHTML = rankEmpty("No fatal news stored yet.");
+        newsHost.innerHTML = rankEmpty(
+          "No book news — watchlist, targets, and positions only."
+        );
       } else {
         newsHost.innerHTML = items
           .map((n) => {
@@ -4756,9 +5236,23 @@
     }
   }
   state.lastSeenFireId = Number(localStorage.getItem("desk_last_fire_id") || 0) || 0;
+  state.lastSeenNewsId = Number(localStorage.getItem("desk_last_news_id") || 0) || 0;
   state.lastAlarmFlashId = null;
-  state.alarmSoundOn = localStorage.getItem("desk_alarm_sound") === "1";
+  // Unset → on (desk must actually alarm). Explicit "0" turns it off.
+  state.alarmSoundOn = localStorage.getItem("desk_alarm_sound") !== "0";
   state.alarmAudioArmed = false;
+
+  function armAlarmAudio() {
+    state.alarmAudioArmed = true;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      if (!playAlarmSound._ctx) playAlarmSound._ctx = new Ctx();
+      if (playAlarmSound._ctx.state === "suspended") {
+        playAlarmSound._ctx.resume();
+      }
+    } catch (_) {}
+  }
 
   function initAlarmSoundUi() {
     const tog = $("#alarmSoundToggle");
@@ -4767,8 +5261,7 @@
     tog.addEventListener("change", () => {
       state.alarmSoundOn = !!tog.checked;
       localStorage.setItem("desk_alarm_sound", state.alarmSoundOn ? "1" : "0");
-      // User gesture arms WebAudio / Audio play
-      state.alarmAudioArmed = true;
+      armAlarmAudio();
       if (state.alarmSoundOn) {
         playAlarmSound(true);
         toast("Alarm sound on");
@@ -4776,29 +5269,100 @@
         toast("Alarm sound off");
       }
     });
+    document.addEventListener("pointerdown", armAlarmAudio, { passive: true });
+    document.addEventListener("keydown", armAlarmAudio);
+  }
+
+  function alarmIsMoverOrTarget(a) {
+    const s = String((a && a.source) || "");
+    return s === "target" || s === "mover_peak" || s === "mover_step";
+  }
+
+  function alarmWavDataUri() {
+    if (alarmWavDataUri._uri) return alarmWavDataUri._uri;
+    const sr = 22050;
+    const pulses = [880, 1175, 1397];
+    const pulseN = Math.floor(sr * 0.22);
+    const gapN = Math.floor(sr * 0.1);
+    const samples = [];
+    for (const hz of pulses) {
+      for (let i = 0; i < pulseN; i++) {
+        const env = Math.min(1, i / 180) * Math.min(1, (pulseN - i) / 320);
+        samples.push(0.62 * env * Math.sin((2 * Math.PI * hz * i) / sr));
+      }
+      for (let i = 0; i < gapN; i++) samples.push(0);
+    }
+    const n = samples.length;
+    const buf = new ArrayBuffer(44 + n * 2);
+    const v = new DataView(buf);
+    const ascii = (off, s) => {
+      for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i));
+    };
+    ascii(0, "RIFF");
+    v.setUint32(4, 36 + n * 2, true);
+    ascii(8, "WAVE");
+    ascii(12, "fmt ");
+    v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true);
+    v.setUint16(22, 1, true);
+    v.setUint32(24, sr, true);
+    v.setUint32(28, sr * 2, true);
+    v.setUint16(32, 2, true);
+    v.setUint16(34, 16, true);
+    ascii(36, "data");
+    v.setUint32(40, n * 2, true);
+    let o = 44;
+    for (let i = 0; i < n; i++) {
+      const x = Math.max(-1, Math.min(1, samples[i]));
+      v.setInt16(o, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+      o += 2;
+    }
+    const bytes = new Uint8Array(buf);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    alarmWavDataUri._uri = "data:audio/wav;base64," + btoa(bin);
+    return alarmWavDataUri._uri;
+  }
+
+  function playAlarmBeeps() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!playAlarmSound._ctx) playAlarmSound._ctx = new Ctx();
+    const ac = playAlarmSound._ctx;
+    if (ac.state === "suspended") ac.resume();
+    // Three square pulses — louder and longer than a 0.3s sine chirp
+    const pulses = [880, 1174.7, 1396.9];
+    pulses.forEach((hz, i) => {
+      const t0 = ac.currentTime + i * 0.38;
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(hz, t0);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.42, t0 + 0.018);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.3);
+      osc.connect(g);
+      g.connect(ac.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.32);
+    });
   }
 
   function playAlarmSound(quietTest) {
     if (!state.alarmSoundOn && !quietTest) return;
     if (!state.alarmAudioArmed && !quietTest) return;
     try {
-      const ctx = window.AudioContext || window.webkitAudioContext;
-      if (!ctx) return;
-      if (!playAlarmSound._ctx) playAlarmSound._ctx = new ctx();
-      const ac = playAlarmSound._ctx;
-      if (ac.state === "suspended") ac.resume();
-      const o = ac.createOscillator();
-      const g = ac.createGain();
-      o.type = "sine";
-      o.frequency.setValueAtTime(880, ac.currentTime);
-      o.frequency.exponentialRampToValueAtTime(1320, ac.currentTime + 0.08);
-      g.gain.setValueAtTime(0.0001, ac.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.12, ac.currentTime + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.28);
-      o.connect(g);
-      g.connect(ac.destination);
-      o.start();
-      o.stop(ac.currentTime + 0.3);
+      playAlarmBeeps();
+    } catch (_) {}
+    try {
+      const el = $("#alarmSound");
+      if (el) {
+        if (!el.getAttribute("src")) el.src = alarmWavDataUri();
+        el.currentTime = 0;
+        el.volume = 1;
+        const p = el.play();
+        if (p && p.catch) p.catch(() => {});
+      }
     } catch (_) {}
   }
 
@@ -4806,6 +5370,9 @@
     const src = String(a.source || "");
     const sym = a.symbol || "?";
     const drop = a.drop_pct != null ? Number(a.drop_pct).toFixed(1) + "%" : "";
+    if (src === "news_devastating" || src === "news") {
+      return `NEWS ${a.class || "DEVASTATING"} ${sym}`.trim();
+    }
     if (src === "target" || src.includes("target")) {
       return `TARGET ${sym}${a.price != null ? " @ " + fmtPx(a.price) : ""}`;
     }
@@ -4815,20 +5382,52 @@
     return `MOVER ${sym} ${drop} ${mode}`.trim();
   }
 
+  function ingestNewsAlarms(d) {
+    const rows = d.news_alarms || [];
+    const newsMax = +d.news_max_id || 0;
+    if (!state.lastSeenNewsId) {
+      let mx = 0;
+      rows.forEach((a) => {
+        mx = Math.max(mx, +a.id || 0);
+      });
+      state.lastSeenNewsId = mx || newsMax || 0;
+      try {
+        localStorage.setItem("desk_last_news_id", String(state.lastSeenNewsId));
+      } catch (_) {}
+      return;
+    }
+    const fresh = rows.filter((a) => +a.id > state.lastSeenNewsId);
+    let mx = state.lastSeenNewsId;
+    rows.forEach((a) => {
+      mx = Math.max(mx, +a.id || 0);
+    });
+    if (newsMax) mx = Math.max(mx, newsMax);
+    state.lastSeenNewsId = mx;
+    try {
+      localStorage.setItem("desk_last_news_id", String(mx));
+    } catch (_) {}
+    if (!fresh.length) return;
+    const last = fresh[fresh.length - 1];
+    toast(alarmToastLine({ ...last, source: "news_devastating" }));
+    playAlarmSound();
+  }
+
   async function pollDeskAlarms() {
     if (document.hidden || state.inCall) return;
     try {
       const q =
-        state.lastSeenFireId > 0
-          ? `?since_id=${state.lastSeenFireId}&limit=20`
-          : `?limit=15`;
+        "?limit=20" +
+        (state.lastSeenFireId > 0 ? `&since_id=${state.lastSeenFireId}` : "") +
+        (state.lastSeenNewsId > 0 ? `&news_since_id=${state.lastSeenNewsId}` : "");
       const d = await api("/api/desk/alarms" + q);
+      ingestNewsAlarms(d);
       const alarms = d.alarms || [];
       if (!alarms.length) {
         if (d.max_id && !state.lastSeenFireId) {
           state.lastSeenFireId = +d.max_id;
           localStorage.setItem("desk_last_fire_id", String(state.lastSeenFireId));
         }
+        renderLastFiredStrip();
         return;
       }
       // Bootstrap: first poll only seeds cursor (no toast flood)
@@ -4839,10 +5438,22 @@
         });
         state.lastSeenFireId = mx || +d.max_id || 0;
         localStorage.setItem("desk_last_fire_id", String(state.lastSeenFireId));
+        if (!state.lastFired) {
+          const newest = alarms
+            .slice()
+            .sort((a, b) => (+a.id || 0) - (+b.id || 0))
+            .pop();
+          if (newest) rememberLastFired(newest);
+        } else {
+          renderLastFiredStrip();
+        }
         return;
       }
       const fresh = alarms.filter((a) => +a.id > state.lastSeenFireId);
-      if (!fresh.length) return;
+      if (!fresh.length) {
+        renderLastFiredStrip();
+        return;
+      }
       let mx = state.lastSeenFireId;
       fresh.forEach((a) => {
         mx = Math.max(mx, +a.id || 0);
@@ -4853,8 +5464,10 @@
       const ordered = fresh.slice().sort((a, b) => (+a.id || 0) - (+b.id || 0));
       const last = ordered[ordered.length - 1];
       state.lastAlarmFlashId = last && last.id != null ? +last.id : null;
+      rememberLastFired(last);
       toast(alarmToastLine(last) + (ordered.length > 1 ? ` · +${ordered.length - 1}` : ""));
-      if (state.alarmSoundOn) playAlarmSound();
+      const fireFresh = fresh.filter(alarmIsMoverOrTarget);
+      if (fireFresh.length) playAlarmSound();
       // Soft refresh surfaces that show fires
       if (state.view === "overview") {
         try {
@@ -4905,7 +5518,19 @@
     }
   });
 
+  document.addEventListener("click", (e) => {
+    const t = e.target;
+    if (!t || !t.closest) return;
+    if (t.closest("button, a, input, select, textarea, label")) return;
+    const hit = t.closest("[data-desk-sym]");
+    if (!hit) return;
+    const sym = hit.getAttribute("data-desk-sym");
+    if (sym) setSelectedSymbol(sym);
+  });
+
   initAlarmSoundUi();
+  renderLastFiredStrip();
+  applySelectedSymbol();
   setView("overview");
   updateMicUi();
   refreshAll();

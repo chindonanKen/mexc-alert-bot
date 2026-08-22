@@ -20,7 +20,7 @@ BAD_CLASSES = frozenset(
         "HACK",
         "SCAM",
         "CLOSURE",
-        "LISTING",  # often pre-delist or risky listing noise — surface as intel
+        "HALT",
     }
 )
 
@@ -103,8 +103,7 @@ def load_bad_intel_feed(
 ) -> List[Dict[str, Any]]:
     """Return up to `limit` most recent bad-intel items (any age).
 
-    Prefers items that touch the owner's book, then fills with global bad news
-    so the strip is rarely empty when the DB has delist/news history.
+    Book-only: watchlist ∪ targets ∪ positions. No global fill.
     """
     wall = float(now if now is not None else time.time())
     book_bases = {b.upper() for b in (book_bases or set()) if b and len(b) >= 2}
@@ -239,12 +238,10 @@ def load_bad_intel_feed(
     except Exception as e:
         logger.debug("bad_intel delist_cache: %s", e)
 
-    # Sort: book hits first, then by recency
-    items.sort(
-        key=lambda x: (
-            0 if x.get("book_hit") else 1,
-            -(float(x.get("ts") or 0)),
-        )
-    )
-    # Dedup already by title; take top N
-    return items[: max(1, int(limit))]
+    # Book only — never fill with a global spam feed.
+    if book_bases:
+        items = [x for x in items if x.get("book_hit")]
+    else:
+        items = []
+    items.sort(key=lambda x: -(float(x.get("ts") or 0)))
+    return items[: max(1, int(limit))] if items else []

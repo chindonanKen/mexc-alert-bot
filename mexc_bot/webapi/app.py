@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import actions, db
-from .prices import market_context, watchlist_tickers
+from .prices import market_context, schedule_ticker_prewarm, watchlist_tickers
 from .voice_agent import chat_with_tools, handle_voice_audio, tts_speak
 
 logger = logging.getLogger(__name__)
@@ -196,6 +196,12 @@ class TagTradeBody(BaseModel):
     notes: Optional[str] = None
 
 
+class HuntMarkBody(BaseModel):
+    symbol: str
+    market: str = "futures"
+    rank: int
+
+
 class VisualAdBody(BaseModel):
     """POST /api/learning/cases/{id}/visual-ad — staff-written visual AD."""
 
@@ -210,6 +216,12 @@ class VisualAdBody(BaseModel):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="AD Desk", version="2.1.0-beta")
+    # Fill the 24h book in the background so later mark attach is a lookup.
+    # First Overview/Movers paint uses needed-parallel and does not wait on this.
+    try:
+        schedule_ticker_prewarm()
+    except Exception:
+        pass
 
     @app.get("/api/health")
     def health():
@@ -496,14 +508,14 @@ def create_app() -> FastAPI:
         learn_stats: Dict[str, Any] = {}
         if uid:
             try:
-                from .learning_v1 import learning_home_v1
+                from .learning_v1 import overview_learning_strip
 
-                lb = learning_home_v1(uid)
+                lb = overview_learning_strip(uid)
                 needs_you = lb.get("needs_you") or needs_you
                 agent_summary = lb.get("agent_summary") or lb.get("what_learned_reply") or ""
                 learn_stats = lb.get("stats") or {}
             except Exception as e:
-                logger.debug("learning_home_v1: %s", e)
+                logger.debug("overview_learning_strip: %s", e)
 
         # Simple journal PnL sketch (closed trades with entry+exit)
         closed = (
@@ -591,7 +603,7 @@ def create_app() -> FastAPI:
     @app.get("/api/alerts")
     def get_alerts(_: bool = Depends(require_auth)):
         try:
-            rows = actions.list_alerts()
+            rows = actions.attach_alert_distances(actions.list_alerts())
             return {"user_id": db.default_user_id(), "alerts": rows}
         except ValueError as e:
             return {"user_id": None, "alerts": [], "error": str(e)}
@@ -660,6 +672,36 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(400, str(e))
 
+    @app.get("/api/hunt")
+    def hunt_home(_: bool = Depends(require_auth)):
+        """Two doorbell lists: still-up / already-off. Names only."""
+        from .hunt import hunt_lists, payload_has_price_or_ad
+
+        try:
+            uid = db.default_user_id()
+            out = hunt_lists(uid)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+        if payload_has_price_or_ad(out):
+            raise HTTPException(500, "hunt payload rejected")
+        return out
+
+    @app.post("/api/hunt/mark")
+    def hunt_mark(body: HuntMarkBody, _: bool = Depends(require_auth)):
+        """Kenneth rank on a hunt name. Does not write lessons or ADs."""
+        from .hunt import mark_hunt_rank
+
+        uid = db.default_user_id()
+        if not uid:
+            raise HTTPException(400, "DESK_USER_ID not configured")
+        try:
+            return {
+                "ok": True,
+                "row": mark_hunt_rank(uid, body.symbol, body.market, body.rank),
+            }
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
     @app.get("/api/watchlist")
     def get_watch(
         set_id: Optional[int] = None, _: bool = Depends(require_auth)
@@ -672,6 +714,7 @@ def create_app() -> FastAPI:
             for r in rows:
                 s = r["symbol"]
                 symbols.append(s.replace("_", "") if "_" in s else s)
+            # Batch + TTL — sequential ticker_24h was the ~4s Movers wait.
             tickers = watchlist_tickers(symbols[:40])
             # Last fire per symbol (learning_events) for live desk columns
             last_fires: Dict[str, dict] = {}
@@ -747,13 +790,19 @@ def create_app() -> FastAPI:
     def desk_alarms(
         since_id: int = Query(0, ge=0),
         since_ts: float = Query(0, ge=0),
+        news_since_id: int = Query(0, ge=0),
         limit: int = Query(30, ge=1, le=100),
         _: bool = Depends(require_auth),
     ):
-        """Slim fire feed for desk toasts / overview (mover + target)."""
+        """Slim fire feed for desk toasts / overview (mover + target + devastating news)."""
         uid = db.default_user_id()
         if not uid:
-            return {"alarms": [], "max_id": 0}
+            return {
+                "alarms": [],
+                "max_id": 0,
+                "news_alarms": [],
+                "news_max_id": 0,
+            }
         try:
             if since_id > 0:
                 rows = db.fetch_all(
@@ -798,7 +847,66 @@ def create_app() -> FastAPI:
                     max_id = max(max_id, int(r.get("id") or 0))
                 except (TypeError, ValueError):
                     pass
-            return {"user_id": uid, "alarms": rows, "max_id": max_id}
+            news_alarms: List[dict] = []
+            news_max_id = 0
+            try:
+                from ..news.classify import evaluate_headline
+                from .news_book import desk_book_sets
+
+                book = desk_book_sets(uid)
+                news_rows = db.fetch_all(
+                    """
+                    SELECT id, symbol, class, severity, title, source, source_trust, ts
+                    FROM news_events
+                    WHERE id > ?
+                    ORDER BY id ASC LIMIT ?
+                    """,
+                    (int(news_since_id), int(limit)),
+                )
+                if news_since_id <= 0:
+                    news_rows = db.fetch_all(
+                        """
+                        SELECT id, symbol, class, severity, title, source, source_trust, ts
+                        FROM news_events
+                        ORDER BY id DESC LIMIT ?
+                        """,
+                        (int(limit),),
+                    )
+                    news_rows = list(reversed(news_rows))
+                for nr in news_rows:
+                    try:
+                        news_max_id = max(news_max_id, int(nr.get("id") or 0))
+                    except (TypeError, ValueError):
+                        pass
+                    ev = evaluate_headline(
+                        nr.get("title") or "",
+                        source_trust=nr.get("source_trust") or "aggregate",
+                        symbol=nr.get("symbol"),
+                        item_bases=str(nr.get("symbol") or "").split(","),
+                        book_bases=book.get("bases"),
+                        book_syms=book.get("syms"),
+                    )
+                    if not ev.get("alarm"):
+                        continue
+                    news_alarms.append(
+                        {
+                            "id": nr.get("id"),
+                            "source": "news_devastating",
+                            "symbol": nr.get("symbol"),
+                            "title": nr.get("title"),
+                            "class": nr.get("class") or ev.get("cls"),
+                            "ts": nr.get("ts"),
+                        }
+                    )
+            except Exception:
+                news_alarms = []
+            return {
+                "user_id": uid,
+                "alarms": rows,
+                "max_id": max_id,
+                "news_alarms": news_alarms,
+                "news_max_id": news_max_id,
+            }
         except Exception as e:
             raise HTTPException(400, str(e))
 
@@ -1027,8 +1135,14 @@ def create_app() -> FastAPI:
             announcements = []
 
         news_rows = db.fetch_all(
-            "SELECT * FROM news_events ORDER BY ts DESC LIMIT ?", (limit,)
+            "SELECT * FROM news_events ORDER BY ts DESC LIMIT ?",
+            (min(150, int(limit) * 3),),
         )
+        from .news_book import desk_book_sets, filter_rows_to_book
+
+        book = desk_book_sets()
+        book_bases = book.get("bases") or set()
+        book_syms = book.get("syms") or set()
         # Expand incomplete MEXC "and N other" titles for the desk
         sess = None
         enriched_news = []
@@ -1093,10 +1207,27 @@ def create_app() -> FastAPI:
             item["bases_text"] = ", ".join(bases) if bases else (item.get("symbol") or "—")
             enriched_news.append(item)
 
+        enriched_news = filter_rows_to_book(
+            enriched_news, book_bases=book_bases, book_syms=book_syms
+        )[: int(limit)]
+        delist_rows = filter_rows_to_book(
+            delist_rows,
+            book_bases=book_bases,
+            book_syms=book_syms,
+            symbol_keys=("base", "symbol"),
+        )[: max(40, int(limit))]
+        announcements = filter_rows_to_book(
+            announcements,
+            book_bases=book_bases,
+            book_syms=book_syms,
+            symbol_keys=("base", "symbol"),
+        )[: int(limit)]
+
         return {
             "news": enriched_news,
-            "delist_cache": delist_rows[: max(40, int(limit))],
+            "delist_cache": delist_rows,
             "delist_announcements": announcements,
+            "book_only": True,
         }
 
     @app.get("/api/prices")
@@ -1389,6 +1520,31 @@ def create_app() -> FastAPI:
             return approve_draft(body.lesson_id, dismiss=bool(body.dismiss))
         except Exception as e:
             raise HTTPException(400, str(e))
+
+    @app.get("/api/learning/lessons/search")
+    def learning_search_lessons(
+        q: str = Query(""), _: bool = Depends(require_auth)
+    ):
+        """Read-only search. `q=1` / first reaches the first lesson."""
+        from .learning_v1 import search_lessons_v1
+
+        try:
+            return search_lessons_v1(q)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/learning/lessons/{lesson_id}")
+    def learning_get_lesson(lesson_id: int, _: bool = Depends(require_auth)):
+        """Read-only fetch of one lesson (lesson 1 included)."""
+        from .learning_v1 import get_lesson_v1
+
+        try:
+            out = get_lesson_v1(int(lesson_id))
+        except Exception as e:
+            raise HTTPException(400, str(e))
+        if not out:
+            raise HTTPException(404, "Lesson not found")
+        return out
 
     @app.patch("/api/learning/lessons/{lesson_id}")
     def learning_edit_lesson(

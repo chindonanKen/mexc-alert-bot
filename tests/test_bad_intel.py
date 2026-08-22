@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Book intel bad-news feed for Overview."""
+"""Book intel bad-news feed — book only, no global fill."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from mexc_bot.webapi.bad_intel import load_bad_intel_feed
 
 
-def test_always_top_n_no_horizon():
+def test_book_only_no_global_fill():
     now = time.time()
     old = now - 30 * 86400  # 30 days ago
 
@@ -53,16 +53,6 @@ def test_always_top_n_no_horizon():
                     "fingerprint": "a",
                 },
                 {
-                    "id": 11,
-                    "exchange": "mexc",
-                    "base": "LEVI",
-                    "title": "Delisting of ARROW USDT-M Perpetual",
-                    "url": "https://mexc.com/a",
-                    "kind": "delist",
-                    "ts": now - 86400,
-                    "fingerprint": "b",
-                },
-                {
                     "id": 12,
                     "exchange": "okx",
                     "base": "LATEST",
@@ -78,20 +68,15 @@ def test_always_top_n_no_horizon():
     rows = load_bad_intel_feed(
         fetch_all, limit=5, book_bases={"HFT", "BTW"}, now=now
     )
-    assert len(rows) >= 2
-    assert len(rows) <= 5
-    # Junk hub title excluded
-    assert not any("Latest Delisted Cryptos" in (r.get("title") or "") for r in rows)
-    # Old delist still present
-    assert any("HFT" in (r.get("title") or "") or r.get("symbol") == "HFT" for r in rows)
-    # Book hit preferred first when present
+    assert len(rows) == 1
     assert rows[0].get("book_hit") is True
-    # ARROW+LEVI collapsed to one announcement
-    arrow_titles = [r for r in rows if "ARROW" in (r.get("title") or "")]
-    assert len(arrow_titles) == 1
-    print("PASS: bad intel top-N, no horizon, book prefer, dedupe")
+    assert "HFT" in (rows[0].get("title") or "") or rows[0].get("symbol") == "HFT"
+    assert not any("SCAMCOIN" in (r.get("title") or "") for r in rows)
+    assert not any("ARROW" in (r.get("title") or "") for r in rows)
+    assert not any("Latest Delisted Cryptos" in (r.get("title") or "") for r in rows)
+    print("PASS: bad intel book-only, no global fill")
 
 
 if __name__ == "__main__":
-    test_always_top_n_no_horizon()
+    test_book_only_no_global_fill()
     print("ALL BAD INTEL TESTS PASSED")

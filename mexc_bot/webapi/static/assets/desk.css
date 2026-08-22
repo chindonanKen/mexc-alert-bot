@@ -325,10 +325,27 @@ body::before {
   color: var(--cyan, #7dd3fc);
   margin-right: 0.4rem;
 }
+.learn-search-row {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  margin: 0.35rem 0 0.55rem;
+}
+.learn-search-row input {
+  flex: 1;
+  min-width: 0;
+}
 .learn-lesson {
   display: block;
   padding: 0.55rem 0;
   border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.learn-lesson.is-lesson-jump {
+  outline: 1px solid rgba(125, 211, 252, 0.45);
+  background: rgba(125, 211, 252, 0.06);
+  border-radius: 8px;
+  padding-left: 0.4rem;
+  padding-right: 0.4rem;
 }
 .learn-lesson-view {
   display: flex;
@@ -779,6 +796,56 @@ body::before {
     radial-gradient(ellipse at 100% 0%, rgba(52, 211, 153, 0.12), transparent 55%),
     var(--panel);
 }
+.cmd-hunt {
+  grid-column: 1 / -1;
+  min-height: 0;
+  background:
+    radial-gradient(ellipse at 0% 0%, rgba(251, 191, 36, 0.10), transparent 50%),
+    var(--panel);
+}
+.cmd-hunt::before {
+  background: linear-gradient(90deg, #fbbf24, #38bdf8);
+}
+.hunt-hint { margin: 0 0 0.55rem; font-size: 0.78rem; }
+.hunt-cols,
+.hunt-movers-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+.hunt-movers-strip {
+  margin: 0.55rem 0 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+}
+.hunt-col-h {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.hunt-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.hunt-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(0,0,0,0.2);
+  color: inherit;
+  border-radius: 999px;
+  padding: 0.2rem 0.45rem 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.hunt-name .hunt-rank {
+  font-size: 0.65rem;
+  color: var(--mute);
+}
+.hunt-name .hunt-mark {
+  font-size: 0.65rem;
+}
 .cmd-h {
   display: flex;
   justify-content: space-between;
@@ -1055,6 +1122,55 @@ body::before {
 .top h1 { margin: 0; font-size: 1.4rem; letter-spacing: -0.03em; font-weight: 700; }
 .sub { display: none; }
 .top-actions { display: flex; gap: 0.65rem; align-items: center; flex-wrap: wrap; }
+
+.desk-sticky-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.85rem;
+  align-items: center;
+  margin: -0.35rem 0 0.95rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(8, 14, 28, 0.92);
+  backdrop-filter: blur(8px);
+}
+.last-fired-strip {
+  flex: 1 1 16rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  min-height: 1.2rem;
+}
+.last-fired-k {
+  color: var(--mute);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  margin-right: 0.45rem;
+}
+.last-fired-sym { font-weight: 700; color: var(--sky); cursor: pointer; }
+.last-fired-empty { color: var(--mute); }
+.desk-focus-chip {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 650;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--sky);
+}
+tr.is-desk-selected,
+.cmd-row.is-desk-selected,
+.pos-card.is-desk-selected {
+  outline: 1px solid rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.08);
+}
+[data-desk-sym] { cursor: pointer; }
+.tgt-dist { font-family: var(--mono); white-space: nowrap; }
 .panel.clean {
   border: 1px solid var(--line);
   background: var(--panel);
@@ -2065,6 +2181,22 @@ form.learn-visual-ad-write,
 }
 .pos-layer-usd { font-weight: 700; }
 .pos-notes { font-size: 0.8rem; color: var(--mute); margin: 0.2rem 0; }
+
+.pos-book {
+  margin: 0.7rem 0 1.15rem;
+  padding: 0.1rem 0 0.25rem 0.75rem;
+  border-left: 3px solid rgba(56, 189, 248, 0.4);
+}
+.pos-book-spot { border-left-color: rgba(52, 211, 153, 0.45); }
+.pos-book-h {
+  font-size: 0.84rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 0 0 0.1rem;
+}
+.pos-book-fut .pos-book-h { color: var(--sky); }
+.pos-book-spot .pos-book-h { color: var(--mint); }
 
 .pos-band-h {
   font-size: 0.72rem;

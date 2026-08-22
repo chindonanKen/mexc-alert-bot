@@ -43,6 +43,57 @@ def list_alerts(user_id: Optional[int] = None) -> List[dict]:
     return rows
 
 
+def target_distance_to_fire(mark: Any, target: Any) -> Optional[dict]:
+    """How far mark is from the target line. pct = (mark − target) / target × 100."""
+    try:
+        t = float(target)
+        m = float(mark)
+    except (TypeError, ValueError):
+        return None
+    if t == 0:
+        return None
+    return {
+        "mark": m,
+        "distance_abs": m - t,
+        "distance_pct": (m - t) / t * 100.0,
+    }
+
+
+def attach_alert_distances(
+    rows: List[dict],
+    tickers: Optional[List[dict]] = None,
+) -> List[dict]:
+    """Add mark + distance_pct/abs onto target rows. Fail-soft (no fire-path change)."""
+    from .prices import normalize_ticker_symbol, watchlist_tickers
+
+    by: dict = {}
+    try:
+        if tickers is None:
+            tickers = watchlist_tickers(
+                [str(r.get("symbol") or "") for r in rows if r.get("symbol")]
+            )
+        for t in tickers or []:
+            key = str((t or {}).get("symbol") or "").upper()
+            if key:
+                by[key] = t
+    except Exception:
+        by = {}
+    for r in rows:
+        key = normalize_ticker_symbol(str(r.get("symbol") or ""))
+        t = by.get(key)
+        mark = (t or {}).get("price") if t else None
+        extra = target_distance_to_fire(mark, r.get("price"))
+        if extra:
+            r["mark"] = extra["mark"]
+            r["distance_abs"] = extra["distance_abs"]
+            r["distance_pct"] = extra["distance_pct"]
+        else:
+            r.setdefault("mark", None)
+            r.setdefault("distance_abs", None)
+            r.setdefault("distance_pct", None)
+    return rows
+
+
 def _resolve_target_symbol(symbol: str, market: str) -> str:
     """Normalize desk target symbols the same way Telegram /a and /af do.
 

@@ -13,11 +13,7 @@ import threading
 import time
 from typing import Callable, Optional, Set
 
-from .classify import (
-    classify_headline,
-    extract_symbol_hints,
-    should_push,
-)
+from .classify import evaluate_headline
 from .sources import fetch_mexc_announcements, fetch_rekt_rss
 from .store import NewsStore
 
@@ -102,33 +98,34 @@ class NewsWatcher:
             title = item.get("title") or ""
             body = item.get("body") or ""
             trust = item.get("source_trust") or "aggregate"
-            classified = classify_headline(title, body=body, source_trust=trust)
-            if not classified:
+            all_bases = list(item.get("bases") or [])
+            if not all_bases:
+                from .tickers import extract_delist_bases
+
+                all_bases = extract_delist_bases(title, body)
+            decision = evaluate_headline(
+                title,
+                body=body,
+                source_trust=trust,
+                symbol=item.get("symbol"),
+                item_bases=all_bases,
+                book_bases=bases,
+                push_unconfirmed=self.push_unconfirmed,
+            )
+            cls = decision.get("cls")
+            severity = decision.get("severity")
+            if not cls:
                 continue
-            cls, severity = classified
             fp = hashlib.sha256(
                 f"{item.get('source')}|{title}|{cls}".encode()
             ).hexdigest()[:40]
             if self.news_store.has_fingerprint(fp):
                 continue
 
-            all_bases = list(item.get("bases") or [])
-            if not all_bases:
-                from .tickers import extract_delist_bases
-
-                all_bases = extract_delist_bases(title, body)
-            hints = set()
-            if bases:
-                hints = extract_symbol_hints(f"{title} {body} {' '.join(all_bases)}", bases)
-                # also match extracted bases against watchlist
-                for b in all_bases:
-                    if b in bases:
-                        hints.add(b)
-            # Store all tickers: primary symbol + full list in raw
             symbol = (
                 ",".join(all_bases)
                 if all_bases
-                else (next(iter(hints), None) if hints else None)
+                else (item.get("symbol") or None)
             )
             raw_item = dict(item)
             raw_item["bases"] = all_bases
@@ -148,12 +145,7 @@ class NewsWatcher:
             if not nid:
                 continue
 
-            do_push = should_push(
-                severity, trust, push_unconfirmed=self.push_unconfirmed
-            )
-            # If we have a watchlist, prefer matches; exchange-wide official delist without match still push
-            if do_push and bases and not hints and trust != "official":
-                do_push = False
+            do_push = bool(decision.get("alarm"))
             if not do_push:
                 logger.info(
                     "news stored silent id=%s class=%s sev=%s title=%s bases=%s",
@@ -176,11 +168,10 @@ class NewsWatcher:
 
             tickers = ", ".join(all_bases) if all_bases else (symbol or "—")
             msg = (
-                f"⚠️ <b>FATAL NEWS</b> · {_html.escape(cls)}\n"
+                f"⚠️ <b>DEVASTATING NEWS</b> · {_html.escape(cls)}\n"
                 f"Tickers: <b>{_html.escape(tickers)}</b>\n"
                 f"source: {_html.escape(str(item.get('source')))}\n"
-                f"{_html.escape(title[:320])}\n"
-                f"<i>Strategy: isolated/destructive risk (Rule 6). Prefer no-trade.</i>"
+                f"{_html.escape(title[:320])}"
             )
             for uid in users:
                 try:

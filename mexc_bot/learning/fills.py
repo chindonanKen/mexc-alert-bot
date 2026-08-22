@@ -115,18 +115,35 @@ class FillSyncPoller:
         new_rows: List[dict] = []
         new_rows.extend(self._sync_spot())
         new_rows.extend(self._sync_futures())
-        if new_rows and self.notify_on_new and self.notifier:
+        if new_rows:
             try:
-                lines = [f"MEXC fills synced: {len(new_rows)} new"]
-                for r in new_rows[:5]:
-                    lines.append(
-                        f"  {r.get('market','?')} {r['side'].upper()} "
-                        f"{r['symbol']} qty={r['qty']} @ {r['price']}"
-                    )
-                self.notifier(self.user_id, "\n".join(lines), parse_mode=None)
+                self.notify_new_fills(new_rows)
             except Exception as e:
-                logger.warning("fill notify failed: %s", e)
+                logger.warning("fill lifecycle notify failed: %s", e)
         self._last_cycle_ms = int((time.perf_counter() - t0) * 1000)
+
+    def notify_new_fills(self, new_rows: List[dict]) -> int:
+        """One Telegram ping per newly completed open/exit order. Tests inject a sink."""
+        from .fill_lifecycle import (
+            existing_fills_excluding,
+            lifecycle_events_from_fills,
+            send_lifecycle_telegram,
+        )
+
+        if not new_rows:
+            return 0
+        try:
+            all_fills = self.event_store.recent_fills(self.user_id, limit=1500)
+        except Exception:
+            all_fills = []
+        existing = existing_fills_excluding(all_fills, new_rows)
+        events = lifecycle_events_from_fills(existing, new_rows)
+        return send_lifecycle_telegram(
+            self.notifier,
+            self.user_id,
+            events,
+            enabled=self.notify_on_new,
+        )
 
     def _insert_row(self, row: dict) -> bool:
         inserted = self.event_store.insert_fill(**{

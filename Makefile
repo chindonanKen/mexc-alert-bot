@@ -32,6 +32,14 @@ test:
 	$$PY tests/test_p1_cases.py && \
 	$$PY tests/test_visual_ad.py && \
 	$$PY tests/test_desk_slice1_search.py && \
+	$$PY tests/test_desk_ticker_cache.py && \
+	$$PY tests/test_desk_positions_slice2.py && \
+	$$PY tests/test_desk_slice3_alarms.py && \
+	$$PY tests/test_desk_slice4_focus.py && \
+	$$PY tests/test_desk_slice5_learn.py && \
+	$$PY tests/test_desk_slice6_hunt.py && \
+	$$PY tests/test_desk_slice7_news.py && \
+	$$PY tests/test_bad_intel.py && \
 	$$PY tests/test_heartbeat.py
 
 verify:
