@@ -235,7 +235,7 @@ class TestDeskFireSoundHook(unittest.TestCase):
         self.assertIn("function alarmWavDataUri", js)
         html = (ROOT / "mexc_bot/webapi/static/index.html").read_text()
         self.assertIn('id="alarmSound"', html)
-        self.assertIn("desk.js?v=slicelab4", html)
+        self.assertIn("desk.js?v=slicelab5", html)
 
     def test_alarms_api_is_mover_and_target_only(self):
         src = (ROOT / "mexc_bot/webapi/app.py").read_text()

@@ -325,10 +325,27 @@ body::before {
   color: var(--cyan, #7dd3fc);
   margin-right: 0.4rem;
 }
+.learn-search-row {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  margin: 0.35rem 0 0.55rem;
+}
+.learn-search-row input {
+  flex: 1;
+  min-width: 0;
+}
 .learn-lesson {
   display: block;
   padding: 0.55rem 0;
   border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.learn-lesson.is-lesson-jump {
+  outline: 1px solid rgba(125, 211, 252, 0.45);
+  background: rgba(125, 211, 252, 0.06);
+  border-radius: 8px;
+  padding-left: 0.4rem;
+  padding-right: 0.4rem;
 }
 .learn-lesson-view {
   display: flex;

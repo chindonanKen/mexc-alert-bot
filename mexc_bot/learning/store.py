@@ -16,6 +16,38 @@ from typing import Any, Dict, List, Optional, Sequence
 logger = logging.getLogger(__name__)
 
 
+def _parse_lesson_jump_query(q: str) -> Optional[int]:
+    """Map search box text to a lesson id. Empty / first / oldest → 1."""
+    s = (q or "").strip()
+    if not s or s.lower() in ("first", "oldest"):
+        return 1
+    if s.startswith("#"):
+        s = s[1:].strip()
+    low = s.lower()
+    if low.startswith("lesson"):
+        s = s[6:].strip()
+        if s.startswith("#"):
+            s = s[1:].strip()
+    if s.isdigit():
+        return int(s)
+    return None
+
+
+def _lesson_query_is_id_jump(q: str) -> bool:
+    """True when the query is only an id / first-lesson jump (not free text)."""
+    s = (q or "").strip()
+    if not s or s.lower() in ("first", "oldest"):
+        return True
+    if s.startswith("#"):
+        s = s[1:].strip()
+    low = s.lower()
+    if low.startswith("lesson"):
+        s = s[6:].strip()
+        if s.startswith("#"):
+            s = s[1:].strip()
+    return s.isdigit()
+
+
 class EventStore:
     """Structured memory for sensor fires, user labels, outcomes, journal."""
 
@@ -782,6 +814,73 @@ class EventStore:
             sql += " ORDER BY created_at DESC LIMIT ?"
             params.append(limit)
             return [dict(r) for r in self._get_conn().execute(sql, params).fetchall()]
+
+    def lesson_id_span(self, user_id: int) -> Dict[str, Any]:
+        """Read-only id range so the desk can jump to the first lesson."""
+        with self._lock:
+            row = self._get_conn().execute(
+                "SELECT MIN(id) AS min_id, MAX(id) AS max_id, COUNT(*) AS n "
+                "FROM learning_lessons WHERE user_id = ?",
+                (int(user_id),),
+            ).fetchone()
+        min_id = row["min_id"] if row is not None else None
+        max_id = row["max_id"] if row is not None else None
+        return {
+            "min_id": int(min_id) if min_id is not None else None,
+            "max_id": int(max_id) if max_id is not None else None,
+            "count": int(row["n"] or 0) if row is not None else 0,
+        }
+
+    def search_lessons(
+        self,
+        user_id: int,
+        q: str,
+        *,
+        limit: int = 30,
+    ) -> List[dict]:
+        """Read-only lookup. Numeric / 'first' queries reach lesson id 1.
+
+        Home lists only the newest N; this path does not rewrite that list
+        and never writes lessons.
+        """
+        raw_q = (q or "").strip()
+        limit = max(1, min(int(limit), 50))
+        want_id = _parse_lesson_jump_query(raw_q)
+        with self._lock:
+            conn = self._get_conn()
+            out: List[dict] = []
+            seen: set = set()
+            if want_id is not None:
+                row = conn.execute(
+                    "SELECT * FROM learning_lessons WHERE user_id = ? AND id = ?",
+                    (int(user_id), int(want_id)),
+                ).fetchone()
+                if row:
+                    d = dict(row)
+                    out.append(d)
+                    seen.add(int(d["id"]))
+                # Bare id / first / lesson N — do not also text-scan.
+                if _lesson_query_is_id_jump(raw_q):
+                    return out[:limit]
+            needle = raw_q.lower()
+            if not needle:
+                return out[:limit]
+            for row in conn.execute(
+                "SELECT * FROM learning_lessons WHERE user_id = ? "
+                "ORDER BY id ASC LIMIT 2000",
+                (int(user_id),),
+            ):
+                d = dict(row)
+                lid = int(d["id"])
+                if lid in seen:
+                    continue
+                blob = f"{lid} {d.get('text') or ''} {d.get('tags_json') or ''}".lower()
+                if needle in blob:
+                    out.append(d)
+                    seen.add(lid)
+                if len(out) >= limit:
+                    break
+            return out[:limit]
 
     def upsert_setup_case(
         self,

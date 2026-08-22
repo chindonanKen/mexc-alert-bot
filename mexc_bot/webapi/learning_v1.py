@@ -221,6 +221,57 @@ def learning_home_v1(user_id: Optional[int] = None) -> Dict[str, Any]:
         "fires": fires,
         "cases": cases,
         "agent_summary": learned.get("reply") or "",
+        "lesson_span": store.lesson_id_span(uid),
+    }
+
+
+def _public_lesson(store: EventStore, uid: int, raw: dict) -> dict:
+    """Read-only enrich for desk cards. Does not write lessons."""
+    try:
+        from ..learning.incident import enrich_lesson_row
+
+        lesson = enrich_lesson_row(dict(raw))
+    except Exception:
+        lesson = dict(raw)
+    try:
+        from ..learning.cases import stamp_lessons_with_cases
+
+        stamped = stamp_lessons_with_cases(store, uid, [lesson])
+        if stamped:
+            lesson = stamped[0]
+    except Exception:
+        pass
+    return lesson
+
+
+def get_lesson_v1(
+    lesson_id: int, user_id: Optional[int] = None
+) -> Optional[Dict[str, Any]]:
+    """Fetch one lesson by id (including lesson 1). Read-only."""
+    uid = int(user_id or uid_or_raise())
+    store = event_store()
+    raw = store.get_lesson(uid, int(lesson_id))
+    if not raw:
+        return None
+    return {"ok": True, "lesson": _public_lesson(store, uid, raw)}
+
+
+def search_lessons_v1(
+    q: str,
+    user_id: Optional[int] = None,
+    *,
+    limit: int = 30,
+) -> Dict[str, Any]:
+    """Search / jump helper. Empty or '1' / 'first' reaches lesson 1."""
+    uid = int(user_id or uid_or_raise())
+    store = event_store()
+    raws = store.search_lessons(uid, q, limit=limit)
+    lessons = [_public_lesson(store, uid, r) for r in raws]
+    return {
+        "ok": True,
+        "q": q,
+        "lessons": lessons,
+        "lesson_span": store.lesson_id_span(uid),
     }
 
 

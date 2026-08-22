@@ -1397,6 +1397,31 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(400, str(e))
 
+    @app.get("/api/learning/lessons/search")
+    def learning_search_lessons(
+        q: str = Query(""), _: bool = Depends(require_auth)
+    ):
+        """Read-only search. `q=1` / first reaches the first lesson."""
+        from .learning_v1 import search_lessons_v1
+
+        try:
+            return search_lessons_v1(q)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/learning/lessons/{lesson_id}")
+    def learning_get_lesson(lesson_id: int, _: bool = Depends(require_auth)):
+        """Read-only fetch of one lesson (lesson 1 included)."""
+        from .learning_v1 import get_lesson_v1
+
+        try:
+            out = get_lesson_v1(int(lesson_id))
+        except Exception as e:
+            raise HTTPException(400, str(e))
+        if not out:
+            raise HTTPException(404, "Lesson not found")
+        return out
+
     @app.patch("/api/learning/lessons/{lesson_id}")
     def learning_edit_lesson(
         lesson_id: int, body: LessonEditBody, _: bool = Depends(require_auth)

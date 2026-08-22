@@ -126,8 +126,8 @@ class TestTargetsRowDistance(unittest.TestCase):
         self.assertIn("data-distance-pct", JS)
         self.assertIn("a.distance_pct", JS)
         self.assertIn("tgt-dist", JS)
-        self.assertIn("desk.js?v=slicelab4", HTML)
-        self.assertIn("desk.css?v=slicelab4", HTML)
+        self.assertIn("desk.js?v=slicelab5", HTML)
+        self.assertIn("desk.css?v=slicelab5", HTML)
 
 
 if __name__ == "__main__":

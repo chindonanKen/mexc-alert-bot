@@ -352,8 +352,8 @@ class TestPositionsTabSplit(unittest.TestCase):
         self.assertIn("pos-book-spot", js)
         self.assertIn("function posBookOf", js)
         html = (ROOT / "mexc_bot/webapi/static/index.html").read_text()
-        self.assertIn("desk.js?v=slicelab4", html)
-        self.assertIn("desk.css?v=slicelab4", html)
+        self.assertIn("desk.js?v=slicelab5", html)
+        self.assertIn("desk.css?v=slicelab5", html)
 
 
 if __name__ == "__main__":
