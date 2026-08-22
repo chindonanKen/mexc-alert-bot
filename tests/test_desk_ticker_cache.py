@@ -134,10 +134,8 @@ class TestDeskTickerCache(unittest.TestCase):
             b = prices.watchlist_tickers(["NOCOINUSDT"])
         self.assertEqual(a, [])
         self.assertEqual(b, [])
-        # Wave 1 MEXC + wave 2 Binance, then negative cache
-        self.assertEqual(len(calls), 2)
-        self.assertTrue(any("mexc.com" in u for u, _ in calls))
-        self.assertTrue(any("binance.com" in u for u, _ in calls))
+        mexc = [c for c in calls if "mexc.com" in c[0]]
+        self.assertEqual(len(mexc), 1, "negative cache must skip a second MEXC round")
 
     def test_binance_fallback_on_mexc_miss(self):
         def fake_get(url, params=None, timeout=8):
@@ -151,12 +149,15 @@ class TestDeskTickerCache(unittest.TestCase):
             self.fail(f"{url} {params}")
 
         with patch.object(prices._session, "get", side_effect=fake_get):
-            rows = prices.watchlist_tickers(["BTCUSDT", "PEPEUSDT"])
+            # Request path is MEXC-only; ticker_24h still has the Binance fallback.
+            prices.reset_ticker_cache()
+            btc = prices.ticker_24h("BTCUSDT")
+            prices.reset_ticker_cache()
+            pepe = prices.ticker_24h("PEPEUSDT")
 
-        by = {r["symbol"]: r for r in rows}
-        self.assertEqual(by["BTCUSDT"]["source"], "mexc")
-        self.assertEqual(by["PEPEUSDT"]["source"], "binance")
-        self.assertEqual(by["PEPEUSDT"]["changePercent"], -8.0)
+        self.assertEqual(btc["source"], "mexc")
+        self.assertEqual(pepe["source"], "binance")
+        self.assertEqual(pepe["changePercent"], -8.0)
 
     def test_overview_strip_skips_full_learning_home(self):
         src = Path(ROOT / "mexc_bot/webapi/learning_v1.py").read_text(encoding="utf-8")

@@ -32,7 +32,8 @@ logger = logging.getLogger(__name__)
 # Soft poll is 10s; 12s keeps a warm hit on the next Movers/Overview refresh.
 TICKER_CACHE_TTL_S = 12.0
 # First-paint path fetches only requested names (not the 800KB all-ticker book).
-_NEEDED_PARALLEL = 20
+# Desk watchlist asks for up to 40; one wave keeps wall clock at ~1 RTT.
+_NEEDED_PARALLEL = 40
 
 _session = requests.Session()
 _session.verify = _CA
@@ -181,20 +182,14 @@ def _fetch_exchange_parallel(
 
 
 def _fetch_needed_parallel(keys: List[str]) -> Dict[str, Dict[str, Any]]:
-    """Needed names only. Wave 1 = MEXC, wave 2 = Binance for leftovers.
+    """Needed names only, one MEXC wave (not N sequential).
 
-    Wall clock is 1–2 RTTs (not N sequential). Unknown names are not retried
-    until the TTL expires (negative cache).
+    Binance is not on this path — a second wave was the extra RTT that
+    pushed first /api/watchlist over 800ms. ticker_24h still falls back.
     """
     if not keys:
         return {}
-    out = _fetch_exchange_parallel(keys, "https://api.mexc.com", "mexc")
-    still = [k for k in keys if k not in out]
-    if still:
-        out.update(
-            _fetch_exchange_parallel(still, "https://api.binance.com", "binance")
-        )
-    return out
+    return _fetch_exchange_parallel(keys, "https://api.mexc.com", "mexc")
 
 
 def _needed_keys(needed: Optional[Iterable[str]]) -> List[str]:
@@ -318,9 +313,6 @@ def ticker_24h(symbol: str) -> Optional[Dict[str, Any]]:
     hit = book.get(key)
     if hit:
         return dict(hit)
-    with _lock:
-        if _miss_until.get(key, 0) > time.time():
-            return None
     row = _ticker_24h_single(key)
     if row:
         with _lock:
