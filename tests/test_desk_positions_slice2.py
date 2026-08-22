@@ -345,15 +345,93 @@ class TestPositionsFeedEntities(unittest.TestCase):
         self.assertEqual(row.get("contract_size"), 1.0)
 
 
-class TestPositionsTabSplit(unittest.TestCase):
-    def test_desk_js_splits_futures_and_spot_books(self):
+def _partition_position_bands(positions):
+    """Mirror of desk.js partitionPositionBands — open then free, no book split."""
+
+    def is_open(p):
+        return bool(p.get("status") == "open" or p.get("is_open"))
+
+    def is_hold(p):
+        return bool(p.get("is_hold") or p.get("position_book") == "hold")
+
+    def is_free(p):
+        return bool(p.get("free_coins") or p.get("free_coins_status") == "manual_on")
+
+    opens = [p for p in positions if is_open(p)]
+    closed = [p for p in positions if not is_open(p)]
+    hold = [p for p in opens if is_hold(p)]
+    live = [p for p in opens if not is_hold(p)]
+    free = [p for p in live if is_free(p)]
+    open_ = [p for p in live if not is_free(p)]
+    open_.sort(key=lambda p: 1 if p.get("free_coins_status") == "near_free" else 0)
+    return {"open": open_, "free": free, "hold": hold, "closed": closed}
+
+
+class TestPositionsTabBands(unittest.TestCase):
+    def test_partition_flattens_markets_open_then_free(self):
+        rows = [
+            {"symbol": "FREE1", "status": "open", "market": "spot", "free_coins": True},
+            {"symbol": "BTC", "status": "open", "market": "futures", "free_coins": False},
+            {
+                "symbol": "NEAR1",
+                "status": "open",
+                "market": "spot",
+                "free_coins": False,
+                "free_coins_status": "near_free",
+            },
+            {
+                "symbol": "HOLD1",
+                "status": "open",
+                "market": "futures",
+                "is_hold": True,
+                "free_coins": False,
+            },
+            {
+                "symbol": "MAN1",
+                "status": "open",
+                "market": "spot",
+                "free_coins_status": "manual_on",
+            },
+            {"symbol": "OLD1", "status": "closed", "market": "futures"},
+        ]
+        bands = _partition_position_bands(rows)
+        self.assertEqual([p["symbol"] for p in bands["open"]], ["BTC", "NEAR1"])
+        self.assertEqual([p["symbol"] for p in bands["free"]], ["FREE1", "MAN1"])
+        self.assertEqual([p["symbol"] for p in bands["hold"]], ["HOLD1"])
+        self.assertEqual([p["symbol"] for p in bands["closed"]], ["OLD1"])
+        self.assertNotIn("FREE1", [p["symbol"] for p in bands["open"]])
+
+    def test_desk_js_paints_flat_open_free_bands(self):
         js = (ROOT / "mexc_bot/webapi/static/assets/desk.js").read_text()
-        self.assertIn("pos-book-fut", js)
-        self.assertIn("pos-book-spot", js)
-        self.assertIn("function posBookOf", js)
+        css = (ROOT / "mexc_bot/webapi/static/assets/desk.css").read_text()
         html = (ROOT / "mexc_bot/webapi/static/index.html").read_text()
-        self.assertIn("desk.js?v=slicelab7", html)
-        self.assertIn("desk.css?v=slicelab7", html)
+        self.assertIn("function posHasEntry", js)
+        self.assertIn("if (!posHasEntry(p) || p.upnl_usd_est == null)", js)
+        self.assertIn("function partitionPositionBands", js)
+        self.assertIn("No open trades", js)
+        self.assertIn("open · ", js)
+        self.assertIn("pos-band-open", js)
+        self.assertIn("pos-band-free", js)
+        self.assertIn("pos-hero", js)
+        self.assertIn("pos-mkt-inline", js)
+        self.assertIn("pos-free-chip", js)
+        self.assertIn("Show more", js)
+        self.assertIn("pos-closed-rest", js)
+        self.assertIn("closed.slice(0, 5)", js)
+        self.assertNotIn("pos-book-fut", js)
+        self.assertNotIn("pos-book-spot", js)
+        self.assertNotIn("scale out on the way up", js)
+        self.assertNotIn("AD risk", js)
+        self.assertNotIn("pos-flow", js)
+        self.assertNotIn("posBankroll", js)
+        self.assertNotIn("id=\"posBankroll\"", html)
+        self.assertIn("desk.js?v=slicelab7b", html)
+        self.assertIn("desk.css?v=slicelab7b", html)
+        self.assertIn("height: 40px", css)
+        self.assertIn("font-size: 12px", css)
+        self.assertIn("font-size: 13px", css)
+        self.assertIn("font-variant-numeric: tabular-nums", css)
+        self.assertIn("inset 3px 0 0", css)
 
 
 if __name__ == "__main__":

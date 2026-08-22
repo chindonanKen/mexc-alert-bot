@@ -873,32 +873,76 @@
     applySelectedSymbol();
   }
 
-  function posOutcomeBadge(p) {
-    const isOpen = p.status === "open" || p.is_open;
-    if (isOpen) {
-      if (p.is_hold || p.position_book === "hold") {
-        return `<span class="pos-outcome hold" title="Long-term invest — excluded from AD learning">HOLD</span>`;
-      }
-      if (p.free_coins) {
-        const src = p.free_coins_source === "manual" ? " · manual" : "";
-        return `<span class="pos-outcome free" title="Principal recovered — free inventory${src}">FREE</span>`;
-      }
-      if (p.free_coins_status === "near_free") {
-        return `<span class="pos-outcome near" title="Almost principal recovered">NEAR</span>`;
-      }
-      return `<span class="pos-outcome open">OPEN</span>`;
-    }
-    const o = (p.outcome || p.status || "").toLowerCase();
-    if (o === "success") return `<span class="pos-outcome success">WIN</span>`;
-    if (o === "miss") return `<span class="pos-outcome miss">MISS</span>`;
-    return `<span class="pos-outcome flat">FLAT</span>`;
+  function posMktTiny(m) {
+    const x = (m || "").toLowerCase();
+    if (x === "futures") return `<span class="pos-mkt-inline">FUT</span>`;
+    if (x === "spot") return `<span class="pos-mkt-inline">SPOT</span>`;
+    return "";
   }
 
-  function posMarketPill(m) {
-    const x = (m || "").toLowerCase();
-    if (x === "futures") return `<span class="pos-mkt fut">FUT</span>`;
-    if (x === "spot") return `<span class="pos-mkt spot">SPOT</span>`;
-    return `<span class="pos-mkt">?</span>`;
+  function isPosOpen(p) {
+    return !!(p && (p.status === "open" || p.is_open));
+  }
+
+  function isPosHold(p) {
+    return !!(p && (p.is_hold || p.position_book === "hold"));
+  }
+
+  function isPosFree(p) {
+    return !!(p && (p.free_coins || p.free_coins_status === "manual_on"));
+  }
+
+  function posHasEntry(p) {
+    return p.entry_display != null || p.entry_avg != null;
+  }
+
+  function partitionPositionBands(positions) {
+    const list = positions || [];
+    const opens = list.filter(isPosOpen);
+    const closed = list.filter((p) => !isPosOpen(p));
+    const hold = opens.filter(isPosHold);
+    const live = opens.filter((p) => !isPosHold(p));
+    const free = live.filter(isPosFree);
+    const open = live.filter((p) => !isPosFree(p));
+    open.sort((a, b) => {
+      const ra = a.free_coins_status === "near_free" ? 1 : 0;
+      const rb = b.free_coins_status === "near_free" ? 1 : 0;
+      return ra - rb;
+    });
+    return { open, free, hold, closed };
+  }
+
+  function posGlanceKind(p) {
+    if (isPosHold(p)) return "hold";
+    if (isPosOpen(p) && isPosFree(p)) return "free";
+    if (isPosOpen(p)) return "open";
+    return "closed";
+  }
+
+  function posGlanceHero(p, kind) {
+    if (kind === "free") {
+      if (p.remaining_mark_usd == null) return { text: "", cls: "up" };
+      return { text: _usd(p.remaining_mark_usd, false), cls: "up" };
+    }
+    if (kind === "open" || kind === "hold") {
+      if (!posHasEntry(p) || p.upnl_usd_est == null) {
+        return { text: "", cls: "mute" };
+      }
+      const v = Number(p.upnl_usd_est);
+      return { text: _usd(v, true), cls: v >= 0 ? "up" : "dn" };
+    }
+    if (p.realized_pnl_usd == null) return { text: "", cls: "mute" };
+    const v = Number(p.realized_pnl_usd);
+    return { text: _usd(v, true), cls: v >= 0 ? "up" : "dn" };
+  }
+
+  function posGlanceMid(p, kind) {
+    if (kind === "free") {
+      if (p.bought_usd == null || p.sold_usd == null) return "";
+      return _usd(Number(p.sold_usd) - Number(p.bought_usd), true);
+    }
+    if (p.remaining_mark_usd == null) return "";
+    return _usd(p.remaining_mark_usd, false);
   }
 
   function _usd(n, signed) {
@@ -962,62 +1006,10 @@
       p.exchange_position_id ||
       `${p.market || "?"}:${p.symbol}:${p.status}:${p.opened_at || ""}:${p.closed_at || ""}`;
 
-    // Hero money (token 3): free bag → held $; open → uPnL $; closed → realized $
-    let heroMain = "—";
-    let heroSub = "";
-    let heroCls = "mute";
-    if (isOpen && p.free_coins && held != null) {
-      heroMain = _usd(held, false);
-      heroCls = "up";
-      if (cashBanked != null) heroSub = "cash " + _usd(cashBanked, true);
-    } else if (isOpen) {
-      if (p.upnl_usd_est != null) {
-        heroMain = _usd(p.upnl_usd_est, true);
-        heroCls = Number(p.upnl_usd_est) >= 0 ? "up" : "dn";
-      }
-      if (p.upnl_pct != null) {
-        heroSub =
-          (Number(p.upnl_pct) >= 0 ? "+" : "") +
-          Number(p.upnl_pct).toFixed(1) +
-          "%";
-      }
-    } else {
-      if (real != null) {
-        heroMain = _usd(real, true);
-        heroCls = real >= 0 ? "up" : "dn";
-      }
-      if (p.realized_pnl_pct != null) {
-        heroSub =
-          (Number(p.realized_pnl_pct) >= 0 ? "+" : "") +
-          Number(p.realized_pnl_pct).toFixed(1) +
-          "%";
-      }
-    }
-
-    // Flow: In · Out · Held (open) or In · Out · PnL (closed)
-    const flow3k = isOpen ? "Held" : "PnL";
-    const flow3v = isOpen
-      ? held != null
-        ? _usd(held, false)
-        : "—"
-      : real != null
-        ? _usd(real, true)
-        : "—";
-
+    const kind = posGlanceKind(p);
+    const hero = posGlanceHero(p, kind);
+    const mid = posGlanceMid(p, kind);
     const when = _holdWhen(p, isOpen);
-    const layers =
-      p.n_buys || p.n_sells
-        ? `B${p.n_buys || 0}/S${p.n_sells || 0}`
-        : "";
-
-    const truth =
-      p.exchange_history || p.money_truth === "exchange"
-        ? `<span class="pos-src" title="Exchange history">EXCH</span>`
-        : p.exchange_hold || p.money_truth === "spot_balance"
-          ? `<span class="pos-src" title="Live / balance">LIVE</span>`
-          : p.money_truth === "fill_recon_unverified" || p.verified === false
-            ? `<span class="pos-src" title="Fill residual">FILL?</span>`
-            : "";
 
     const buys = (p.buy_orders || [])
       .map(
@@ -1103,21 +1095,13 @@
           exit_ != null ? fmtPx(exit_) : "—"
         }`;
 
-    const freeBanner = p.free_coins
-      ? `<div class="pos-free-banner">Free bag · ${
-          held != null ? _usd(held, false) : "—"
-        } mark · scale out on the way up${
-          cashBanked != null ? " · cash banked " + _usd(cashBanked, true) : ""
-        }</div>`
-      : p.free_coins_status === "near_free"
-        ? `<div class="pos-free-banner near">Near free · principal almost back</div>`
-        : "";
-
-    return `<details class="pos-card ${isOpen ? "is-open" : "is-closed"} outcome-${
+    return `<details class="pos-card ${
+      kind === "closed" ? "is-closed" : kind === "free" ? "is-free" : kind === "hold" ? "is-hold" : "is-open"
+    } outcome-${
       (p.outcome || (isOpen ? "open" : "flat")).toLowerCase()
-    }${p.free_coins && !isHold ? " is-free" : ""}${
-      p.free_coins_status === "near_free" && !isHold ? " is-near" : ""
-    }${isHold ? " is-hold" : ""}${deskRowSelectedClass(
+    }${
+      p.free_coins_status === "near_free" && kind === "open" ? " is-near" : ""
+    }${deskRowSelectedClass(
       p.symbol
     )}" data-pos-id="${String(posId).replace(/"/g, "")}" data-desk-sym="${escHtml(
       String(p.symbol || "")
@@ -1125,23 +1109,12 @@
       <summary class="pos-sum">
         <div class="pos-id"><span class="pos-sym">${escHtml(
           String(p.symbol || "")
-        )}</span></div>
-        ${posOutcomeBadge(p)}
-        <div class="pos-pnl-block">
-          <span class="pos-pnl-main ${heroCls}">${heroMain}</span>
-          ${heroSub ? `<span class="pos-pnl-sub">${heroSub}</span>` : ""}
-        </div>
-        <div class="pos-flow">
-          <div class="pos-flow-cell"><span class="pos-flow-k">In</span><span class="pos-flow-v">${
-            bought != null ? _usd(bought, false) : "—"
-          }</span></div>
-          <div class="pos-flow-cell"><span class="pos-flow-k">Out</span><span class="pos-flow-v">${
-            sold != null ? _usd(sold, false) : "—"
-          }</span></div>
-          <div class="pos-flow-cell"><span class="pos-flow-k">${flow3k}</span><span class="pos-flow-v">${flow3v}</span></div>
-        </div>
-        <div class="pos-meta">${when}${layers ? " · " + layers : ""}</div>
-        <div class="pos-tags">${posMarketPill(p.book || p.market)}${truth}</div>
+        )}</span>${posMktTiny(p.book || p.market)}${
+          kind === "free" ? `<span class="pos-free-chip">FREE</span>` : ""
+        }</div>
+        <span class="pos-hero ${hero.cls}">${hero.text}</span>
+        <span class="pos-mid">${mid}</span>
+        <span class="pos-age">${when === "—" ? "" : when}</span>
         <span class="pos-chev" aria-hidden="true">▾</span>
       </summary>
       <div class="pos-detail">
@@ -1194,8 +1167,8 @@
         }</div>
         ${
           isOpen
-            ? `${!isHold && (p.market || "").toLowerCase() === "spot" ? `<div class="pos-g">Free bag</div>${freeBanner}` : ""}${!isHold && freeBanner && (p.market || "").toLowerCase() !== "spot" ? freeBanner : ""}${isHold ? `<div class="pos-g">Book</div><div class="pos-hold-banner">Long-term invest · excluded from AD learning</div>` : ""}<div class="pos-g">Flags</div>${freeBtns}`
-            : freeBanner
+            ? `${isHold ? `<div class="pos-g">Book</div><div class="pos-hold-banner">Long-term invest · excluded from AD learning</div>` : ""}<div class="pos-g">Flags</div>${freeBtns}`
+            : ""
         }
         <div class="pos-g">Mark</div>
         <div class="pos-price-line">${markLine} · ${
@@ -1302,124 +1275,43 @@
   function renderPositionsList(positions) {
     const host = $("#posTable");
     if (!host) return;
-    let opens = positions.filter((p) => p.status === "open" || p.is_open);
-    const closed = positions.filter((p) => !(p.status === "open" || p.is_open));
-    const isHoldP = (p) => !!(p.is_hold || p.position_book === "hold");
-    const holdOpens = opens.filter(isHoldP);
-    const adOpens = opens.filter((p) => !isHoldP(p));
-    // AD opens: FREE first, then NEAR, then rest
-    adOpens.sort((a, b) => {
-      const ra = a.free_coins ? 0 : a.free_coins_status === "near_free" ? 1 : 2;
-      const rb = b.free_coins ? 0 : b.free_coins_status === "near_free" ? 1 : 2;
-      return ra - rb;
-    });
-    const freeOpens = adOpens.filter((p) => p.free_coins);
-    const riskOpens = adOpens.filter((p) => !p.free_coins);
-
+    const { open, free, hold, closed } = partitionPositionBands(positions);
     const head = $("#posListHead");
     if (head) {
-      head.textContent = `${riskOpens.length} AD · ${freeOpens.length} free · ${holdOpens.length} hold · ${closed.length} closed`;
+      head.textContent = `${open.length} open · ${free.length} free`;
     }
-    const br = $("#posBankroll");
-    if (br) {
-      let adMark = 0,
-        freeMark = 0,
-        freeN = 0,
-        holdMark = 0,
-        holdN = 0,
-        openReal = 0,
-        cashBanked = 0;
-      opens.forEach((p) => {
-        const m =
-          p.remaining_mark_usd != null ? Number(p.remaining_mark_usd) : 0;
-        if (isHoldP(p)) {
-          holdN += 1;
-          holdMark += m;
-          return;
-        }
-        if (p.free_coins) {
-          freeN += 1;
-          freeMark += m;
-        } else {
-          adMark += m;
-        }
-        if (p.realized_pnl_usd != null) openReal += Number(p.realized_pnl_usd);
-        if (
-          p.principal_recovered &&
-          p.bought_usd != null &&
-          p.sold_usd != null
-        ) {
-          cashBanked += Number(p.sold_usd) - Number(p.bought_usd);
-        }
-      });
-      br.innerHTML = `<div class="pos-strip">
-        <div class="pos-strip-cell"><span class="pos-strip-k">AD risk</span><span class="pos-strip-v">$${adMark.toFixed(
-          0
-        )}</span></div>
-        <div class="pos-strip-cell is-free"><span class="pos-strip-k">Free bags</span><span class="pos-strip-v">${freeN} · $${freeMark.toFixed(
-        0
-      )}</span></div>
-        <div class="pos-strip-cell is-hold"><span class="pos-strip-k">Long-term</span><span class="pos-strip-v">${holdN} · $${holdMark.toFixed(
-        0
-      )}</span></div>
-      </div>
-      <div class="pos-strip-foot mute">Partial AD real ${
-        openReal >= 0 ? "+" : ""
-      }$${openReal.toFixed(0)}${
-        cashBanked
-          ? " · free cash " +
-            (cashBanked >= 0 ? "+$" : "−$") +
-            Math.abs(cashBanked).toFixed(0)
-          : ""
-      } · hold bags excluded from AD learning</div>`;
+    let html = "";
+    if (open.length) {
+      html += `<div class="pos-band pos-band-open">${open
+        .map(posCardHtml)
+        .join("")}</div>`;
+    } else {
+      html += `<div class="pos-empty-open mute">No open trades</div>`;
     }
-    function bandsFor(rows) {
-      const opensB = rows.filter((p) => p.status === "open" || p.is_open);
-      const closedB = rows.filter((p) => !(p.status === "open" || p.is_open));
-      const holdB = opensB.filter(isHoldP);
-      const adB = opensB.filter((p) => !isHoldP(p));
-      adB.sort((a, b) => {
-        const ra = a.free_coins ? 0 : a.free_coins_status === "near_free" ? 1 : 2;
-        const rb = b.free_coins ? 0 : b.free_coins_status === "near_free" ? 1 : 2;
-        return ra - rb;
-      });
-      const freeB = adB.filter((p) => p.free_coins);
-      const riskB = adB.filter((p) => !p.free_coins);
-      let inner = "";
-      if (riskB.length) {
-        inner += `<div class="pos-band-h">AD open risk <span class="pos-band-n">${riskB.length}</span></div>`;
-        inner += riskB.map(posCardHtml).join("");
-      } else {
-        inner += `<div class="pos-band-h mute">No AD open risk</div>`;
-      }
-      if (freeB.length) {
-        inner += `<div class="pos-band-h free">Free coins <span class="pos-band-n">${freeB.length}</span></div>`;
-        inner += freeB.map(posCardHtml).join("");
-      }
-      if (holdB.length) {
-        inner += `<div class="pos-band-h hold">Long-term hold <span class="pos-band-n">${holdB.length}</span></div>`;
-        inner += `<p class="pos-band-hint mute">Invest bags — not used for AD bulk teach / agent cases.</p>`;
-        inner += holdB.map(posCardHtml).join("");
-      }
-      if (closedB.length) {
-        inner += `<div class="pos-band-h closed">Closed <span class="pos-band-n">${closedB.length}</span></div>`;
-        inner += closedB.map(posCardHtml).join("");
-      }
-      if (!opensB.length && !closedB.length) {
-        inner = `<div class="pos-band-h mute">None</div>`;
-      }
-      return inner;
+    if (free.length) {
+      html += `<div class="pos-band pos-band-free">${free
+        .map(posCardHtml)
+        .join("")}</div>`;
     }
-
-    const fut = positions.filter((p) => posBookOf(p) === "futures");
-    const spot = positions.filter((p) => posBookOf(p) === "spot");
-    host.innerHTML =
-      `<div class="pos-book pos-book-fut"><div class="pos-book-h">Futures</div>${bandsFor(
-        fut
-      )}</div>` +
-      `<div class="pos-book pos-book-spot"><div class="pos-book-h">Spot</div>${bandsFor(
-        spot
-      )}</div>`;
+    if (hold.length) {
+      html += `<details class="pos-fold pos-fold-hold"><summary class="pos-fold-sum">Long-term hold · ${
+        hold.length
+      }</summary>${hold.map(posCardHtml).join("")}</details>`;
+    }
+    if (closed.length) {
+      const first = closed.slice(0, 5);
+      const rest = closed.slice(5);
+      html += `<details class="pos-fold pos-fold-closed"><summary class="pos-fold-sum">Closed · ${
+        closed.length
+      }</summary>${first.map(posCardHtml).join("")}`;
+      if (rest.length) {
+        html += `<div class="pos-closed-rest" hidden>${rest
+          .map(posCardHtml)
+          .join("")}</div><button type="button" class="btn soft sm pos-more-closed">Show more</button>`;
+      }
+      html += `</details>`;
+    }
+    host.innerHTML = html;
     applySelectedSymbol();
   }
 
@@ -1467,6 +1359,15 @@
       (ev) => {
         const t = ev.target;
         if (!t || !t.closest) return;
+        const moreClosed = t.closest(".pos-more-closed");
+        if (moreClosed && host.contains(moreClosed)) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const rest = host.querySelector(".pos-closed-rest");
+          if (rest) rest.hidden = false;
+          moreClosed.remove();
+          return;
+        }
         const bookHold = t.closest("[data-book-hold]");
         if (bookHold && host.contains(bookHold)) {
           ev.preventDefault();
@@ -1757,9 +1658,9 @@
     );
 
     if (!positions.length) {
-      host.innerHTML = rankEmpty("No positions yet — fills sync or log manual");
+      host.innerHTML = `<div class="pos-empty-open mute">No open trades</div>`;
       const head0 = $("#posListHead");
-      if (head0) head0.textContent = "0 open · 0 closed";
+      if (head0) head0.textContent = "0 open · 0 free";
       _posFingerprint = fp;
       return;
     }

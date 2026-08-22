@@ -147,8 +147,8 @@ class TestUnwatchedNotShown(unittest.TestCase):
 
 class TestDeskAndRoutes(unittest.TestCase):
     def test_cache_bust_slicelab7(self):
-        self.assertIn("desk.js?v=slicelab7", HTML)
-        self.assertIn("desk.css?v=slicelab7", HTML)
+        self.assertIn("desk.js?v=slicelab7b", HTML)
+        self.assertIn("desk.css?v=slicelab7b", HTML)
 
     def test_desk_alarms_news_and_no_query_token(self):
         self.assertIn("news_alarms", APP)
