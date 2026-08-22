@@ -796,6 +796,56 @@ body::before {
     radial-gradient(ellipse at 100% 0%, rgba(52, 211, 153, 0.12), transparent 55%),
     var(--panel);
 }
+.cmd-hunt {
+  grid-column: 1 / -1;
+  min-height: 0;
+  background:
+    radial-gradient(ellipse at 0% 0%, rgba(251, 191, 36, 0.10), transparent 50%),
+    var(--panel);
+}
+.cmd-hunt::before {
+  background: linear-gradient(90deg, #fbbf24, #38bdf8);
+}
+.hunt-hint { margin: 0 0 0.55rem; font-size: 0.78rem; }
+.hunt-cols,
+.hunt-movers-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+.hunt-movers-strip {
+  margin: 0.55rem 0 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+}
+.hunt-col-h {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.hunt-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.hunt-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(0,0,0,0.2);
+  color: inherit;
+  border-radius: 999px;
+  padding: 0.2rem 0.45rem 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.hunt-name .hunt-rank {
+  font-size: 0.65rem;
+  color: var(--mute);
+}
+.hunt-name .hunt-mark {
+  font-size: 0.65rem;
+}
 .cmd-h {
   display: flex;
   justify-content: space-between;

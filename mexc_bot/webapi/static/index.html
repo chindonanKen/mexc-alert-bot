@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
   <noscript><link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" /></noscript>
-  <link rel="stylesheet" href="/assets/desk.css?v=slicelab5" />
+  <link rel="stylesheet" href="/assets/desk.css?v=slicelab6" />
 </head>
 <body>
   <div class="bg-orb orb-a"></div>
@@ -83,6 +83,23 @@
             </header>
             <div id="ovPos" class="cmd-list"></div>
           </article>
+          <article class="cmd-panel cmd-hunt">
+            <header class="cmd-h">
+              <h3>Hunt · doorbell</h3>
+              <span class="badge quiet">names only</span>
+            </header>
+            <p class="hunt-hint mute">still-up = wait · already-off = look at that chart. Not an AD.</p>
+            <div class="hunt-cols">
+              <div>
+                <h4 class="hunt-col-h">still-up</h4>
+                <div id="huntStillUp" class="hunt-list"></div>
+              </div>
+              <div>
+                <h4 class="hunt-col-h">already-off</h4>
+                <div id="huntAlreadyOff" class="hunt-list"></div>
+              </div>
+            </div>
+          </article>
         </div>
         <div id="ovBookNews" class="ov-book-news panel clean mt" hidden></div>
         <div id="ovBookIntel" class="ov-book-intel panel clean mt" hidden></div>
@@ -150,6 +167,16 @@
             <span class="badge quiet" id="mwBadge"></span>
           </form>
           <p class="quiet sm" id="moverSetHint">Each set has its own coins and threshold. Scanner runs every enabled set.</p>
+          <div class="hunt-movers-strip" id="huntMoversStrip">
+            <div>
+              <h4 class="hunt-col-h">still-up</h4>
+              <div id="huntStillUpMovers" class="hunt-list"></div>
+            </div>
+            <div>
+              <h4 class="hunt-col-h">already-off</h4>
+              <div id="huntAlreadyOffMovers" class="hunt-list"></div>
+            </div>
+          </div>
           <div class="form-row tight table-filter">
             <input id="moversSearch" type="search" placeholder="Find symbol…" autocomplete="off" aria-label="Filter movers by symbol" />
             <span class="badge quiet" id="moversFilterCount" hidden></span>
@@ -454,6 +481,6 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/assets/desk.js?v=slicelab5"></script>
+  <script src="/assets/desk.js?v=slicelab6"></script>
 </body>
 </html>

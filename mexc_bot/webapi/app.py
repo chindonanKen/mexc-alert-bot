@@ -196,6 +196,12 @@ class TagTradeBody(BaseModel):
     notes: Optional[str] = None
 
 
+class HuntMarkBody(BaseModel):
+    symbol: str
+    market: str = "futures"
+    rank: int
+
+
 class VisualAdBody(BaseModel):
     """POST /api/learning/cases/{id}/visual-ad — staff-written visual AD."""
 
@@ -663,6 +669,36 @@ def create_app() -> FastAPI:
     def delete_mover_set(set_id: int, _: bool = Depends(require_auth)):
         try:
             return actions.delete_mover_set(set_id)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/hunt")
+    def hunt_home(_: bool = Depends(require_auth)):
+        """Two doorbell lists: still-up / already-off. Names only."""
+        from .hunt import hunt_lists, payload_has_price_or_ad
+
+        try:
+            uid = db.default_user_id()
+            out = hunt_lists(uid)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+        if payload_has_price_or_ad(out):
+            raise HTTPException(500, "hunt payload rejected")
+        return out
+
+    @app.post("/api/hunt/mark")
+    def hunt_mark(body: HuntMarkBody, _: bool = Depends(require_auth)):
+        """Kenneth rank on a hunt name. Does not write lessons or ADs."""
+        from .hunt import mark_hunt_rank
+
+        uid = db.default_user_id()
+        if not uid:
+            raise HTTPException(400, "DESK_USER_ID not configured")
+        try:
+            return {
+                "ok": True,
+                "row": mark_hunt_rank(uid, body.symbol, body.market, body.rank),
+            }
         except Exception as e:
             raise HTTPException(400, str(e))
 

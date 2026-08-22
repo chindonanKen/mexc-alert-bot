@@ -805,6 +805,71 @@
       }
     }
     applySelectedSymbol();
+    loadHunt();
+  }
+
+  function huntNameChip(row) {
+    const rank =
+      row.rank == null || row.rank === ""
+        ? "unranked"
+        : "#" + String(row.rank);
+    return `<span class="hunt-name" data-desk-sym="${escHtml(
+      String(row.symbol || "")
+    )}"><span>${escHtml(String(row.symbol || ""))}</span><span class="hunt-rank">${escHtml(
+      rank
+    )}</span><button type="button" class="btn soft sm hunt-mark" data-hunt-mark="${escHtml(
+      String(row.symbol || "")
+    )}" data-hunt-mkt="${escHtml(String(row.market || "futures"))}">Mark</button></span>`;
+  }
+
+  function paintHuntList(el, rows) {
+    if (!el) return;
+    const list = Array.isArray(rows) ? rows : [];
+    const html = list.length
+      ? list.map(huntNameChip).join("")
+      : `<span class="mute">—</span>`;
+    const sig = list.map((r) => [r.symbol, r.market, r.rank]);
+    if (paintIfChanged(el, html, el.id || "hunt", sig)) {
+      $$("[data-hunt-mark]", el).forEach((b) => {
+        b.addEventListener("click", async (ev) => {
+          ev.stopPropagation();
+          const raw = prompt("Hunt rank 1–99 (name only — not an AD)", "");
+          if (raw == null || !String(raw).trim()) return;
+          const n = parseInt(String(raw).trim(), 10);
+          if (!n || n < 1 || n > 99) {
+            toast("Rank must be 1–99");
+            return;
+          }
+          try {
+            await api("/api/hunt/mark", {
+              method: "POST",
+              body: JSON.stringify({
+                symbol: b.dataset.huntMark,
+                market: b.dataset.huntMkt || "futures",
+                rank: n,
+              }),
+            });
+            loadHunt();
+          } catch (e) {
+            toast(e.message);
+          }
+        });
+      });
+    }
+  }
+
+  async function loadHunt() {
+    let d = {};
+    try {
+      d = await api("/api/hunt");
+    } catch (_) {
+      return;
+    }
+    paintHuntList($("#huntStillUp"), d.still_up || []);
+    paintHuntList($("#huntAlreadyOff"), d.already_off || []);
+    paintHuntList($("#huntStillUpMovers"), d.still_up || []);
+    paintHuntList($("#huntAlreadyOffMovers"), d.already_off || []);
+    applySelectedSymbol();
   }
 
   function posOutcomeBadge(p) {
@@ -1745,9 +1810,12 @@
       _fillMoverSetSelect(d.sets || [], d.active_set_id ?? _activeMoverSetId);
       if (_activeMoverSetId != null && d.active_set_id == null) {
         const d2 = await api(`/api/watchlist?set_id=${_activeMoverSetId}`);
-        return _renderMovers(d2, soft);
+        _renderMovers(d2, soft);
+        loadHunt();
+        return;
       }
       _renderMovers(d, soft);
+      loadHunt();
     } catch (e) {
       if (!soft) toast(e.message || String(e));
     }
