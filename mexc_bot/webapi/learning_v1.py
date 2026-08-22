@@ -84,6 +84,57 @@ def what_have_you_learned(
     }
 
 
+def overview_learning_strip(user_id: Optional[int] = None) -> Dict[str, Any]:
+    """Overview Needs-you + memory strip — not the full Learning home.
+
+    `/api/learning` stays on learning_home_v1 (lessons, trades, cases).
+    Overview only paints pending (max 2) + the first ~420 chars of the
+    memory strip. Building the 640KB home (list_money_reviews ×2, cases,
+    lesson enrich) was the Overview first-paint wait — do not call it here.
+    """
+    uid = int(user_id or uid_or_raise())
+    store = event_store()
+
+    pending_raw = store.list_pending_questions(uid, status="open", limit=10)
+    pending_all: List[dict] = []
+    for p in pending_raw:
+        row = dict(p)
+        try:
+            from ..learning.trades import enrich_pending_row
+
+            row = enrich_pending_row(store, p)
+        except Exception:
+            pass
+        pending_all.append(row)
+    pending = pending_all[:2]
+
+    lessons: List[dict] = []
+    try:
+        lessons = store.list_lessons(uid, approved_only=True, limit=12)
+    except Exception:
+        lessons = []
+
+    lines: List[str] = []
+    if lessons:
+        lines.append("Lessons I store:")
+        for L in lessons[:12]:
+            lines.append(f"  · {(L.get('text') or '')[:160]}")
+    else:
+        lines.append("No durable lessons yet — teach me a rule.")
+    reply = "\n".join(lines)
+
+    return {
+        "needs_you": {
+            "pending_questions": pending,
+            "count": len(pending_all),
+            "has_lessons": bool(lessons),
+        },
+        "agent_summary": reply,
+        "what_learned_reply": reply,
+        "stats": {},
+    }
+
+
 def learning_home_v1(user_id: Optional[int] = None) -> Dict[str, Any]:
     """Single payload for Learning view + voice context."""
     uid = int(user_id or uid_or_raise())

@@ -7,9 +7,20 @@ import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from . import db
-from .prices import ticker_24h
+from .prices import ensure_ticker_book, ticker_24h
 
 logger = logging.getLogger(__name__)
+
+
+def _warm_marks(symbols) -> None:
+    """One parallel ticker fetch for this entity set — no per-row HTTP after."""
+    keys = [str(s) for s in (symbols or []) if s]
+    if not keys:
+        return
+    try:
+        ensure_ticker_book(keys)
+    except Exception:
+        pass
 
 
 def list_position_entities(
@@ -180,6 +191,7 @@ def list_position_entities(
             entities.append(d)
 
     now = time.time()
+    _warm_marks(d.get("symbol") for d in entities)
     for d in entities:
         if d.get("status") == "open":
             if d.get("opened_at"):
@@ -448,6 +460,7 @@ def _reconcile_spot_with_balances(
         return entities
 
     by_asset: Dict[str, dict] = {}
+    warm_syms = []
     for b in bals:
         asset = str(b.get("asset") or "").upper()
         tot = float(b.get("total") or 0)
@@ -455,6 +468,18 @@ def _reconcile_spot_with_balances(
             continue
         if asset in _SPOT_BALANCE_IGNORE_ASSETS:
             logger.info("Ignoring delisted/dust spot asset %s", asset)
+            continue
+        warm_syms.append(str(b.get("symbol") or f"{asset}USDT"))
+    for e in entities:
+        if e.get("symbol"):
+            warm_syms.append(str(e.get("symbol")))
+    _warm_marks(warm_syms)
+    for b in bals:
+        asset = str(b.get("asset") or "").upper()
+        tot = float(b.get("total") or 0)
+        if not asset or tot <= 1e-8:
+            continue
+        if asset in _SPOT_BALANCE_IGNORE_ASSETS:
             continue
         sym = str(b.get("symbol") or f"{asset}USDT")
         if not _spot_symbol_tradeable(sym):

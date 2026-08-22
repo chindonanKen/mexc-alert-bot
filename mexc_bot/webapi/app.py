@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import actions, db
-from .prices import market_context, watchlist_tickers
+from .prices import market_context, schedule_ticker_prewarm, watchlist_tickers
 from .voice_agent import chat_with_tools, handle_voice_audio, tts_speak
 
 logger = logging.getLogger(__name__)
@@ -210,6 +210,12 @@ class VisualAdBody(BaseModel):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="AD Desk", version="2.1.0-beta")
+    # Fill the 24h book in the background so later mark attach is a lookup.
+    # First Overview/Movers paint uses needed-parallel and does not wait on this.
+    try:
+        schedule_ticker_prewarm()
+    except Exception:
+        pass
 
     @app.get("/api/health")
     def health():
@@ -496,14 +502,14 @@ def create_app() -> FastAPI:
         learn_stats: Dict[str, Any] = {}
         if uid:
             try:
-                from .learning_v1 import learning_home_v1
+                from .learning_v1 import overview_learning_strip
 
-                lb = learning_home_v1(uid)
+                lb = overview_learning_strip(uid)
                 needs_you = lb.get("needs_you") or needs_you
                 agent_summary = lb.get("agent_summary") or lb.get("what_learned_reply") or ""
                 learn_stats = lb.get("stats") or {}
             except Exception as e:
-                logger.debug("learning_home_v1: %s", e)
+                logger.debug("overview_learning_strip: %s", e)
 
         # Simple journal PnL sketch (closed trades with entry+exit)
         closed = (
@@ -672,6 +678,7 @@ def create_app() -> FastAPI:
             for r in rows:
                 s = r["symbol"]
                 symbols.append(s.replace("_", "") if "_" in s else s)
+            # Batch + TTL — sequential ticker_24h was the ~4s Movers wait.
             tickers = watchlist_tickers(symbols[:40])
             # Last fire per symbol (learning_events) for live desk columns
             last_fires: Dict[str, dict] = {}
