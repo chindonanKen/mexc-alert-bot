@@ -6,8 +6,9 @@
   <title>AD Desk — Agent Trading Platform</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/desk.css?v=lessonad1" />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" /></noscript>
+  <link rel="stylesheet" href="/assets/desk.css?v=slicelab1" />
 </head>
 <body>
   <div class="bg-orb orb-a"></div>
@@ -145,6 +146,10 @@
             <span class="badge quiet" id="mwBadge"></span>
           </form>
           <p class="quiet sm" id="moverSetHint">Each set has its own coins and threshold. Scanner runs every enabled set.</p>
+          <div class="form-row tight table-filter">
+            <input id="moversSearch" type="search" placeholder="Find symbol…" autocomplete="off" aria-label="Filter movers by symbol" />
+            <span class="badge quiet" id="moversFilterCount" hidden></span>
+          </div>
           <div id="moversTable" class="scroll"></div>
         </div>
       </section>
@@ -158,6 +163,10 @@
             <select name="market"><option value="spot">Spot</option><option value="futures">Futures</option></select>
             <button class="btn" type="submit">Add</button>
           </form>
+          <div class="form-row tight table-filter">
+            <input id="targetsSearch" type="search" placeholder="Find symbol…" autocomplete="off" aria-label="Filter targets by symbol" />
+            <span class="badge quiet" id="targetsFilterCount" hidden></span>
+          </div>
           <div id="alertsTable" class="scroll"></div>
         </div>
       </section>
@@ -437,6 +446,6 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/assets/desk.js?v=lessonad1"></script>
+  <script src="/assets/desk.js?v=slicelab1"></script>
 </body>
 </html>

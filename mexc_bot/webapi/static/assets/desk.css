@@ -1190,6 +1190,8 @@ body::before {
 }
 .form-row input { flex: 1; min-width: 110px; }
 .form-row select { min-width: 110px; }
+.table-filter { margin-bottom: 0.5rem; }
+.table-filter input[type="search"] { flex: 1; min-width: 160px; }
 .chk { font-size: 0.82rem; color: var(--mute); display: flex; gap: 0.35rem; align-items: center; }
 .row-gap { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 

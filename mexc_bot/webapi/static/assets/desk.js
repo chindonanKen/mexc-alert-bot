@@ -131,6 +131,85 @@
       .join("")}</tr></thead><tbody>${body}</tbody></table>`;
   }
 
+  // SLICE 1 — skip innerHTML when payload is unchanged; filter Targets/Movers by symbol.
+  const _deskPaint = { painted: 0, skipped: 0, sig: Object.create(null) };
+  try {
+    window.__deskPaintStats = _deskPaint;
+  } catch (_) {}
+
+  function _deskSig(payload) {
+    if (payload == null) return "";
+    if (typeof payload === "string") return payload;
+    try {
+      return JSON.stringify(payload);
+    } catch (_) {
+      return String(payload);
+    }
+  }
+
+  function paintIfChanged(el, html, key, payload) {
+    if (!el) return false;
+    const k = key || el.id || "anon";
+    const sig = _deskSig(payload != null ? payload : html);
+    if (_deskPaint.sig[k] === sig) {
+      _deskPaint.skipped += 1;
+      return false;
+    }
+    _deskPaint.sig[k] = sig;
+    el.innerHTML = html;
+    _deskPaint.painted += 1;
+    return true;
+  }
+
+  function applyTableSymbolFilter(host, query, symbolCol, countEl) {
+    if (!host) return 0;
+    const q = String(query || "").trim().toUpperCase();
+    const qCompact = q.replace(/[^A-Z0-9]/g, "");
+    const rows = host.querySelectorAll("table.data tbody tr");
+    let shown = 0;
+    const total = rows.length;
+    rows.forEach((tr) => {
+      const cell = tr.children[symbolCol];
+      const raw = cell ? String(cell.textContent || "") : "";
+      const up = raw.toUpperCase();
+      const compact = up.replace(/[^A-Z0-9]/g, "");
+      const ok =
+        !q ||
+        up.indexOf(q) !== -1 ||
+        (qCompact && compact.indexOf(qCompact) !== -1);
+      tr.hidden = !ok;
+      if (ok) shown += 1;
+    });
+    if (countEl) {
+      if (q && total) {
+        countEl.hidden = false;
+        countEl.textContent = shown + " / " + total;
+      } else {
+        countEl.hidden = true;
+        countEl.textContent = "";
+      }
+    }
+    return shown;
+  }
+
+  function _applyMoversFilter() {
+    applyTableSymbolFilter(
+      $("#moversTable"),
+      $("#moversSearch") ? $("#moversSearch").value : "",
+      1,
+      $("#moversFilterCount")
+    );
+  }
+
+  function _applyTargetsFilter() {
+    applyTableSymbolFilter(
+      $("#alertsTable"),
+      $("#targetsSearch") ? $("#targetsSearch").value : "",
+      2,
+      $("#targetsFilterCount")
+    );
+  }
+
   function setView(name) {
     state.view = name;
     $$(".view").forEach((v) => v.classList.remove("on"));
@@ -208,7 +287,7 @@
       updateLearningNavBadge(ny.count != null ? ny.count : qs.length);
       if (!qs.length) {
         needsEl.hidden = true;
-        needsEl.innerHTML = "";
+        paintIfChanged(needsEl, "", "ovNeedsYou", "empty");
       } else {
         needsEl.hidden = false;
         let html = `<div class="ov-needs-h">Needs you <button type="button" class="btn soft sm" data-jump="memory">Learning</button></div>`;
@@ -242,47 +321,56 @@
             </div>
           </div>`;
         });
-        needsEl.innerHTML = html;
-        $$("[data-ans]", needsEl).forEach((b) =>
-          b.addEventListener("click", async () => {
-            try {
-              await api("/api/learning/answer", {
-                method: "POST",
-                body: JSON.stringify({
-                  question_id: +b.dataset.ans,
-                  action: b.dataset.act,
-                  answer_text: "overview",
-                }),
-              });
-              toast("Saved");
-              loadOverview();
-            } catch (e) {
-              toast(e.message);
-            }
-          })
-        );
-        $$("[data-dismiss-q]", needsEl).forEach((b) =>
-          b.addEventListener("click", async () => {
-            try {
-              await api("/api/learning/answer", {
-                method: "POST",
-                body: JSON.stringify({
-                  question_id: +b.getAttribute("data-dismiss-q"),
-                  dismiss: true,
-                }),
-              });
-              loadOverview();
-            } catch (e) {
-              toast(e.message);
-            }
-          })
-        );
-        $$("[data-jump]", needsEl).forEach((b) =>
-          b.addEventListener("click", () => {
-            setView(b.dataset.jump);
-            refreshAll();
-          })
-        );
+        const needsSig = qs.map((q) => [
+          q.id,
+          q.question,
+          q.symbol || (q.event && q.event.symbol),
+          q.drop_pct != null ? q.drop_pct : q.event && q.event.drop_pct,
+          q.fire_price != null ? q.fire_price : q.event && q.event.price,
+          q.fire_ts || (q.event && q.event.ts),
+        ]);
+        if (paintIfChanged(needsEl, html, "ovNeedsYou", needsSig)) {
+          $$("[data-ans]", needsEl).forEach((b) =>
+            b.addEventListener("click", async () => {
+              try {
+                await api("/api/learning/answer", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    question_id: +b.dataset.ans,
+                    action: b.dataset.act,
+                    answer_text: "overview",
+                  }),
+                });
+                toast("Saved");
+                loadOverview();
+              } catch (e) {
+                toast(e.message);
+              }
+            })
+          );
+          $$("[data-dismiss-q]", needsEl).forEach((b) =>
+            b.addEventListener("click", async () => {
+              try {
+                await api("/api/learning/answer", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    question_id: +b.getAttribute("data-dismiss-q"),
+                    dismiss: true,
+                  }),
+                });
+                loadOverview();
+              } catch (e) {
+                toast(e.message);
+              }
+            })
+          );
+          $$("[data-jump]", needsEl).forEach((b) =>
+            b.addEventListener("click", () => {
+              setView(b.dataset.jump);
+              refreshAll();
+            })
+          );
+        }
       }
     }
 
@@ -292,12 +380,16 @@
       const bn = h.book_news || [];
       if (!bn.length) {
         newsEl.hidden = false;
-        newsEl.innerHTML =
+        paintIfChanged(
+          newsEl,
           `<div class="ov-news-h">Book intel · bad news</div>` +
-          rankEmpty("No delist/scam/hack items in cache yet — open Intel radar");
+            rankEmpty("No delist/scam/hack items in cache yet — open Intel radar"),
+          "ovBookNews",
+          "empty"
+        );
       } else {
         newsEl.hidden = false;
-        newsEl.innerHTML =
+        const newsHtml =
           `<div class="panel-h ov-news-head">
             <h3 class="ov-news-h">Book intel · bad news</h3>
             <span class="mute sm">Top 5 · delist/scam/hack · even if old</span>
@@ -333,12 +425,22 @@
             </div>`;
             })
             .join("");
-        $$("[data-jump]", newsEl).forEach((b) =>
-          b.addEventListener("click", () => {
-            setView(b.dataset.jump);
-            refreshAll();
-          })
-        );
+        const newsSig = bn.slice(0, 5).map((n) => [
+          n.title,
+          n.ts,
+          n.symbol,
+          n.book_hit,
+          n.url,
+          n.class || n.severity,
+        ]);
+        if (paintIfChanged(newsEl, newsHtml, "ovBookNews", newsSig)) {
+          $$("[data-jump]", newsEl).forEach((b) =>
+            b.addEventListener("click", () => {
+              setView(b.dataset.jump);
+              refreshAll();
+            })
+          );
+        }
       }
     }
 
@@ -366,38 +468,52 @@
     }
 
     const tt = h.top_targets || [];
-    $("#ovTopTargets").innerHTML = tt.length
-      ? tt
-          .map(
-            (a, i) => `<div class="cmd-row">
+    paintIfChanged(
+      $("#ovTopTargets"),
+      tt.length
+        ? tt
+            .map(
+              (a, i) => `<div class="cmd-row">
             <div class="cmd-row-main">
               <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
               <div>
                 <div class="cmd-sym">${a.symbol}</div>
                 <div class="cmd-meta">${(a.market || "spot").toString().slice(0, 1).toUpperCase()} · fired ${
-              ageLabel(a.age_seconds) || fmtTime(a.fired_at || a.ts)
-            }</div>
+                ageLabel(a.age_seconds) || fmtTime(a.fired_at || a.ts)
+              }</div>
                 ${posUnder(a.position)}
               </div>
             </div>
             <div class="cmd-px">${fmtPx(a.price)}</div>
           </div>`
-          )
-          .join("")
-      : rankEmpty("No target fires yet");
+            )
+            .join("")
+        : rankEmpty("No target fires yet"),
+      "ovTopTargets",
+      tt.map((a) => [
+        a.symbol,
+        a.market,
+        a.price,
+        a.fired_at || a.ts,
+        a.position && a.position.mark,
+        a.position && a.position.upnl_pct,
+      ])
+    );
 
     const tm = h.top_movers || [];
-    $("#ovTopMovers").innerHTML = tm.length
-      ? tm
-          .map(
-            (e, i) => `<div class="cmd-row hot">
+    paintIfChanged(
+      $("#ovTopMovers"),
+      tm.length
+        ? tm
+            .map(
+              (e, i) => `<div class="cmd-row hot">
             <div class="cmd-row-main">
               <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
               <div>
                 <div class="cmd-sym">${e.symbol}</div>
                 <div class="cmd-meta">${e.velocity_band || e.mode || "mover"} · ${
-              ageLabel(e.age_seconds) || fmtTime(e.fired_at || e.ts)
-            }</div>
+                ageLabel(e.age_seconds) || fmtTime(e.fired_at || e.ts)
+              }</div>
                 ${posUnder(e.position)}
               </div>
             </div>
@@ -409,37 +525,50 @@
                   : "—"
             }</div>
           </div>`
-          )
-          .join("")
-      : rankEmpty("No mover fires in the last hour");
+            )
+            .join("")
+        : rankEmpty("No mover fires in the last hour"),
+      "ovTopMovers",
+      tm.map((e) => [
+        e.symbol,
+        e.drop_pct,
+        e.move_1h_pct,
+        e.velocity_band || e.mode,
+        e.fired_at || e.ts,
+        e.position && e.position.mark,
+        e.position && e.position.upnl_pct,
+      ])
+    );
 
     const pos = h.positions || d.positions || [];
-    $("#ovPos").innerHTML = pos.length
-      ? pos
-          .map((p) => {
-            const free = p.free_coins
-              ? `<span class="pos-free">FREE</span>`
-              : "";
-            const hero =
-              p.free_coins && p.remaining_mark_usd != null
-                ? "$" + Number(p.remaining_mark_usd).toFixed(0)
-                : p.upnl_usd_est != null
-                  ? (Number(p.upnl_usd_est) >= 0 ? "+$" : "−$") +
-                    Math.abs(Number(p.upnl_usd_est)).toFixed(0)
-                  : p.realized_pnl_usd != null
-                    ? (Number(p.realized_pnl_usd) >= 0 ? "+$" : "−$") +
-                      Math.abs(Number(p.realized_pnl_usd)).toFixed(0)
-                    : "—";
-            const flow = [
-              p.bought_usd != null ? "in $" + Number(p.bought_usd).toFixed(0) : null,
-              p.sold_usd != null ? "out $" + Number(p.sold_usd).toFixed(0) : null,
-              p.remaining_mark_usd != null && !p.free_coins
-                ? "held $" + Number(p.remaining_mark_usd).toFixed(0)
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" · ");
-            return `<div class="cmd-row pos">
+    paintIfChanged(
+      $("#ovPos"),
+      pos.length
+        ? pos
+            .map((p) => {
+              const free = p.free_coins
+                ? `<span class="pos-free">FREE</span>`
+                : "";
+              const hero =
+                p.free_coins && p.remaining_mark_usd != null
+                  ? "$" + Number(p.remaining_mark_usd).toFixed(0)
+                  : p.upnl_usd_est != null
+                    ? (Number(p.upnl_usd_est) >= 0 ? "+$" : "−$") +
+                      Math.abs(Number(p.upnl_usd_est)).toFixed(0)
+                    : p.realized_pnl_usd != null
+                      ? (Number(p.realized_pnl_usd) >= 0 ? "+$" : "−$") +
+                        Math.abs(Number(p.realized_pnl_usd)).toFixed(0)
+                      : "—";
+              const flow = [
+                p.bought_usd != null ? "in $" + Number(p.bought_usd).toFixed(0) : null,
+                p.sold_usd != null ? "out $" + Number(p.sold_usd).toFixed(0) : null,
+                p.remaining_mark_usd != null && !p.free_coins
+                  ? "held $" + Number(p.remaining_mark_usd).toFixed(0)
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ");
+              return `<div class="cmd-row pos">
             <div class="cmd-row-main">
               <div>
                 <div class="cmd-sym">${escHtml(String(p.symbol || ""))} ${free}</div>
@@ -453,9 +582,21 @@
               <div class="cmd-px mono">${hero}</div>
             </div>
           </div>`;
-          })
-          .join("")
-      : rankEmpty("No open positions");
+            })
+            .join("")
+        : rankEmpty("No open positions"),
+      "ovPos",
+      pos.map((p) => [
+        p.symbol,
+        p.free_coins,
+        p.remaining_mark_usd,
+        p.upnl_usd_est,
+        p.realized_pnl_usd,
+        p.bought_usd,
+        p.sold_usd,
+        p.hold_hours,
+      ])
+    );
 
     // Isolated-dump investigations only (bad news lives in Book intel · bad news above)
     const intelEl = $("#ovBookIntel");
@@ -463,10 +604,10 @@
       const bi = h.book_intel || [];
       if (!bi.length) {
         intelEl.hidden = true;
-        intelEl.innerHTML = "";
+        paintIfChanged(intelEl, "", "ovBookIntel", "empty");
       } else {
         intelEl.hidden = false;
-        intelEl.innerHTML =
+        const intelHtml =
           `<div class="panel-h"><h3>Isolated dump probes</h3><button type="button" class="btn soft sm" data-jump="intel">Open</button></div>` +
           bi
             .map(
@@ -487,9 +628,18 @@
             </div>`
             )
             .join("");
-        $$("[data-jump]", intelEl).forEach((b) =>
-          b.addEventListener("click", () => setView(b.dataset.jump))
-        );
+        if (
+          paintIfChanged(
+            intelEl,
+            intelHtml,
+            "ovBookIntel",
+            bi.map((i) => [i.symbol, i.verdict, i.velocity_band, i.drop_pct, i.confidence])
+          )
+        ) {
+          $$("[data-jump]", intelEl).forEach((b) =>
+            b.addEventListener("click", () => setView(b.dataset.jump))
+          );
+        }
       }
     }
 
@@ -502,17 +652,19 @@
         h.agent_summary || d.agent_summary || d.what_learned_reply || "";
       if (hasLessons && summary && String(summary).trim()) {
         learnedEl.hidden = false;
-        learnedEl.innerHTML = `<div class="panel-h"><h3>Agent memory</h3><button type="button" class="btn soft sm" data-jump="memory">Learning</button></div>
+        const learnedHtml = `<div class="panel-h"><h3>Agent memory</h3><button type="button" class="btn soft sm" data-jump="memory">Learning</button></div>
           <pre class="learn-recall-sm">${escHtml(String(summary).slice(0, 420))}</pre>`;
-        $$("[data-jump]", learnedEl).forEach((b) =>
-          b.addEventListener("click", () => {
-            setView(b.dataset.jump);
-            refreshAll();
-          })
-        );
+        if (paintIfChanged(learnedEl, learnedHtml, "ovAgentLearned", summary)) {
+          $$("[data-jump]", learnedEl).forEach((b) =>
+            b.addEventListener("click", () => {
+              setView(b.dataset.jump);
+              refreshAll();
+            })
+          );
+        }
       } else {
         learnedEl.hidden = true;
-        learnedEl.innerHTML = "";
+        paintIfChanged(learnedEl, "", "ovAgentLearned", "empty");
       }
     }
   }
@@ -1441,12 +1593,16 @@
     const tableEl = $("#moversTable") || $("#tapeTable");
     if (s && s.enabled && !wl.length) {
       if (tableEl) {
-        tableEl.innerHTML =
+        const emptyHtml =
           rankEmpty(
             "Movers ON but watchlist is EMPTY — no dumps will fire. " +
               "Add coins or Restore from recent fires."
           ) +
           `<div class="row-gap mt"><button type="button" class="btn sm" id="btnRestoreWatch">Restore from recent fires (7d)</button></div>`;
+        paintIfChanged(tableEl, emptyHtml, "moversTable", [
+          "empty-on",
+          _activeMoverSetId,
+        ]);
         const br = $("#btnRestoreWatch");
         if (br && !br.dataset.bound) {
           br.dataset.bound = "1";
@@ -1505,24 +1661,51 @@
         </tr>`;
       })
       .join("");
-    if (tableEl)
-      tableEl.innerHTML = table(
-        ["M", "Symbol", "Mark", "24h", "Last fire", "When", ""],
-        rows
+    const moversSig = [
+      _activeMoverSetId,
+      state.lastAlarmFlashId,
+      wl.map((w) => {
+        const key = String(w.symbol).toUpperCase().replace(/_/g, "");
+        const t = by[key] || by[key.replace("USDT", "") + "USDT"];
+        const lf = w.last_fire || null;
+        return [
+          w.symbol,
+          w.market,
+          w.set_id || null,
+          t ? t.price : null,
+          t ? t.changePercent : null,
+          lf && lf.id,
+          lf && lf.drop_pct,
+          lf && lf.ts,
+          lf && (lf.mode || lf.source || ""),
+          lf && lf.velocity_band,
+        ];
+      }),
+    ];
+    if (tableEl) {
+      const painted = paintIfChanged(
+        tableEl,
+        table(["M", "Symbol", "Mark", "24h", "Last fire", "When", ""], rows),
+        "moversTable",
+        moversSig
       );
-    $$("[data-unwatch]").forEach((b) =>
-      b.addEventListener("click", async () => {
-        try {
-          let url = `/api/watchlist?symbol=${encodeURIComponent(b.dataset.unwatch)}&market=${b.dataset.m}`;
-          if (b.dataset.set) url += `&set_id=${b.dataset.set}`;
-          await api(url, { method: "DELETE" });
-          toast("Removed from set");
-          loadMovers();
-        } catch (e) {
-          toast(e.message);
-        }
-      })
-    );
+      if (painted) {
+        $$("[data-unwatch]").forEach((b) =>
+          b.addEventListener("click", async () => {
+            try {
+              let url = `/api/watchlist?symbol=${encodeURIComponent(b.dataset.unwatch)}&market=${b.dataset.m}`;
+              if (b.dataset.set) url += `&set_id=${b.dataset.set}`;
+              await api(url, { method: "DELETE" });
+              toast("Removed from set");
+              loadMovers();
+            } catch (e) {
+              toast(e.message);
+            }
+          })
+        );
+      }
+      _applyMoversFilter();
+    }
   }
 
   async function loadTargets(opts) {
@@ -1534,7 +1717,8 @@
       if (!soft) toast(e.message || String(e));
       return;
     }
-    const rows = (d.alerts || [])
+    const alerts = d.alerts || [];
+    const rows = alerts
       .map(
         (a) => `<tr>
         <td>#${a.visual_id}</td>
@@ -1549,35 +1733,47 @@
       </tr>`
       )
       .join("");
-    $("#alertsTable").innerHTML = table(
-      ["#", "M", "Symbol", "Target", "State", ""],
-      rows
+    const painted = paintIfChanged(
+      $("#alertsTable"),
+      table(["#", "M", "Symbol", "Target", "State", ""], rows),
+      "alertsTable",
+      alerts.map((a) => [
+        a.stable_id,
+        a.visual_id,
+        a.symbol,
+        a.market,
+        a.price,
+        a.enabled ? 1 : 0,
+      ])
     );
-    $$("[data-del]").forEach((b) =>
-      b.addEventListener("click", async () => {
-        if (!confirm("Delete this alert?")) return;
-        try {
-          await api(`/api/alerts/${b.dataset.del}`, { method: "DELETE" });
-          toast("Deleted");
-          loadTargets();
-        } catch (e) {
-          toast(e.message);
-        }
-      })
-    );
-    $$("[data-tog]").forEach((b) =>
-      b.addEventListener("click", async () => {
-        try {
-          await api(`/api/alerts/${b.dataset.tog}`, {
-            method: "PATCH",
-            body: JSON.stringify({ enabled: b.dataset.en === "1" }),
-          });
-          loadTargets();
-        } catch (e) {
-          toast(e.message);
-        }
-      })
-    );
+    if (painted) {
+      $$("[data-del]").forEach((b) =>
+        b.addEventListener("click", async () => {
+          if (!confirm("Delete this alert?")) return;
+          try {
+            await api(`/api/alerts/${b.dataset.del}`, { method: "DELETE" });
+            toast("Deleted");
+            loadTargets();
+          } catch (e) {
+            toast(e.message);
+          }
+        })
+      );
+      $$("[data-tog]").forEach((b) =>
+        b.addEventListener("click", async () => {
+          try {
+            await api(`/api/alerts/${b.dataset.tog}`, {
+              method: "PATCH",
+              body: JSON.stringify({ enabled: b.dataset.en === "1" }),
+            });
+            loadTargets();
+          } catch (e) {
+            toast(e.message);
+          }
+        })
+      );
+    }
+    _applyTargetsFilter();
   }
 
   // Learning P1 — case factory: pick → snapshot → chips + note
@@ -4418,6 +4614,17 @@
         toast(e.message);
       }
     });
+  }
+
+  const moversSearch = $("#moversSearch");
+  if (moversSearch) {
+    moversSearch.addEventListener("input", _applyMoversFilter);
+    moversSearch.addEventListener("search", _applyMoversFilter);
+  }
+  const targetsSearch = $("#targetsSearch");
+  if (targetsSearch) {
+    targetsSearch.addEventListener("input", _applyTargetsFilter);
+    targetsSearch.addEventListener("search", _applyTargetsFilter);
   }
 
   $("#alertForm").addEventListener("submit", async (e) => {

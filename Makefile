@@ -31,6 +31,7 @@ test:
 	$$PY tests/test_p1_retrieve.py && \
 	$$PY tests/test_p1_cases.py && \
 	$$PY tests/test_visual_ad.py && \
+	$$PY tests/test_desk_slice1_search.py && \
 	$$PY tests/test_heartbeat.py
 
 verify:
