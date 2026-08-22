@@ -109,8 +109,8 @@ class TestSearchReachesLessonOne(unittest.TestCase):
 
 class TestDeskJumpAndTeachFire(unittest.TestCase):
     def test_cache_bust_slicelab5(self):
-        self.assertIn("desk.js?v=slicelab7", HTML)
-        self.assertIn("desk.css?v=slicelab7", HTML)
+        self.assertIn("desk.js?v=slicelab7b", HTML)
+        self.assertIn("desk.css?v=slicelab7b", HTML)
 
     def test_search_jump_ui_can_select_lesson_1(self):
         self.assertIn("id=\"learnLessonSearch\"", HTML)
