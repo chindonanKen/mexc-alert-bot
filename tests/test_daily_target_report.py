@@ -117,7 +117,7 @@ class TestFireLogAndReport(unittest.TestCase):
             self.assertIn("SOLUSDT", text)
 
     def test_merge_dedupe(self) -> None:
-        ts = time.time()
+        ts = 1_700_000_000.0  # fixed — time.time() flakes at minute boundaries
         a = TargetHit("X", "spot", 1, 1, ts, source="target_fire_log")
         b = TargetHit("X", "spot", 1, 1, ts + 10, source="learning_events")
         m = merge_hits([a], [b])
