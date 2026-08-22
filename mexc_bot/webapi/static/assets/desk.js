@@ -4798,8 +4798,21 @@
   }
   state.lastSeenFireId = Number(localStorage.getItem("desk_last_fire_id") || 0) || 0;
   state.lastAlarmFlashId = null;
-  state.alarmSoundOn = localStorage.getItem("desk_alarm_sound") === "1";
+  // Unset → on (desk must actually alarm). Explicit "0" turns it off.
+  state.alarmSoundOn = localStorage.getItem("desk_alarm_sound") !== "0";
   state.alarmAudioArmed = false;
+
+  function armAlarmAudio() {
+    state.alarmAudioArmed = true;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      if (!playAlarmSound._ctx) playAlarmSound._ctx = new Ctx();
+      if (playAlarmSound._ctx.state === "suspended") {
+        playAlarmSound._ctx.resume();
+      }
+    } catch (_) {}
+  }
 
   function initAlarmSoundUi() {
     const tog = $("#alarmSoundToggle");
@@ -4808,8 +4821,7 @@
     tog.addEventListener("change", () => {
       state.alarmSoundOn = !!tog.checked;
       localStorage.setItem("desk_alarm_sound", state.alarmSoundOn ? "1" : "0");
-      // User gesture arms WebAudio / Audio play
-      state.alarmAudioArmed = true;
+      armAlarmAudio();
       if (state.alarmSoundOn) {
         playAlarmSound(true);
         toast("Alarm sound on");
@@ -4817,29 +4829,100 @@
         toast("Alarm sound off");
       }
     });
+    document.addEventListener("pointerdown", armAlarmAudio, { passive: true });
+    document.addEventListener("keydown", armAlarmAudio);
+  }
+
+  function alarmIsMoverOrTarget(a) {
+    const s = String((a && a.source) || "");
+    return s === "target" || s === "mover_peak" || s === "mover_step";
+  }
+
+  function alarmWavDataUri() {
+    if (alarmWavDataUri._uri) return alarmWavDataUri._uri;
+    const sr = 22050;
+    const pulses = [880, 1175, 1397];
+    const pulseN = Math.floor(sr * 0.22);
+    const gapN = Math.floor(sr * 0.1);
+    const samples = [];
+    for (const hz of pulses) {
+      for (let i = 0; i < pulseN; i++) {
+        const env = Math.min(1, i / 180) * Math.min(1, (pulseN - i) / 320);
+        samples.push(0.62 * env * Math.sin((2 * Math.PI * hz * i) / sr));
+      }
+      for (let i = 0; i < gapN; i++) samples.push(0);
+    }
+    const n = samples.length;
+    const buf = new ArrayBuffer(44 + n * 2);
+    const v = new DataView(buf);
+    const ascii = (off, s) => {
+      for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i));
+    };
+    ascii(0, "RIFF");
+    v.setUint32(4, 36 + n * 2, true);
+    ascii(8, "WAVE");
+    ascii(12, "fmt ");
+    v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true);
+    v.setUint16(22, 1, true);
+    v.setUint32(24, sr, true);
+    v.setUint32(28, sr * 2, true);
+    v.setUint16(32, 2, true);
+    v.setUint16(34, 16, true);
+    ascii(36, "data");
+    v.setUint32(40, n * 2, true);
+    let o = 44;
+    for (let i = 0; i < n; i++) {
+      const x = Math.max(-1, Math.min(1, samples[i]));
+      v.setInt16(o, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+      o += 2;
+    }
+    const bytes = new Uint8Array(buf);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    alarmWavDataUri._uri = "data:audio/wav;base64," + btoa(bin);
+    return alarmWavDataUri._uri;
+  }
+
+  function playAlarmBeeps() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!playAlarmSound._ctx) playAlarmSound._ctx = new Ctx();
+    const ac = playAlarmSound._ctx;
+    if (ac.state === "suspended") ac.resume();
+    // Three square pulses — louder and longer than a 0.3s sine chirp
+    const pulses = [880, 1174.7, 1396.9];
+    pulses.forEach((hz, i) => {
+      const t0 = ac.currentTime + i * 0.38;
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(hz, t0);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.42, t0 + 0.018);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.3);
+      osc.connect(g);
+      g.connect(ac.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.32);
+    });
   }
 
   function playAlarmSound(quietTest) {
     if (!state.alarmSoundOn && !quietTest) return;
     if (!state.alarmAudioArmed && !quietTest) return;
     try {
-      const ctx = window.AudioContext || window.webkitAudioContext;
-      if (!ctx) return;
-      if (!playAlarmSound._ctx) playAlarmSound._ctx = new ctx();
-      const ac = playAlarmSound._ctx;
-      if (ac.state === "suspended") ac.resume();
-      const o = ac.createOscillator();
-      const g = ac.createGain();
-      o.type = "sine";
-      o.frequency.setValueAtTime(880, ac.currentTime);
-      o.frequency.exponentialRampToValueAtTime(1320, ac.currentTime + 0.08);
-      g.gain.setValueAtTime(0.0001, ac.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.12, ac.currentTime + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.28);
-      o.connect(g);
-      g.connect(ac.destination);
-      o.start();
-      o.stop(ac.currentTime + 0.3);
+      playAlarmBeeps();
+    } catch (_) {}
+    try {
+      const el = $("#alarmSound");
+      if (el) {
+        if (!el.getAttribute("src")) el.src = alarmWavDataUri();
+        el.currentTime = 0;
+        el.volume = 1;
+        const p = el.play();
+        if (p && p.catch) p.catch(() => {});
+      }
     } catch (_) {}
   }
 
@@ -4895,7 +4978,8 @@
       const last = ordered[ordered.length - 1];
       state.lastAlarmFlashId = last && last.id != null ? +last.id : null;
       toast(alarmToastLine(last) + (ordered.length > 1 ? ` · +${ordered.length - 1}` : ""));
-      if (state.alarmSoundOn) playAlarmSound();
+      const fireFresh = fresh.filter(alarmIsMoverOrTarget);
+      if (fireFresh.length) playAlarmSound();
       // Soft refresh surfaces that show fires
       if (state.view === "overview") {
         try {
