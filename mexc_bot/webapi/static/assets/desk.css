@@ -1055,6 +1055,55 @@ body::before {
 .top h1 { margin: 0; font-size: 1.4rem; letter-spacing: -0.03em; font-weight: 700; }
 .sub { display: none; }
 .top-actions { display: flex; gap: 0.65rem; align-items: center; flex-wrap: wrap; }
+
+.desk-sticky-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.85rem;
+  align-items: center;
+  margin: -0.35rem 0 0.95rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(8, 14, 28, 0.92);
+  backdrop-filter: blur(8px);
+}
+.last-fired-strip {
+  flex: 1 1 16rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  min-height: 1.2rem;
+}
+.last-fired-k {
+  color: var(--mute);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  margin-right: 0.45rem;
+}
+.last-fired-sym { font-weight: 700; color: var(--sky); cursor: pointer; }
+.last-fired-empty { color: var(--mute); }
+.desk-focus-chip {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 650;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--sky);
+}
+tr.is-desk-selected,
+.cmd-row.is-desk-selected,
+.pos-card.is-desk-selected {
+  outline: 1px solid rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.08);
+}
+[data-desk-sym] { cursor: pointer; }
+.tgt-dist { font-family: var(--mono); white-space: nowrap; }
 .panel.clean {
   border: 1px solid var(--line);
   background: var(--panel);

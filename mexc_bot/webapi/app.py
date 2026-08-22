@@ -597,7 +597,7 @@ def create_app() -> FastAPI:
     @app.get("/api/alerts")
     def get_alerts(_: bool = Depends(require_auth)):
         try:
-            rows = actions.list_alerts()
+            rows = actions.attach_alert_distances(actions.list_alerts())
             return {"user_id": db.default_user_id(), "alerts": rows}
         except ValueError as e:
             return {"user_id": None, "alerts": [], "error": str(e)}

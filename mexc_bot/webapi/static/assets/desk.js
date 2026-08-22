@@ -21,6 +21,9 @@
     busy: false,
     speakingHeard: false,
     silenceMs: 0,
+    selectedSymbol: "",
+    selectedSymbolRaw: "",
+    lastFired: null,
   };
 
   // VAD: commit after real speech + sustained silence.
@@ -209,6 +212,133 @@
       $("#targetsFilterCount")
     );
   }
+
+  function normDeskSym(s) {
+    return String(s || "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
+  }
+
+  function deskRowSelectedClass(sym) {
+    const want = state.selectedSymbol;
+    return want && normDeskSym(sym) === want ? " is-desk-selected" : "";
+  }
+
+  function setSelectedSymbol(sym) {
+    const raw = String(sym || "").trim();
+    const n = normDeskSym(raw);
+    if (!n) return;
+    state.selectedSymbol = n;
+    state.selectedSymbolRaw = raw;
+    try {
+      localStorage.setItem("desk_selected_symbol", raw);
+    } catch (_) {}
+    applySelectedSymbol();
+  }
+
+  function applySelectedSymbol() {
+    const want = state.selectedSymbol;
+    $$("[data-desk-sym]").forEach((el) => {
+      el.classList.toggle(
+        "is-desk-selected",
+        !!(want && normDeskSym(el.getAttribute("data-desk-sym")) === want)
+      );
+    });
+    const chip = $("#deskFocusChip");
+    if (chip) {
+      if (want) {
+        chip.hidden = false;
+        chip.textContent = "Focus " + (state.selectedSymbolRaw || want);
+      } else {
+        chip.hidden = true;
+        chip.textContent = "";
+      }
+    }
+  }
+
+  function rememberLastFired(a) {
+    if (!a || !a.symbol) return;
+    state.lastFired = {
+      id: a.id != null ? +a.id : null,
+      source: a.source || "",
+      symbol: a.symbol,
+      market: a.market || "",
+      price: a.price,
+      drop_pct: a.drop_pct,
+      ts: a.ts,
+      mode: a.mode || "",
+    };
+    try {
+      localStorage.setItem("desk_last_fired", JSON.stringify(state.lastFired));
+    } catch (_) {}
+    renderLastFiredStrip();
+  }
+
+  function renderLastFiredStrip() {
+    const el = $("#lastFiredStrip");
+    if (!el) return;
+    const a = state.lastFired;
+    if (!a || !a.symbol) {
+      paintIfChanged(
+        el,
+        `<span class="last-fired-empty">Last fire — none yet</span>`,
+        "lastFiredStrip",
+        "empty"
+      );
+      return;
+    }
+    const src = String(a.source || "");
+    const kind =
+      src === "target" || src.includes("target")
+        ? "TARGET"
+        : "MOVER";
+    const drop =
+      a.drop_pct != null && !Number.isNaN(Number(a.drop_pct))
+        ? Number(a.drop_pct).toFixed(1) + "%"
+        : "";
+    const px = a.price != null ? fmtPx(a.price) : "";
+    const when = a.ts ? fmtTime(a.ts) : "";
+    const html = `<span class="last-fired-k">Last fire</span><span class="last-fired-sym" data-desk-sym="${escHtml(
+      String(a.symbol)
+    )}">${escHtml(String(a.symbol))}</span> · ${kind}${
+      drop ? " · " + drop : ""
+    }${px ? " · " + px : ""}${a.mode ? " · " + a.mode : ""}${
+      when ? " · " + when : ""
+    }`;
+    paintIfChanged(el, html, "lastFiredStrip", [
+      a.id,
+      a.symbol,
+      a.source,
+      a.ts,
+      a.drop_pct,
+      a.price,
+      a.mode,
+    ]);
+  }
+
+  try {
+    const savedFocus = localStorage.getItem("desk_selected_symbol") || "";
+    if (savedFocus) {
+      state.selectedSymbol = normDeskSym(savedFocus);
+      state.selectedSymbolRaw = savedFocus;
+    }
+    const savedFire = localStorage.getItem("desk_last_fired");
+    if (savedFire) {
+      const parsed = JSON.parse(savedFire);
+      if (parsed && parsed.symbol) state.lastFired = parsed;
+    }
+  } catch (_) {}
+
+  try {
+    window.__deskFocus = {
+      getSelected: () => state.selectedSymbol,
+      setSelected: setSelectedSymbol,
+      apply: applySelectedSymbol,
+      getLastFired: () => state.lastFired,
+      rememberLastFired,
+      renderLastFiredStrip,
+    };
+  } catch (_) {}
 
   function setView(name) {
     state.view = name;
@@ -473,7 +603,9 @@
       tt.length
         ? tt
             .map(
-              (a, i) => `<div class="cmd-row">
+              (a, i) => `<div class="cmd-row${deskRowSelectedClass(
+                a.symbol
+              )}" data-desk-sym="${escHtml(String(a.symbol || ""))}">
             <div class="cmd-row-main">
               <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
               <div>
@@ -506,7 +638,9 @@
       tm.length
         ? tm
             .map(
-              (e, i) => `<div class="cmd-row hot">
+              (e, i) => `<div class="cmd-row hot${deskRowSelectedClass(
+                e.symbol
+              )}" data-desk-sym="${escHtml(String(e.symbol || ""))}">
             <div class="cmd-row-main">
               <span class="cmd-rank">${String(i + 1).padStart(2, "0")}</span>
               <div>
@@ -568,7 +702,9 @@
               ]
                 .filter(Boolean)
                 .join(" · ");
-              return `<div class="cmd-row pos">
+              return `<div class="cmd-row pos${deskRowSelectedClass(
+                p.symbol
+              )}" data-desk-sym="${escHtml(String(p.symbol || ""))}">
             <div class="cmd-row-main">
               <div>
                 <div class="cmd-sym">${escHtml(String(p.symbol || ""))} ${free}</div>
@@ -667,6 +803,7 @@
         paintIfChanged(learnedEl, "", "ovAgentLearned", "empty");
       }
     }
+    applySelectedSymbol();
   }
 
   function posOutcomeBadge(p) {
@@ -913,7 +1050,11 @@
       (p.outcome || (isOpen ? "open" : "flat")).toLowerCase()
     }${p.free_coins && !isHold ? " is-free" : ""}${
       p.free_coins_status === "near_free" && !isHold ? " is-near" : ""
-    }${isHold ? " is-hold" : ""}" data-pos-id="${String(posId).replace(/"/g, "")}">
+    }${isHold ? " is-hold" : ""}${deskRowSelectedClass(
+      p.symbol
+    )}" data-pos-id="${String(posId).replace(/"/g, "")}" data-desk-sym="${escHtml(
+      String(p.symbol || "")
+    )}">
       <summary class="pos-sum">
         <div class="pos-id"><span class="pos-sym">${escHtml(
           String(p.symbol || "")
@@ -1212,6 +1353,7 @@
       `<div class="pos-book pos-book-spot"><div class="pos-book-h">Spot</div>${bandsFor(
         spot
       )}</div>`;
+    applySelectedSymbol();
   }
 
   function wirePosTableOnce() {
@@ -1689,7 +1831,9 @@
                 ? "peak"
                 : lf.source || "")
           : "";
-        return `<tr class="${lf && lf.id === state.lastAlarmFlashId ? "row-flash" : ""}">
+        return `<tr class="${lf && lf.id === state.lastAlarmFlashId ? "row-flash" : ""}${deskRowSelectedClass(
+          w.symbol
+        )}" data-desk-sym="${escHtml(String(w.symbol || ""))}">
           <td>${w.market === "futures" ? "F" : "S"}</td>
           <td>${w.symbol}</td>
           <td>${t ? fmtPx(t.price) : "—"}</td>
@@ -1746,6 +1890,7 @@
         );
       }
       _applyMoversFilter();
+      applySelectedSymbol();
     }
   }
 
@@ -1760,23 +1905,38 @@
     }
     const alerts = d.alerts || [];
     const rows = alerts
-      .map(
-        (a) => `<tr>
+      .map((a) => {
+        const dist =
+          a.distance_pct != null && !Number.isNaN(Number(a.distance_pct))
+            ? Number(a.distance_pct)
+            : null;
+        const distCls =
+          dist == null ? "mute" : dist >= 0 ? "up" : "dn";
+        const distLabel =
+          dist == null
+            ? "—"
+            : (dist >= 0 ? "+" : "") + dist.toFixed(2) + "%";
+        return `<tr class="${deskRowSelectedClass(a.symbol)}" data-desk-sym="${escHtml(
+          String(a.symbol || "")
+        )}" data-distance-pct="${dist == null ? "" : dist}">
         <td>#${a.visual_id}</td>
         <td>${a.market === "futures" ? "F" : "S"}</td>
         <td>${a.symbol}</td>
         <td>${fmtPx(a.price)}</td>
+        <td class="tgt-dist ${distCls}" title="${
+          a.mark != null ? "mark " + fmtPx(a.mark) : "no mark"
+        }">${distLabel}</td>
         <td>${a.enabled ? "on" : "off"}</td>
         <td>
           <button type="button" class="btn soft sm" data-tog="${a.stable_id}" data-en="${a.enabled ? 0 : 1}">${a.enabled ? "Disable" : "Enable"}</button>
           <button type="button" class="btn soft sm" data-del="${a.stable_id}">Delete</button>
         </td>
-      </tr>`
-      )
+      </tr>`;
+      })
       .join("");
     const painted = paintIfChanged(
       $("#alertsTable"),
-      table(["#", "M", "Symbol", "Target", "State", ""], rows),
+      table(["#", "M", "Symbol", "Target", "To fire", "State", ""], rows),
       "alertsTable",
       alerts.map((a) => [
         a.stable_id,
@@ -1785,6 +1945,8 @@
         a.market,
         a.price,
         a.enabled ? 1 : 0,
+        a.mark,
+        a.distance_pct,
       ])
     );
     if (painted) {
@@ -1815,6 +1977,7 @@
       );
     }
     _applyTargetsFilter();
+    applySelectedSymbol();
   }
 
   // Learning P1 — case factory: pick → snapshot → chips + note
@@ -4953,6 +5116,7 @@
           state.lastSeenFireId = +d.max_id;
           localStorage.setItem("desk_last_fire_id", String(state.lastSeenFireId));
         }
+        renderLastFiredStrip();
         return;
       }
       // Bootstrap: first poll only seeds cursor (no toast flood)
@@ -4963,10 +5127,22 @@
         });
         state.lastSeenFireId = mx || +d.max_id || 0;
         localStorage.setItem("desk_last_fire_id", String(state.lastSeenFireId));
+        if (!state.lastFired) {
+          const newest = alarms
+            .slice()
+            .sort((a, b) => (+a.id || 0) - (+b.id || 0))
+            .pop();
+          if (newest) rememberLastFired(newest);
+        } else {
+          renderLastFiredStrip();
+        }
         return;
       }
       const fresh = alarms.filter((a) => +a.id > state.lastSeenFireId);
-      if (!fresh.length) return;
+      if (!fresh.length) {
+        renderLastFiredStrip();
+        return;
+      }
       let mx = state.lastSeenFireId;
       fresh.forEach((a) => {
         mx = Math.max(mx, +a.id || 0);
@@ -4977,6 +5153,7 @@
       const ordered = fresh.slice().sort((a, b) => (+a.id || 0) - (+b.id || 0));
       const last = ordered[ordered.length - 1];
       state.lastAlarmFlashId = last && last.id != null ? +last.id : null;
+      rememberLastFired(last);
       toast(alarmToastLine(last) + (ordered.length > 1 ? ` · +${ordered.length - 1}` : ""));
       const fireFresh = fresh.filter(alarmIsMoverOrTarget);
       if (fireFresh.length) playAlarmSound();
@@ -5030,7 +5207,19 @@
     }
   });
 
+  document.addEventListener("click", (e) => {
+    const t = e.target;
+    if (!t || !t.closest) return;
+    if (t.closest("button, a, input, select, textarea, label")) return;
+    const hit = t.closest("[data-desk-sym]");
+    if (!hit) return;
+    const sym = hit.getAttribute("data-desk-sym");
+    if (sym) setSelectedSymbol(sym);
+  });
+
   initAlarmSoundUi();
+  renderLastFiredStrip();
+  applySelectedSymbol();
   setView("overview");
   updateMicUi();
   refreshAll();

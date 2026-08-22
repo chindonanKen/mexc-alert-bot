@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
   <noscript><link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" /></noscript>
-  <link rel="stylesheet" href="/assets/desk.css?v=slicelab3" />
+  <link rel="stylesheet" href="/assets/desk.css?v=slicelab4" />
 </head>
 <body>
   <div class="bg-orb orb-a"></div>
@@ -53,6 +53,10 @@
           <button type="button" class="btn soft" id="btnRefresh">Refresh</button>
         </div>
       </header>
+      <div id="deskStickyBar" class="desk-sticky-bar">
+        <div id="lastFiredStrip" class="last-fired-strip" data-last-fired-strip></div>
+        <div id="deskFocusChip" class="desk-focus-chip" hidden></div>
+      </div>
 
       <!-- OVERVIEW -->
       <section class="view on" id="view-overview">
@@ -446,6 +450,6 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/assets/desk.js?v=slicelab3"></script>
+  <script src="/assets/desk.js?v=slicelab4"></script>
 </body>
 </html>
