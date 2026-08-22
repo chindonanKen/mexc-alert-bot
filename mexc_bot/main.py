@@ -264,26 +264,36 @@ def main() -> None:
         from .news import NewsWatcher
 
         def _watch_bases():
+            from .news.book import normalize_news_base
+
             bases = set()
+
+            def _add(raw: str) -> None:
+                b = normalize_news_base(str(raw or ""))
+                if len(b) >= 2:
+                    bases.add(b)
+
             if mover_store is not None:
                 try:
-                    # all watchlist symbols across users
+                    # watch book names across users
                     for uid in store.get_all_user_ids():
                         for row in mover_store.get_watchlist(uid):
-                            s = str(row.get("symbol") or "").upper()
-                            base = s.replace("_USDT", "").replace("USDT", "").replace("_", "")
-                            if base:
-                                bases.add(base)
+                            _add(row.get("symbol") or "")
                 except Exception:
                     pass
+            try:
+                for uid in store.get_all_user_ids():
+                    for a in store.get_user_alerts(uid):
+                        _add(a.get("symbol") or "")
+            except Exception:
+                pass
             if event_store is not None:
                 try:
                     for uid in store.get_all_user_ids():
                         for e in event_store.recent_events(uid, limit=30):
-                            s = str(e.get("symbol") or "").upper()
-                            base = s.replace("_USDT", "").replace("USDT", "").replace("_", "")
-                            if base:
-                                bases.add(base)
+                            _add(e.get("symbol") or "")
+                        for t in event_store.journal_list(uid, open_only=True):
+                            _add(t.get("symbol") or "")
                 except Exception:
                     pass
             return bases

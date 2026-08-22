@@ -38,6 +38,8 @@ test:
 	$$PY tests/test_desk_slice4_focus.py && \
 	$$PY tests/test_desk_slice5_learn.py && \
 	$$PY tests/test_desk_slice6_hunt.py && \
+	$$PY tests/test_desk_slice7_news.py && \
+	$$PY tests/test_bad_intel.py && \
 	$$PY tests/test_heartbeat.py
 
 verify:

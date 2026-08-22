@@ -203,8 +203,8 @@ class TestHuntMarkTableAdditive(unittest.TestCase):
 
 class TestHuntDeskAndRoutes(unittest.TestCase):
     def test_cache_bust_slicelab6(self):
-        self.assertIn("desk.js?v=slicelab6", HTML)
-        self.assertIn("desk.css?v=slicelab6", HTML)
+        self.assertIn("desk.js?v=slicelab7", HTML)
+        self.assertIn("desk.css?v=slicelab7", HTML)
 
     def test_two_lists_on_desk(self):
         self.assertIn("id=\"huntStillUp\"", HTML)

@@ -24,6 +24,7 @@
     selectedSymbol: "",
     selectedSymbolRaw: "",
     lastFired: null,
+    lastSeenNewsId: 0,
     learnLessons: [],
   };
 
@@ -514,7 +515,7 @@
         paintIfChanged(
           newsEl,
           `<div class="ov-news-h">Book intel · bad news</div>` +
-            rankEmpty("No delist/scam/hack items in cache yet — open Intel radar"),
+            rankEmpty("No delist/hack/halt news on your book (watch · targets · positions)."),
           "ovBookNews",
           "empty"
         );
@@ -523,7 +524,7 @@
         const newsHtml =
           `<div class="panel-h ov-news-head">
             <h3 class="ov-news-h">Book intel · bad news</h3>
-            <span class="mute sm">Top 5 · delist/scam/hack · even if old</span>
+            <span class="mute sm">Book only · devastating classes</span>
             <button type="button" class="btn soft sm" data-jump="intel">All intel</button>
           </div>` +
           bn
@@ -4041,7 +4042,9 @@
     if (newsHost) {
       const items = news.news || [];
       if (!items.length) {
-        newsHost.innerHTML = rankEmpty("No fatal news stored yet.");
+        newsHost.innerHTML = rankEmpty(
+          "No book news — watchlist, targets, and positions only."
+        );
       } else {
         newsHost.innerHTML = items
           .map((n) => {
@@ -5233,6 +5236,7 @@
     }
   }
   state.lastSeenFireId = Number(localStorage.getItem("desk_last_fire_id") || 0) || 0;
+  state.lastSeenNewsId = Number(localStorage.getItem("desk_last_news_id") || 0) || 0;
   state.lastAlarmFlashId = null;
   // Unset → on (desk must actually alarm). Explicit "0" turns it off.
   state.alarmSoundOn = localStorage.getItem("desk_alarm_sound") !== "0";
@@ -5366,6 +5370,9 @@
     const src = String(a.source || "");
     const sym = a.symbol || "?";
     const drop = a.drop_pct != null ? Number(a.drop_pct).toFixed(1) + "%" : "";
+    if (src === "news_devastating" || src === "news") {
+      return `NEWS ${a.class || "DEVASTATING"} ${sym}`.trim();
+    }
     if (src === "target" || src.includes("target")) {
       return `TARGET ${sym}${a.price != null ? " @ " + fmtPx(a.price) : ""}`;
     }
@@ -5375,14 +5382,45 @@
     return `MOVER ${sym} ${drop} ${mode}`.trim();
   }
 
+  function ingestNewsAlarms(d) {
+    const rows = d.news_alarms || [];
+    const newsMax = +d.news_max_id || 0;
+    if (!state.lastSeenNewsId) {
+      let mx = 0;
+      rows.forEach((a) => {
+        mx = Math.max(mx, +a.id || 0);
+      });
+      state.lastSeenNewsId = mx || newsMax || 0;
+      try {
+        localStorage.setItem("desk_last_news_id", String(state.lastSeenNewsId));
+      } catch (_) {}
+      return;
+    }
+    const fresh = rows.filter((a) => +a.id > state.lastSeenNewsId);
+    let mx = state.lastSeenNewsId;
+    rows.forEach((a) => {
+      mx = Math.max(mx, +a.id || 0);
+    });
+    if (newsMax) mx = Math.max(mx, newsMax);
+    state.lastSeenNewsId = mx;
+    try {
+      localStorage.setItem("desk_last_news_id", String(mx));
+    } catch (_) {}
+    if (!fresh.length) return;
+    const last = fresh[fresh.length - 1];
+    toast(alarmToastLine({ ...last, source: "news_devastating" }));
+    playAlarmSound();
+  }
+
   async function pollDeskAlarms() {
     if (document.hidden || state.inCall) return;
     try {
       const q =
-        state.lastSeenFireId > 0
-          ? `?since_id=${state.lastSeenFireId}&limit=20`
-          : `?limit=15`;
+        "?limit=20" +
+        (state.lastSeenFireId > 0 ? `&since_id=${state.lastSeenFireId}` : "") +
+        (state.lastSeenNewsId > 0 ? `&news_since_id=${state.lastSeenNewsId}` : "");
       const d = await api("/api/desk/alarms" + q);
+      ingestNewsAlarms(d);
       const alarms = d.alarms || [];
       if (!alarms.length) {
         if (d.max_id && !state.lastSeenFireId) {

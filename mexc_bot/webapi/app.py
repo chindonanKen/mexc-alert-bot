@@ -790,13 +790,19 @@ def create_app() -> FastAPI:
     def desk_alarms(
         since_id: int = Query(0, ge=0),
         since_ts: float = Query(0, ge=0),
+        news_since_id: int = Query(0, ge=0),
         limit: int = Query(30, ge=1, le=100),
         _: bool = Depends(require_auth),
     ):
-        """Slim fire feed for desk toasts / overview (mover + target)."""
+        """Slim fire feed for desk toasts / overview (mover + target + devastating news)."""
         uid = db.default_user_id()
         if not uid:
-            return {"alarms": [], "max_id": 0}
+            return {
+                "alarms": [],
+                "max_id": 0,
+                "news_alarms": [],
+                "news_max_id": 0,
+            }
         try:
             if since_id > 0:
                 rows = db.fetch_all(
@@ -841,7 +847,66 @@ def create_app() -> FastAPI:
                     max_id = max(max_id, int(r.get("id") or 0))
                 except (TypeError, ValueError):
                     pass
-            return {"user_id": uid, "alarms": rows, "max_id": max_id}
+            news_alarms: List[dict] = []
+            news_max_id = 0
+            try:
+                from ..news.classify import evaluate_headline
+                from .news_book import desk_book_sets
+
+                book = desk_book_sets(uid)
+                news_rows = db.fetch_all(
+                    """
+                    SELECT id, symbol, class, severity, title, source, source_trust, ts
+                    FROM news_events
+                    WHERE id > ?
+                    ORDER BY id ASC LIMIT ?
+                    """,
+                    (int(news_since_id), int(limit)),
+                )
+                if news_since_id <= 0:
+                    news_rows = db.fetch_all(
+                        """
+                        SELECT id, symbol, class, severity, title, source, source_trust, ts
+                        FROM news_events
+                        ORDER BY id DESC LIMIT ?
+                        """,
+                        (int(limit),),
+                    )
+                    news_rows = list(reversed(news_rows))
+                for nr in news_rows:
+                    try:
+                        news_max_id = max(news_max_id, int(nr.get("id") or 0))
+                    except (TypeError, ValueError):
+                        pass
+                    ev = evaluate_headline(
+                        nr.get("title") or "",
+                        source_trust=nr.get("source_trust") or "aggregate",
+                        symbol=nr.get("symbol"),
+                        item_bases=str(nr.get("symbol") or "").split(","),
+                        book_bases=book.get("bases"),
+                        book_syms=book.get("syms"),
+                    )
+                    if not ev.get("alarm"):
+                        continue
+                    news_alarms.append(
+                        {
+                            "id": nr.get("id"),
+                            "source": "news_devastating",
+                            "symbol": nr.get("symbol"),
+                            "title": nr.get("title"),
+                            "class": nr.get("class") or ev.get("cls"),
+                            "ts": nr.get("ts"),
+                        }
+                    )
+            except Exception:
+                news_alarms = []
+            return {
+                "user_id": uid,
+                "alarms": rows,
+                "max_id": max_id,
+                "news_alarms": news_alarms,
+                "news_max_id": news_max_id,
+            }
         except Exception as e:
             raise HTTPException(400, str(e))
 
@@ -1070,8 +1135,14 @@ def create_app() -> FastAPI:
             announcements = []
 
         news_rows = db.fetch_all(
-            "SELECT * FROM news_events ORDER BY ts DESC LIMIT ?", (limit,)
+            "SELECT * FROM news_events ORDER BY ts DESC LIMIT ?",
+            (min(150, int(limit) * 3),),
         )
+        from .news_book import desk_book_sets, filter_rows_to_book
+
+        book = desk_book_sets()
+        book_bases = book.get("bases") or set()
+        book_syms = book.get("syms") or set()
         # Expand incomplete MEXC "and N other" titles for the desk
         sess = None
         enriched_news = []
@@ -1136,10 +1207,27 @@ def create_app() -> FastAPI:
             item["bases_text"] = ", ".join(bases) if bases else (item.get("symbol") or "—")
             enriched_news.append(item)
 
+        enriched_news = filter_rows_to_book(
+            enriched_news, book_bases=book_bases, book_syms=book_syms
+        )[: int(limit)]
+        delist_rows = filter_rows_to_book(
+            delist_rows,
+            book_bases=book_bases,
+            book_syms=book_syms,
+            symbol_keys=("base", "symbol"),
+        )[: max(40, int(limit))]
+        announcements = filter_rows_to_book(
+            announcements,
+            book_bases=book_bases,
+            book_syms=book_syms,
+            symbol_keys=("base", "symbol"),
+        )[: int(limit)]
+
         return {
             "news": enriched_news,
-            "delist_cache": delist_rows[: max(40, int(limit))],
+            "delist_cache": delist_rows,
             "delist_announcements": announcements,
+            "book_only": True,
         }
 
     @app.get("/api/prices")
