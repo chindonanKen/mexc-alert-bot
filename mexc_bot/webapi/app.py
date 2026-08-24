@@ -246,7 +246,7 @@ def create_app() -> FastAPI:
             ],
             "next": [
                 {"id": "p1_cases", "title": "P1 Case factory — multi-TF AD + regime/vol/reds + retrieve", "status": "wip"},
-                {"id": "p2_decide", "title": "P2 Decide + log (TF pick + factor stack + size hint)", "status": "planned"},
+                {"id": "p2_decide", "title": "P2 Week-1 student decide (tape walk, one copy, no orders)", "status": "wip"},
                 {"id": "p3_grade", "title": "P3 Grade decisions vs teach_ok / ad_met", "status": "planned"},
                 {"id": "p4_policy", "title": "P4 AD policy proposals (layers/zones)", "status": "planned"},
                 {"id": "p5_paper", "title": "P5 Paper / replay + pass bar", "status": "planned"},
@@ -1573,6 +1573,35 @@ def create_app() -> FastAPI:
         if not out.get("ok"):
             raise HTTPException(502, out.get("error") or "voice failed")
         return out
+
+    @app.get("/api/learning/decide")
+    def learning_decide(
+        symbol: str,
+        market: str = "futures",
+        tf: str = "15m",
+        _: bool = Depends(require_auth),
+    ):
+        """Staff: walk official klines for one book name. No orders."""
+        from ..learning.student_decide import decide_symbol
+
+        try:
+            return decide_symbol(symbol, market, tf=tf)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/learning/decide/book")
+    def learning_decide_book(
+        walk: bool = False,
+        tf: str = "15m",
+        _: bool = Depends(require_auth),
+    ):
+        """Staff: book names (default) or walk each if walk=1. No invented line."""
+        from ..learning.student_decide import decide_book
+
+        try:
+            return decide_book(tf=tf, walk=bool(walk))
+        except Exception as e:
+            raise HTTPException(400, str(e))
 
     @app.get("/api/strategy")
     def strategy(_: bool = Depends(require_auth)):

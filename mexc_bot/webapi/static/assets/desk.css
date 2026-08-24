@@ -461,6 +461,17 @@ body::before {
   color: var(--mute);
   margin-top: 0.2rem;
 }
+.decide-names { margin-top: 0.6rem; }
+.learn-decide-out {
+  margin-top: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.learn-decide-out.skip { color: var(--mute); }
+.learn-decide-out.line { color: var(--text); }
+.learn-decide-copy { color: var(--amber); font-weight: 600; }
 .ov-needs-meta {
   font-family: var(--mono);
   font-size: 0.68rem;

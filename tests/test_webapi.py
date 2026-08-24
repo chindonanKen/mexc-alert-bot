@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -161,6 +162,7 @@ class TestWebApi(unittest.TestCase):
         self.assertIn("learnTradeList", r.text)
         self.assertIn("learnContextBar", r.text)
         self.assertIn("ovAgentLearned", r.text)
+        self.assertIn("learnDecide", r.text)
 
     def test_learning_endpoints(self):
         r = self.client.get("/api/learning")
@@ -217,6 +219,29 @@ class TestWebApi(unittest.TestCase):
             or any(t.get("money_truth") == "exchange" for t in all_trades)
             or isinstance(all_trades, list)
         )
+
+    def test_student_decide_book_names_no_walk(self):
+        r = self.client.get("/api/learning/decide/book")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body.get("ok"))
+        self.assertFalse(body.get("live_orders"))
+        self.assertEqual(body.get("tz"), "Asia/Manila")
+        self.assertEqual(body.get("decides"), [])
+        self.assertIn("names", body)
+
+    def test_student_decide_skip_without_tape(self):
+        with patch("mexc_bot.movers.klines.KlineClient.get_ohlcv", return_value=[]):
+            r = self.client.get(
+                "/api/learning/decide?symbol=HUNT&market=futures&tf=15m"
+            )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body.get("action"), "skip")
+        self.assertEqual(body.get("reason"), "no_tape")
+        self.assertIsNone(body.get("live_copy"))
+        self.assertFalse(body.get("live_orders"))
+        self.assertEqual(body.get("tz"), "Asia/Manila")
 
 
 if __name__ == "__main__":

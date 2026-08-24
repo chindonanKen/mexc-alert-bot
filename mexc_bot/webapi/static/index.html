@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/desk.css?v=lessonad1" />
+  <link rel="stylesheet" href="/assets/desk.css?v=decide1" />
 </head>
 <body>
   <div class="bg-orb orb-a"></div>
@@ -338,6 +338,30 @@
           </form>
           <pre id="agentRecallReply" class="learn-recall scroll mt"></pre>
         </div>
+
+        <div class="panel mt" id="learnDecide">
+          <header class="panel-h">
+            <h3>5 · Student decide</h3>
+            <button type="button" class="btn soft sm" id="btnDecideBook">Book names</button>
+          </header>
+          <p class="learn-panel-hint mute">Click a book name. Tape walk only — skip if it does not repeat dump-and-bounce. No orders.</p>
+          <form id="decideForm" class="form-row">
+            <input name="symbol" id="decideSymbol" placeholder="Symbol" required />
+            <select name="market" id="decideMarket">
+              <option value="futures">Futures</option>
+              <option value="spot">Spot</option>
+            </select>
+            <select name="tf" id="decideTf">
+              <option value="15m" selected>15m</option>
+              <option value="5m">5m</option>
+              <option value="1h">1h</option>
+              <option value="4h">4h</option>
+            </select>
+            <button class="btn" type="submit">Walk tape</button>
+          </form>
+          <div id="decideNames" class="ticker-chips decide-names"></div>
+          <div id="decideOut" class="learn-decide-out mute">Click a name or walk a symbol.</div>
+        </div>
       </section>
 
       <!-- INTEL -->
@@ -437,6 +461,6 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/assets/desk.js?v=lessonad1"></script>
+  <script src="/assets/desk.js?v=decide1"></script>
 </body>
 </html>
