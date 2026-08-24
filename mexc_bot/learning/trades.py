@@ -118,6 +118,82 @@ def _all_fills_chronological(
     return all_fills
 
 
+def remaining_cost_average(
+    bought_usd: Any,
+    sold_usd: Any,
+    remaining_qty: Any,
+) -> Optional[float]:
+    """Open-position average: (bought USD − sold USD) / remaining qty.
+
+    Sell above leftover avg → leftover avg goes down.
+    Sell below leftover avg → leftover avg goes up.
+    None when remaining qty is not positive (closed / dust — no divide by zero).
+    """
+    rem = _f(remaining_qty)
+    if rem is None or rem <= 1e-12:
+        return None
+    bought = _f(bought_usd) or 0.0
+    sold = _f(sold_usd) or 0.0
+    return (bought - sold) / rem
+
+
+def _layers_notional(orders: Optional[Sequence[dict]]) -> float:
+    tot = 0.0
+    for o in orders or []:
+        q = _f(o.get("quote_qty"))
+        if q is not None and q > 0:
+            tot += q
+            continue
+        p, qty = _f(o.get("price")), _f(o.get("qty"))
+        if p is not None and qty is not None and qty > 0 and p > 0:
+            tot += p * qty
+    return tot
+
+
+def apply_open_remaining_cost_avg(entity: dict) -> dict:
+    """Set user-visible open avg / remaining cost from bought − sold.
+
+    Closed or flat leftover: no-op. No buy/sell dollars and no layers: leave
+    existing entry_avg (exchange hold avg or journal).
+    """
+    if not entity:
+        return entity
+    if not (entity.get("status") == "open" or entity.get("is_open")):
+        return entity
+    rem = _f(entity.get("size_remaining"))
+    if rem is None or rem <= 1e-12:
+        return entity
+
+    has_layers = bool(entity.get("buy_orders") or entity.get("sell_orders"))
+    has_money = (
+        entity.get("bought_usd") is not None or entity.get("sold_usd") is not None
+    )
+    if not has_money and not has_layers:
+        return entity
+
+    bought = _f(entity.get("bought_usd"))
+    sold = _f(entity.get("sold_usd"))
+    if bought is None:
+        bought = _layers_notional(entity.get("buy_orders"))
+    if sold is None:
+        sold = _layers_notional(entity.get("sell_orders"))
+    bought = bought or 0.0
+    sold = sold or 0.0
+    if bought == 0.0 and sold == 0.0 and not has_layers:
+        return entity
+
+    if entity.get("bought_usd") is None:
+        entity["bought_usd"] = round(bought, 4)
+    if entity.get("sold_usd") is None:
+        entity["sold_usd"] = round(sold, 4)
+    entity["remaining_cost_usd"] = round(bought - sold, 4)
+    avg = remaining_cost_average(bought, sold, rem)
+    if avg is not None:
+        entity["entry_avg"] = avg
+        entity["entry_display"] = avg
+    return entity
+
+
 def _inventory_is_flat(qty: float, bought_qty_cycle: float = 0.0) -> bool:
     """True when remaining qty is economically zero (float dust after sells).
 
@@ -274,13 +350,16 @@ def segment_positions_from_fills(
 
     # open remainder (ignore dust)
     if not _inventory_is_flat(qty, bought_qty_cycle) and cycle_buys:
-        entry_avg = cost / qty if qty > 0 else None  # residual inventory avg
+        # Remaining-cost avg: (bought USD − sold USD) / leftover qty.
+        # Frozen inventory avg (sell-at-then-avg) is NOT the user-visible entry.
+        remaining_cost_raw = bought_cost_cycle - realized_quote
+        entry_avg = remaining_cost_average(bought_cost_cycle, realized_quote, qty)
         entry_avg_full = (
             (bought_cost_cycle / bought_qty_cycle) if bought_qty_cycle > 1e-12 else None
         )
         bought_usd = round(bought_cost_cycle, 4) if bought_cost_cycle else 0.0
         sold_usd = round(realized_quote, 4) if realized_quote else 0.0
-        remaining_cost = round(cost, 4) if cost > 0 else 0.0
+        remaining_cost = round(remaining_cost_raw, 4)
         # Partial realized on sells so far (avg-cost of sold vs sell proceeds)
         pnl_usd = None
         pnl_pct = None

@@ -212,11 +212,11 @@ class TestReconstructFills(unittest.TestCase):
             {"symbol": "AAAUSDT", "side": "sell", "price": 14.0, "qty": 5, "ts": 300},
             {"symbol": "AAAUSDT", "side": "buy", "price": 11.0, "qty": 5, "ts": 400},
         ]
-        # After: bought 10@10 + 10@12 = 20 @11 avg, sell 5 → 15 left @11, buy 5@11 → 20 @11
+        # Remaining-cost: bought 100+120+55=275, sold 5*14=70, rem 20 → (275-70)/20=10.25
         r = reconstruct_open_from_fills(fills, symbol="AAAUSDT", market="spot")
         self.assertTrue(r["is_open"])
         self.assertAlmostEqual(r["size_remaining"], 20.0, places=5)
-        self.assertAlmostEqual(r["entry_avg"], 11.0, places=5)
+        self.assertAlmostEqual(r["entry_avg"], 10.25, places=5)
         self.assertEqual(r["n_buys"], 3)
         self.assertEqual(r["n_sells"], 1)
 

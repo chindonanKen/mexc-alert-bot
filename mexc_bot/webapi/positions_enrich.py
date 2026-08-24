@@ -180,8 +180,11 @@ def list_position_entities(
             entities.append(d)
 
     now = time.time()
+    from ..learning.trades import apply_open_remaining_cost_avg
+
     for d in entities:
         if d.get("status") == "open":
+            apply_open_remaining_cost_avg(d)
             if d.get("opened_at"):
                 d["hold_seconds"] = max(0.0, now - float(d["opened_at"]))
                 d["hold_hours"] = round(d["hold_seconds"] / 3600.0, 2)
@@ -429,7 +432,10 @@ def _reconcile_spot_with_balances(
         fetch_live_spot_balances,
         read_spot_balances_authority,
     )
-    from ..learning.trades import segment_positions_from_fills
+    from ..learning.trades import (
+        apply_open_remaining_cost_avg,
+        segment_positions_from_fills,
+    )
 
     fills_all = fills_all or []
     bals = fetch_live_spot_balances(user_id, event_store=store)
@@ -502,6 +508,7 @@ def _reconcile_spot_with_balances(
             _attach_fills_window(
                 e, fills_all, market="spot", open_position=True
             )
+        apply_open_remaining_cost_avg(e)
         kept.append(e)
 
     # Balances with no fill-open entity yet — invent open with fill entry if possible
@@ -532,8 +539,11 @@ def _reconcile_spot_with_balances(
             "entry_display": entry,
             "exit_avg": None,
             "size_remaining": tot,
-            "size_qty": tot,
+            "size_qty": open_seg.get("size_qty") if open_seg else tot,
             "size_sold": open_seg.get("size_sold") if open_seg else 0,
+            "bought_usd": open_seg.get("bought_usd") if open_seg else None,
+            "sold_usd": open_seg.get("sold_usd") if open_seg else None,
+            "remaining_cost_usd": open_seg.get("remaining_cost_usd") if open_seg else None,
             "buy_orders": buys,
             "sell_orders": sells,
             "n_buys": len(buys),
@@ -553,6 +563,7 @@ def _reconcile_spot_with_balances(
             _attach_fills_window(
                 ent, fills_all, market="spot", open_position=True
             )
+        apply_open_remaining_cost_avg(ent)
         kept.append(ent)
 
     return kept
@@ -665,6 +676,25 @@ def _reconcile_futures_with_exchange(
         _attach_fills_window(
             ent, fills_all, market="futures", open_position=True
         )
+        # Remaining-cost avg from this cycle's fills; keep exchange hold_avg.
+        try:
+            from ..learning.trades import (
+                apply_open_remaining_cost_avg,
+                segment_positions_from_fills,
+            )
+
+            segs = segment_positions_from_fills(
+                fills_all, symbol=fsym, market="futures"
+            )
+            open_seg = next((s for s in segs if s.get("status") == "open"), None)
+            if open_seg:
+                if open_seg.get("bought_usd") is not None:
+                    ent["bought_usd"] = open_seg.get("bought_usd")
+                if open_seg.get("sold_usd") is not None:
+                    ent["sold_usd"] = open_seg.get("sold_usd")
+            apply_open_remaining_cost_avg(ent)
+        except Exception as exc:
+            logger.debug("futures remaining-cost avg: %s", exc)
         kept.append(ent)
     return kept
 
