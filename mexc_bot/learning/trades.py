@@ -179,7 +179,7 @@ def apply_open_remaining_cost_avg(entity: dict) -> dict:
         sold = _layers_notional(entity.get("sell_orders"))
     bought = bought or 0.0
     sold = sold or 0.0
-    if bought == 0.0 and sold == 0.0 and not has_layers:
+    if bought == 0.0 and sold == 0.0:
         return entity
 
     if entity.get("bought_usd") is None:
