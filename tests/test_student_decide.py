@@ -7,6 +7,7 @@ Fixtures only — no live MEXC network.
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -15,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from mexc_bot.learning.store import EventStore
 from mexc_bot.learning.student_decide import (
     TZ_NAME,
     decide_book,
@@ -22,6 +24,12 @@ from mexc_bot.learning.student_decide import (
     decide_symbol,
     live_copy_text,
     manila_label,
+    should_paper_fill,
+)
+from mexc_bot.learning.student_paper import (
+    StudentPaperBook,
+    entry_notice_text,
+    watch_once,
 )
 
 MANILA = ZoneInfo("Asia/Manila")
@@ -80,6 +88,24 @@ def fixture_repeat() -> list:
     i += 1
     bars.append(_red(i, 1.22, 1.19, 130))
     _ = high2_i
+    return bars
+
+
+def fixture_tagged_habit() -> list:
+    """Repeat + 4 live reds that tag the copy with this chart's expand finish."""
+    bars = fixture_repeat()
+    i = len(bars)
+    bars.append(_red(i, 1.19, 1.12, 220))
+    bars.append(_red(i + 1, 1.12, 1.05, 220))
+    return bars
+
+
+def fixture_tagged_short_of_habit() -> list:
+    """Copy tags, but live reds are short of THIS chart's finish."""
+    bars = fixture_repeat()[:-2]
+    i = len(bars)
+    bars.append(_red(i, 1.25, 1.10, 220))
+    bars.append(_red(i + 1, 1.10, 1.05, 220))
     return bars
 
 
@@ -249,6 +275,99 @@ class TestBookAndInject(unittest.TestCase):
             )
             fetch.assert_not_called()
         self.assertEqual(d["live_copy"]["text"], "top 1.25 → bottom 1.05")
+
+
+class TestPaperFillOnTag(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = EventStore(Path(self.tmp.name) / "p.db")
+        self.book = StudentPaperBook(self.store)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_wait_and_skip_do_not_fill(self) -> None:
+        wait = decide_from_bars(
+            fixture_repeat(), symbol="FOO", market="futures"
+        )
+        self.assertEqual(wait["tag"], "wait")
+        self.assertFalse(should_paper_fill(wait))
+        skip = decide_from_bars(
+            fixture_no_repeat_grind(), symbol="GRIND", market="spot"
+        )
+        self.assertFalse(should_paper_fill(skip))
+        self.assertIsNone(self.book.open_on_tag(1, wait))
+        self.assertIsNone(self.book.open_on_tag(1, skip))
+
+    def test_tag_without_this_chart_habit_does_not_fill(self) -> None:
+        d = decide_from_bars(
+            fixture_tagged_short_of_habit(), symbol="FOO", market="futures"
+        )
+        self.assertEqual(d["action"], "line")
+        self.assertEqual(d["tag"], "tagged")
+        self.assertEqual(d["live_streak"]["vs_habit"], "short")
+        self.assertFalse(should_paper_fill(d))
+        # Not a global 3–5 rule: 2 reds can still be a tag, but habit here is 4
+        self.assertLess(d["live_streak"]["reds"], 3)
+
+    def test_tag_plus_habit_opens_one_paper_row(self) -> None:
+        d = decide_from_bars(
+            fixture_tagged_habit(), symbol="FOO_USDT", market="futures"
+        )
+        self.assertEqual(d["tag"], "tagged")
+        self.assertEqual(d["live_streak"]["vs_habit"], "at")
+        self.assertTrue(should_paper_fill(d))
+        row = self.book.open_on_tag(7, d)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["symbol"], "FOO_USDT")
+        self.assertEqual(row["copy_text"], "top 1.25 → bottom 1.05")
+        self.assertFalse(row["live_order"])
+        self.assertEqual(row["status"], "open")
+        again = self.book.open_on_tag(7, d)
+        self.assertIsNone(again)
+        self.assertEqual(len(self.book.list_open(7)), 1)
+
+    def test_notice_says_paper_and_recut(self) -> None:
+        d = decide_from_bars(
+            fixture_tagged_habit(), symbol="FOO_USDT", market="futures"
+        )
+        row = self.book.open_on_tag(7, d)
+        text = entry_notice_text(row)
+        self.assertIn("Student entered (paper)", text)
+        self.assertIn("No live order", text)
+        self.assertIn("Recut in the morning", text)
+        self.assertIn("top 1.25 → bottom 1.05", text)
+        self.assertNotIn("sniper", text.lower())
+
+    def test_watch_once_fills_and_notifies(self) -> None:
+        notes = []
+
+        def fetch(market, symbol, tf, limit):
+            if symbol == "FOO":
+                return fixture_tagged_habit()
+            return fixture_no_repeat_grind()
+
+        def notify(uid, text, parse_mode=None):
+            notes.append((uid, text, parse_mode))
+
+        out = watch_once(
+            self.book,
+            9,
+            names=[
+                {"symbol": "FOO", "market": "futures"},
+                {"symbol": "GRIND", "market": "spot"},
+            ],
+            fetch_bars=fetch,
+            notifier=notify,
+        )
+        self.assertEqual(out["n_filled"], 1)
+        self.assertFalse(out["live_orders"])
+        self.assertEqual(notes[0][0], 9)
+        self.assertIsNone(notes[0][2])
+        self.assertIn("Student entered (paper)", notes[0][1])
+        recut = self.book.recut(9, out["filled"][0]["id"])
+        self.assertEqual(recut["status"], "recut")
+        self.assertEqual(self.book.list_open(9), [])
 
 
 if __name__ == "__main__":

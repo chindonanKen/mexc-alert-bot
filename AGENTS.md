@@ -452,7 +452,7 @@ Observe → Freeze case → Decide + log → Grade → AD policy → Paper → A
 |-------|------|--------|
 | **P0** | Truth & teach (money, chips, trade-bound lessons) | **Shipped** |
 | **P1** | **Case factory** — `agent_setup_cases`, freeze on fire/teach, Learning snapshot UI | **Core shipped** (index/retrieval → P2) |
-| **P2** | Decide + log (`agent_decisions`, nearest-case, soft remind) | Week-1 tape decide shipped (no orders) |
+| **P2** | Decide + log (`agent_decisions`, nearest-case, soft remind) | Week-1 tape decide + paper fill on tag (no live orders) |
 | **P3** | Grade vs path / `ad_met` / teach_ok PnL | Not started |
 | **P4** | AD policy proposals (layers/zones) | Not started |
 | **P5** | Paper / replay + pass bar | Not started |

@@ -286,6 +286,34 @@
       }
     }
 
+    const seEl = $("#ovStudentEntered");
+    if (seEl) {
+      const entered = h.student_entered || d.student_entered || [];
+      if (!entered.length) {
+        seEl.hidden = true;
+        seEl.innerHTML = "";
+      } else {
+        seEl.hidden = false;
+        let html = `<div class="ov-student-h">Student entered (paper) <button type="button" class="btn soft sm" data-jump="memory">Recut</button></div>`;
+        entered.forEach((r) => {
+          html += `<div class="ov-needs-row">
+            <div class="ov-needs-meta">${escHtml(
+              [r.symbol, r.market, r.copy_text, r.tag, "no live order"]
+                .filter(Boolean)
+                .join(" · ")
+            )}</div>
+          </div>`;
+        });
+        seEl.innerHTML = html;
+        $$("[data-jump]", seEl).forEach((b) =>
+          b.addEventListener("click", () => {
+            setView(b.dataset.jump);
+            refreshAll();
+          })
+        );
+      }
+    }
+
     // Bad intel strip — always top 5 delist/scam/hack/… (any age = reminder)
     const newsEl = $("#ovBookNews");
     if (newsEl) {
@@ -3185,6 +3213,7 @@
       setLearnSelection(state.learnSel);
     }
     loadStudentDecideBook();
+    loadPaperBook();
   }
 
   function renderDecide(d) {
@@ -3265,6 +3294,54 @@
           if ($("#decideMarket")) $("#decideMarket").value = mkt;
           try {
             await runStudentDecide(sym, mkt, tf);
+          } catch (e) {
+            toast(e.message);
+          }
+        });
+      });
+    } catch (e) {
+      host.innerHTML = `<span class="mute">${escHtml(e.message)}</span>`;
+    }
+  }
+
+  async function loadPaperBook() {
+    const host = $("#paperBook");
+    if (!host) return;
+    try {
+      const r = await api("/api/learning/paper");
+      const open = r.open || [];
+      if (!open.length) {
+        host.innerHTML = `<span class="mute">No paper entries. Recut after a tag fill.</span>`;
+        return;
+      }
+      host.innerHTML = open
+        .map(
+          (row) => `<div class="learn-card">
+            <div class="learn-card-h">${escHtml(row.symbol || "—")} · ${escHtml(
+            row.copy_text || ""
+          )}</div>
+            <div class="learn-card-meta">${escHtml(
+              `${row.tag || ""} · habit ${row.habit_reds ?? "—"} / ${
+                row.habit_vol || "—"
+              } · paper · no live order`
+            )}</div>
+            <div class="row-gap mt">
+              <button type="button" class="btn soft sm" data-recut="${
+                row.id
+              }">Recut</button>
+            </div>
+          </div>`
+        )
+        .join("");
+      $$("[data-recut]", host).forEach((b) => {
+        b.addEventListener("click", async () => {
+          try {
+            await api(`/api/learning/paper/${b.dataset.recut}/recut`, {
+              method: "POST",
+            });
+            toast("Recut (paper)");
+            loadPaperBook();
+            if (state.view === "overview") loadOverview();
           } catch (e) {
             toast(e.message);
           }
@@ -3466,6 +3543,29 @@
     if (bb && !bb.dataset.bound) {
       bb.dataset.bound = "1";
       bb.addEventListener("click", () => loadStudentDecideBook());
+    }
+    const bw = $("#btnDecideWatch");
+    if (bw && !bw.dataset.bound) {
+      bw.dataset.bound = "1";
+      bw.addEventListener("click", async () => {
+        const out = $("#decideOut");
+        if (out) {
+          out.className = "learn-decide-out mute";
+          out.textContent = "Watching book…";
+        }
+        try {
+          const r = await api("/api/learning/decide/watch", { method: "POST" });
+          if (out) {
+            out.className = "learn-decide-out line";
+            out.textContent = r.n_filled
+              ? `Student entered paper × ${r.n_filled}. Recut in the morning.`
+              : "Watch done · no tag+habit fill";
+          }
+          loadPaperBook();
+        } catch (e) {
+          toast(e.message);
+        }
+      });
     }
   }
 

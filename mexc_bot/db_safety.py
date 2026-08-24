@@ -56,6 +56,7 @@ PROTECTED_TABLES: frozenset[str] = frozenset(
         "agent_cases",
         "chart_profiles",
         "target_fire_log",
+        "student_paper_book",
     }
 )
 

@@ -472,6 +472,15 @@ body::before {
 .learn-decide-out.skip { color: var(--mute); }
 .learn-decide-out.line { color: var(--text); }
 .learn-decide-copy { color: var(--amber); font-weight: 600; }
+.ov-student-entered {
+  margin-bottom: 0.85rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-radius: var(--radius);
+  background: rgba(251, 191, 36, 0.06);
+}
+.ov-student-h { font-weight: 600; margin-bottom: 0.35rem; }
+.learn-paper-book { font-family: var(--mono); font-size: 0.78rem; }
 .ov-needs-meta {
   font-family: var(--mono);
   font-size: 0.68rem;

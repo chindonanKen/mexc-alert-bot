@@ -163,6 +163,8 @@ class TestWebApi(unittest.TestCase):
         self.assertIn("learnContextBar", r.text)
         self.assertIn("ovAgentLearned", r.text)
         self.assertIn("learnDecide", r.text)
+        self.assertIn("ovStudentEntered", r.text)
+        self.assertIn("paperBook", r.text)
 
     def test_learning_endpoints(self):
         r = self.client.get("/api/learning")
@@ -242,6 +244,17 @@ class TestWebApi(unittest.TestCase):
         self.assertIsNone(body.get("live_copy"))
         self.assertFalse(body.get("live_orders"))
         self.assertEqual(body.get("tz"), "Asia/Manila")
+
+    def test_student_paper_list_empty_and_no_live(self):
+        r = self.client.get("/api/learning/paper")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body.get("ok"))
+        self.assertFalse(body.get("live_orders"))
+        self.assertEqual(body.get("open"), [])
+        ov = self.client.get("/api/overview").json()
+        self.assertIn("student_entered", ov)
+        self.assertEqual(ov.get("student_entered"), [])
 
 
 if __name__ == "__main__":

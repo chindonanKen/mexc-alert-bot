@@ -164,7 +164,7 @@ Smoke: `/s` · `/l` · `/p f TSLA` · `/mw`.
 | **Canonical plan** | **[AD_AGENT_PLAN.md](AD_AGENT_PLAN.md)** — path to fully autonomous AD agent |
 | **Shipped (P0)** | Money truth · Learning V1 teach · multi-set movers · Binance CMS delist · turn-based voice |
 | **ACTIVE** | **P1 production-ready wave** — per-TF ADs (1m–1w), red-streak 1st–5th, click-first teach, retrieve; then P2 |
-| **Later** | P2 week-1 tape decide is in · full decide+log → P3 grade → P4 AD policy → P5 paper → P6 advise (gated) → P7 gated live |
+| **Later** | P2 week-1 tape decide + paper fill on tag · full decide+log → P3 grade → P4 AD policy → P5 paper → P6 advise (gated) → P7 gated live |
 | **Desk** | Small edits only unless phase-blocking |
 | **Owner teach** | Light, high-quality on real trades while P1 builds — do **not** block on more P0 soak |
 | **Playbook** | [TRADING_STRATEGY.md](TRADING_STRATEGY.md) |

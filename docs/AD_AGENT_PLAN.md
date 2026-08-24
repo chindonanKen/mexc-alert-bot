@@ -123,7 +123,7 @@ P1 freeze: `ad_by_tf[]` per TF + `factor_alignment` `{factors, yes_count, size_h
 6. Never break spot target `stable_id` crossing; never grow learning into Telegram.  
 7. After shipping a phase: update this file status, `SESSION_HANDOFF`, `GET /api/roadmap`, `Agents.md`.
 
-**Status snapshot:** P0 done · P1 case core shipped · **P2 week-1 student decide** (official tape walk, one copy, skip if no repeat; no orders) · full decide+log still later.
+**Status snapshot:** P0 done · P1 case core shipped · **P2 week-1 student decide** (tape walk + paper fill on tag; no live orders) · full decide+log still later.
 
 ### Free coins (spot discipline)
 

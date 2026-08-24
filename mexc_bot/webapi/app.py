@@ -246,7 +246,7 @@ def create_app() -> FastAPI:
             ],
             "next": [
                 {"id": "p1_cases", "title": "P1 Case factory — multi-TF AD + regime/vol/reds + retrieve", "status": "wip"},
-                {"id": "p2_decide", "title": "P2 Week-1 student decide (tape walk, one copy, no orders)", "status": "wip"},
+                {"id": "p2_decide", "title": "P2 Week-1 student decide + paper fill on tag (no live orders)", "status": "wip"},
                 {"id": "p3_grade", "title": "P3 Grade decisions vs teach_ok / ad_met", "status": "planned"},
                 {"id": "p4_policy", "title": "P4 AD policy proposals (layers/zones)", "status": "planned"},
                 {"id": "p5_paper", "title": "P5 Paper / replay + pass bar", "status": "planned"},
@@ -504,6 +504,15 @@ def create_app() -> FastAPI:
                 learn_stats = lb.get("stats") or {}
             except Exception as e:
                 logger.debug("learning_home_v1: %s", e)
+        student_entered: List[dict] = []
+        if uid:
+            try:
+                from ..learning.student_paper import StudentPaperBook
+                from .learning_v1 import event_store
+
+                student_entered = StudentPaperBook(event_store()).list_open(uid, limit=8)
+            except Exception as e:
+                logger.debug("student_paper overview: %s", e)
 
         # Simple journal PnL sketch (closed trades with entry+exit)
         closed = (
@@ -553,6 +562,7 @@ def create_app() -> FastAPI:
             "counts": counts,
             "hierarchy": {
                 "needs_you": needs_you,
+                "student_entered": student_entered,
                 "top_targets": top_targets,
                 "top_movers": top_movers,
                 "book_intel": book_intel,
@@ -566,6 +576,7 @@ def create_app() -> FastAPI:
                 "pnl": pnl,
             },
             "needs_you": needs_you,
+            "student_entered": student_entered,
             "agent_summary": agent_summary,
             "what_learned_reply": agent_summary,
             "positions": positions,
@@ -1600,6 +1611,56 @@ def create_app() -> FastAPI:
 
         try:
             return decide_book(tf=tf, walk=bool(walk))
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/learning/decide/watch")
+    def learning_decide_watch(
+        tf: str = "15m",
+        _: bool = Depends(require_auth),
+    ):
+        """Staff: one unattended pass. Paper fill on tag+habit. No live orders."""
+        from ..learning.student_paper import StudentPaperBook, watch_once
+        from .learning_v1 import event_store, uid_or_raise
+
+        try:
+            uid = uid_or_raise()
+            book = StudentPaperBook(event_store())
+            return watch_once(book, uid, tf=tf, notifier=None)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/api/learning/paper")
+    def learning_paper(_: bool = Depends(require_auth)):
+        from ..learning.student_paper import StudentPaperBook
+        from .learning_v1 import event_store, uid_or_raise
+
+        try:
+            uid = uid_or_raise()
+            book = StudentPaperBook(event_store())
+            rows = book.list_recent(uid, limit=40)
+            return {
+                "ok": True,
+                "live_orders": False,
+                "open": [r for r in rows if r.get("status") == "open"],
+                "rows": rows,
+            }
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/learning/paper/{paper_id}/recut")
+    def learning_paper_recut(paper_id: int, _: bool = Depends(require_auth)):
+        from ..learning.student_paper import StudentPaperBook
+        from .learning_v1 import event_store, uid_or_raise
+
+        try:
+            uid = uid_or_raise()
+            row = StudentPaperBook(event_store()).recut(uid, int(paper_id))
+            if not row:
+                raise HTTPException(404, "Paper row not found")
+            return {"ok": True, "live_orders": False, "row": row}
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(400, str(e))
 

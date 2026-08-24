@@ -243,6 +243,37 @@ class EventStore:
         )
         # book: 'ad' (default AD desk learning) | 'hold' (long-term invest — exclude from AD teach)
         self._ensure_column(conn, "position_flags", "book", "TEXT")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS student_paper_book (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                market TEXT NOT NULL,
+                tf TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                entry_px REAL NOT NULL,
+                copy_top REAL,
+                copy_bottom REAL,
+                copy_text TEXT,
+                tag TEXT,
+                habit_reds INTEGER,
+                live_reds INTEGER,
+                habit_vol TEXT,
+                live_vol TEXT,
+                decide_json TEXT,
+                note TEXT,
+                opened_at REAL NOT NULL,
+                notified_at REAL,
+                recut_at REAL,
+                live_order INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_student_paper_user_open "
+            "ON student_paper_book (user_id, status, opened_at DESC)"
+        )
 
     @staticmethod
     def _ensure_column(

@@ -236,6 +236,48 @@ def _vs_habit(live_reds: int, habit_reds: Optional[int]) -> str:
     return "at"
 
 
+def live_vol_pack(bars: Sequence[Bar], live_reds: int) -> Dict[str, Any]:
+    """Volume on the live dump vs this tape's recent base — not a market-wide rule."""
+    seq = list(bars or [])
+    n_dump = max(int(live_reds or 0), 3)
+    if len(seq) < n_dump + 4:
+        return {"flag": "unknown", "ratio": None}
+    dump = seq[-n_dump:]
+    base = seq[-(n_dump + 20) : -n_dump] or seq[:-n_dump]
+    dump_vol = _median([float(b.get("v") or 0) for b in dump])
+    base_vol = _median([float(b.get("v") or 0) for b in base])
+    flag = _vol_flag(dump_vol, base_vol)
+    ratio = None
+    if dump_vol and base_vol and base_vol > 0:
+        ratio = dump_vol / base_vol
+    return {"flag": flag, "ratio": ratio}
+
+
+def should_paper_fill(decide: Dict[str, Any]) -> bool:
+    """Paper only: line + copy tagged + THIS chart's path habit. No global 3–5."""
+    if not isinstance(decide, dict):
+        return False
+    if decide.get("action") != "line":
+        return False
+    if decide.get("live_orders"):
+        return False
+    if decide.get("tag") not in ("tagged", "through"):
+        return False
+    if not decide.get("live_copy"):
+        return False
+    habit = decide.get("path_habit") or {}
+    streak = decide.get("live_streak") or {}
+    if habit.get("reds") is None:
+        return False
+    if streak.get("vs_habit") not in ("at", "long"):
+        return False
+    hvol = habit.get("vol")
+    live_vol = (decide.get("live_vol") or {}).get("flag")
+    if hvol == "expand" and live_vol == "dry":
+        return False
+    return True
+
+
 def decide_from_bars(
     bars: Sequence[Bar],
     *,
@@ -263,6 +305,7 @@ def decide_from_bars(
         "live_copy": None,
         "path_habit": None,
         "live_streak": None,
+        "live_vol": None,
         "tag": None,
         "cycles": 0,
     }
@@ -316,6 +359,7 @@ def decide_from_bars(
                 "label": streak_label(live_reds),
                 "vs_habit": _vs_habit(live_reds, habit.get("reds")),
             },
+            "live_vol": live_vol_pack(seq, live_reds),
             "tag": tag_state(seq, bottom),
         }
     )
