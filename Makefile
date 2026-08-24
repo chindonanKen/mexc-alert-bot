@@ -16,6 +16,7 @@ test:
 	$$PY tests/test_desk_learning_spine.py && \
 	$$PY tests/test_trade_learning.py && \
 	$$PY tests/test_super_agent.py && \
+	$$PY tests/test_remaining_cost_avg.py && \
 	$$PY tests/test_assistant_ux.py && \
 	$$PY tests/test_v1_complete.py && \
 	$$PY tests/test_isolated_agent.py && \
