@@ -8,7 +8,12 @@ Closed / zero remaining qty must not divide by zero.
 
 from __future__ import annotations
 
+import sys
 import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from mexc_bot.learning.trades import (
     apply_open_remaining_cost_avg,
@@ -183,6 +188,84 @@ class TestApplyOpenRemainingCostOnEntity(unittest.TestCase):
         }
         apply_open_remaining_cost_avg(ent)
         self.assertAlmostEqual(ent["entry_avg"], 1.0, places=8)
+
+
+class TestReconcileAppliesRemainingCost(unittest.TestCase):
+    def test_futures_open_uses_fill_remaining_cost_not_hold_avg(self):
+        from unittest.mock import patch
+
+        from mexc_bot.webapi.positions_enrich import _reconcile_futures_with_exchange
+
+        exch = [
+            {
+                "symbol": "NES_USDT",
+                "hold_vol": 600.0,
+                "entry_avg": 0.1399,
+                "hold_avg": 0.1399,
+                "leverage": 1,
+                "position_type": 1,
+                "opened_at": 1_700_000_000,
+            }
+        ]
+        fills = [
+            _fill("NES_USDT", "buy", 0.1407, 1000, 1_700_000_000, market="futures"),
+            _fill("NES_USDT", "sell", 0.1500, 400, 1_700_000_100, market="futures"),
+        ]
+        expected = (0.1407 * 1000 - 0.1500 * 400) / 600.0
+        with patch(
+            "mexc_bot.learning.fills.fetch_live_futures_opens", return_value=exch
+        ):
+            out = _reconcile_futures_with_exchange(
+                [], store=None, user_id=1, fills_all=fills
+            )
+        fut = next(e for e in out if e.get("status") == "open")
+        self.assertAlmostEqual(fut["size_remaining"], 600.0, places=5)
+        self.assertAlmostEqual(fut["hold_avg"], 0.1399, places=8)
+        self.assertAlmostEqual(fut["entry_avg"], expected, places=8)
+        self.assertAlmostEqual(fut["entry_display"], expected, places=8)
+        self.assertLess(fut["entry_avg"], 0.1399)
+
+    def test_spot_balance_size_recomputes_remaining_avg(self):
+        from unittest.mock import patch
+
+        from mexc_bot.webapi.positions_enrich import _reconcile_spot_with_balances
+
+        entities = [
+            {
+                "symbol": "NESUSDT",
+                "market": "spot",
+                "status": "open",
+                "is_open": True,
+                "size_remaining": 40.0,
+                "bought_usd": 200.0,
+                "sold_usd": 155.0,
+                "entry_avg": 1.125,
+                "entry_display": 1.125,
+                "buy_orders": [{"price": 2.0, "qty": 100}],
+                "sell_orders": [{"price": 3.0, "qty": 50}, {"price": 0.5, "qty": 10}],
+            }
+        ]
+        bals = [
+            {
+                "asset": "NES",
+                "free": 40.0,
+                "locked": 0.0,
+                "total": 40.0,
+                "symbol": "NESUSDT",
+            }
+        ]
+        with patch(
+            "mexc_bot.learning.fills.fetch_live_spot_balances", return_value=bals
+        ), patch(
+            "mexc_bot.webapi.positions_enrich._spot_symbol_tradeable",
+            return_value=True,
+        ):
+            out = _reconcile_spot_with_balances(
+                entities, store=None, user_id=1, fills_all=[]
+            )
+        open_ = next(e for e in out if e.get("status") == "open")
+        self.assertAlmostEqual(open_["size_remaining"], 40.0, places=5)
+        self.assertAlmostEqual(open_["entry_avg"], 1.125, places=8)
 
 
 if __name__ == "__main__":
