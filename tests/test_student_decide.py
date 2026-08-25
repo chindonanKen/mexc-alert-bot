@@ -25,7 +25,9 @@ from mexc_bot.learning.student_decide import (
     live_copy_text,
     manila_label,
     should_paper_fill,
+    usable_locked_visual_ad,
 )
+from mexc_bot.learning.symbols import same_book_name
 from mexc_bot.learning.student_paper import (
     StudentPaperBook,
     entry_notice_text,
@@ -119,6 +121,46 @@ def fixture_no_repeat_grind() -> list:
         bars.append(_red(i, px, nxt, 70))
         px = nxt
     return bars
+
+
+AXTI_LOCK = {
+    "high": 113.49,
+    "low": 81.10,
+    "high_label": "2026-06-16 12:00 PHT",
+    "low_label": "2026-06-19 00:00 PHT",
+    "tf": "4h",
+    "source": "staff",
+}
+
+
+def fixture_axti_4h() -> list:
+    """Official 4h prints Kenneth locked + the later July dump that fooled a short window."""
+
+    def at(y, m, d, hh, o, h, lo, c, v=100.0) -> dict:
+        ts = datetime(y, m, d, hh, 0, tzinfo=MANILA).timestamp()
+        return {"ts": ts, "o": o, "h": h, "l": lo, "c": c, "v": v}
+
+    return [
+        at(2026, 6, 15, 12, 104.72, 116.72, 104.72, 111.86, 200),
+        at(2026, 6, 16, 8, 110.0, 111.35, 107.82, 109.97, 120),
+        at(2026, 6, 16, 12, 111.0, 113.49, 109.86, 113.0, 180),
+        at(2026, 6, 16, 20, 113.0, 112.93, 96.26, 98.06, 400),
+        at(2026, 6, 17, 0, 98.06, 100.57, 93.10, 93.18, 220),
+        at(2026, 6, 18, 20, 96.0, 97.81, 82.82, 83.65, 350),
+        at(2026, 6, 19, 0, 83.65, 85.38, 81.10, 84.61, 300),
+        at(2026, 6, 19, 12, 84.61, 89.02, 84.57, 87.75, 140),
+        at(2026, 6, 20, 0, 87.75, 95.0, 86.0, 94.0, 160),
+        at(2026, 7, 16, 12, 53.42, 53.75, 52.66, 52.78, 180),
+        at(2026, 7, 17, 16, 43.81, 45.05, 42.27, 44.14, 210),
+        at(2026, 7, 18, 0, 44.14, 50.0, 44.0, 49.0, 150),
+        at(2026, 8, 18, 0, 93.28, 97.97, 93.07, 96.17, 400),
+        at(2026, 8, 25, 8, 95.0, 96.0, 94.0, 95.0, 120),
+    ]
+
+
+def fixture_axti_july_window() -> list:
+    """Short window that starts at the later dump — must not become the initial drop."""
+    return [b for b in fixture_axti_4h() if b["ts"] >= datetime(2026, 7, 16, 12, tzinfo=MANILA).timestamp()]
 
 
 def fixture_one_bounce_only() -> list:
@@ -397,6 +439,122 @@ class TestPaperFillOnTag(unittest.TestCase):
         recut = self.book.recut(9, out["filled"][0]["id"])
         self.assertEqual(recut["status"], "recut")
         self.assertEqual(self.book.list_open(9), [])
+
+
+class TestAxtiLockedInitialDrop(unittest.TestCase):
+    """AXTI 4h: first dump is 16 Jun 113.49→19 Jun 81.10, copy 97.97→65.58."""
+
+    def test_same_name_axti_stock(self) -> None:
+        self.assertTrue(same_book_name("AXTI", "AXTISTOCK_USDT"))
+        self.assertTrue(same_book_name("AXTISTOCK_USDT", "AXTI"))
+
+    def test_formula_and_grind_rows_are_not_locks(self) -> None:
+        self.assertFalse(
+            usable_locked_visual_ad(
+                {"high": 53.75, "low": 42.27, "source": "formula", "tf": "4h"}
+            )
+        )
+        self.assertFalse(
+            usable_locked_visual_ad(
+                {"high": 53.75, "low": 42.27, "source": "grind", "tf": "4h"}
+            )
+        )
+        self.assertTrue(
+            usable_locked_visual_ad(
+                {"high": 113.49, "low": 81.10, "source": "staff", "tf": "4h"}
+            )
+        )
+
+    def test_locked_bars_copy_65_58(self) -> None:
+        d = decide_from_bars(
+            fixture_axti_4h(),
+            symbol="AXTISTOCK_USDT",
+            market="futures",
+            tf="4h",
+            locked=AXTI_LOCK,
+        )
+        self.assertEqual(d["action"], "line")
+        self.assertEqual(d["reason"], "locked")
+        self.assertFalse(d["live_orders"])
+        drop = d["initial_drop"]
+        self.assertAlmostEqual(drop["high"], 113.49, places=2)
+        self.assertAlmostEqual(drop["low"], 81.10, places=2)
+        self.assertEqual((drop["high_bar"] or {}).get("label"), "2026-06-16 12:00 PHT")
+        self.assertEqual((drop["low_bar"] or {}).get("label"), "2026-06-19 00:00 PHT")
+        copy = d["live_copy"]
+        self.assertAlmostEqual(copy["top"], 97.97, places=2)
+        self.assertAlmostEqual(copy["bottom"], 65.58, places=2)
+        self.assertEqual(copy["text"], "top 97.97 → bottom 65.58")
+
+    def test_july_window_without_locked_bars_skips(self) -> None:
+        d = decide_from_bars(
+            fixture_axti_july_window(),
+            symbol="AXTI",
+            market="futures",
+            tf="4h",
+            locked=AXTI_LOCK,
+        )
+        self.assertEqual(d["action"], "skip")
+        self.assertEqual(d["reason"], "locked_bars_missing")
+        self.assertIsNone(d["live_copy"])
+        self.assertFalse(d["live_orders"])
+
+    def test_july_window_must_not_become_the_line(self) -> None:
+        """Short window first dump was 53.75→42.27 hung as 97.97→86.49. Not allowed when locked."""
+        d = decide_from_bars(
+            fixture_axti_july_window(),
+            symbol="AXTI",
+            market="futures",
+            tf="4h",
+            locked=AXTI_LOCK,
+        )
+        if d.get("live_copy"):
+            self.assertNotAlmostEqual(d["live_copy"]["bottom"], 86.49, places=2)
+
+    def test_learning_staff_lock_beats_formula_grind(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        try:
+            store = EventStore(Path(tmp.name) / "axti.db")
+            store.upsert_setup_case(
+                7,
+                symbol="AXTI_USDT",
+                market="futures",
+                velocity_band="GRIND",
+                features={
+                    "ok": True,
+                    "ad_median": 11.48,
+                    "ad_zone": "at_ad",
+                    "ad_by_tf": [{"tf": "4h", "ad_median": 11.48, "high": 53.75, "low": 42.27}],
+                },
+                note="formula grind",
+            )
+            cid = store.upsert_setup_case(
+                7,
+                symbol="AXTISTOCK_USDT",
+                market="futures",
+                event_id=99,
+                features={"ok": True},
+                note="kenneth lock",
+            )
+            self.assertGreater(cid, 0)
+            store.merge_visual_ad(7, cid, dict(AXTI_LOCK))
+            d = decide_symbol(
+                "AXTI",
+                "futures",
+                tf="4h",
+                bars=fixture_axti_4h(),
+                event_store=store,
+                user_id=7,
+            )
+            self.assertEqual(d["reason"], "locked")
+            self.assertAlmostEqual(d["live_copy"]["top"], 97.97, places=2)
+            self.assertAlmostEqual(d["live_copy"]["bottom"], 65.58, places=2)
+            self.assertEqual(
+                (d["initial_drop"]["high_bar"] or {}).get("label"),
+                "2026-06-16 12:00 PHT",
+            )
+        finally:
+            tmp.cleanup()
 
 
 if __name__ == "__main__":

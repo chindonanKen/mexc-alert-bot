@@ -1,4 +1,4 @@
-"""Week-1 AD student DECIDE — walk this chart's official tape.
+"""Student DECIDE — first dump on the full tape, or Kenneth's locked visual AD.
 
 Staff-only. No orders. No pixel prices. No invented line without a walk.
 """
@@ -21,6 +21,24 @@ TAG_THROUGH_EPS = 0.002
 TAG_TOUCH_EPS = 0.003
 VOL_EXPAND = 1.4
 VOL_FLAT = 0.9
+LOCK_PX_EPS = 0.002
+FORMULA_LOCK_SOURCES = frozenset(
+    {"formula", "grind", "auto", "chart_features", "system"}
+)
+STAFF_LOCK_SOURCES = frozenset(
+    {"staff", "owner", "recut", "locked", "human", ""}
+)
+TF_SECONDS = {
+    "1m": 60,
+    "5m": 300,
+    "15m": 900,
+    "1h": 3600,
+    "4h": 14400,
+    "8h": 28800,
+    "12h": 43200,
+    "1d": 86400,
+    "1w": 604800,
+}
 
 Bar = Dict[str, Any]
 FetchBars = Callable[[str, str, str, int], List[Bar]]
@@ -210,6 +228,174 @@ def live_copy_text(top: float, bottom: float) -> str:
     return f"top {fmt_px(top)} → bottom {fmt_px(bottom)}"
 
 
+def tape_bar_limit(tf: str) -> int:
+    """Enough closed bars to see the first dump, not a mid-history window."""
+    sec = TF_SECONDS.get((tf or DEFAULT_TF).strip() or DEFAULT_TF, 900)
+    n = int(200 * 86400 / max(int(sec), 60))
+    return max(240, min(n, 2000))
+
+
+def parse_pht_label(label: Any) -> Optional[float]:
+    raw = str(label or "").replace(" PHT", "").strip()
+    if not raw:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(raw, fmt).replace(tzinfo=MANILA).timestamp()
+        except ValueError:
+            continue
+    return None
+
+
+def usable_locked_visual_ad(vad: Any, case: Optional[Dict[str, Any]] = None) -> bool:
+    """Kenneth high/low lock only. Ignore formula / grind AD rows."""
+    if not isinstance(vad, dict):
+        return False
+    high, low = _f(vad.get("high")), _f(vad.get("low"))
+    if high is None or low is None or high <= low:
+        return False
+    src = str(vad.get("source") or "").strip().lower()
+    if src in FORMULA_LOCK_SOURCES:
+        return False
+    if src not in STAFF_LOCK_SOURCES:
+        return False
+    band = str((case or {}).get("velocity_band") or "").strip().upper()
+    if band == "GRIND" and src in FORMULA_LOCK_SOURCES:
+        return False
+    return True
+
+
+def locked_from_visual_ad(vad: Dict[str, Any]) -> Dict[str, Any]:
+    high = float(vad["high"])
+    low = float(vad["low"])
+    high_ts = _f(vad.get("high_ts")) or parse_pht_label(vad.get("high_label"))
+    low_ts = _f(vad.get("low_ts")) or parse_pht_label(vad.get("low_label"))
+    return {
+        "high": high,
+        "low": low,
+        "high_ts": high_ts,
+        "low_ts": low_ts,
+        "high_label": vad.get("high_label") or "",
+        "low_label": vad.get("low_label") or "",
+        "tf": vad.get("tf") or "",
+        "source": vad.get("source") or "staff",
+        "drop_len": high - low,
+    }
+
+
+def find_locked_visual_ad(
+    event_store: Any,
+    user_id: Optional[int],
+    symbol: str,
+    market: str,
+    tf: str = DEFAULT_TF,
+) -> Optional[Dict[str, Any]]:
+    """Latest staff visual_ad / locked recut for this name. Not formula AD."""
+    if event_store is None or not user_id:
+        return None
+    try:
+        from .visual_ad import extract_visual_ad, parse_features_json
+
+        rows = event_store.list_setup_cases_for_symbol(
+            int(user_id), symbol, market=market, limit=40
+        )
+    except Exception:
+        return None
+    tf_s = (tf or "").strip().lower()
+    best: Optional[Dict[str, Any]] = None
+    best_score = -1.0
+    for row in rows:
+        feats = parse_features_json(row.get("features_json"))
+        vad = extract_visual_ad(feats)
+        if not usable_locked_visual_ad(vad, row):
+            continue
+        score = float(row.get("frozen_at") or 0)
+        if tf_s and str((vad or {}).get("tf") or "").strip().lower() == tf_s:
+            score += 1e12
+        if score > best_score and vad:
+            best_score = score
+            best = locked_from_visual_ad(vad)
+    return best
+
+
+def match_locked_bars(
+    bars: Sequence[Bar],
+    locked: Dict[str, Any],
+    *,
+    tf: str = DEFAULT_TF,
+) -> Optional[Dict[str, Any]]:
+    """Find Kenneth's locked high/low bars on this tape. None → cannot match."""
+    seq = [b for b in bars if b]
+    high = _f(locked.get("high"))
+    low = _f(locked.get("low"))
+    if not seq or high is None or low is None or high <= low:
+        return None
+    tf_sec = float(TF_SECONDS.get((tf or DEFAULT_TF).strip() or DEFAULT_TF, 14400))
+    slop = max(60.0, tf_sec * 0.51)
+    high_ts = _f(locked.get("high_ts")) or parse_pht_label(locked.get("high_label"))
+    low_ts = _f(locked.get("low_ts")) or parse_pht_label(locked.get("low_label"))
+
+    def _near_px(got: Optional[float], want: float) -> bool:
+        if got is None or want <= 0:
+            return False
+        return abs(float(got) - want) / want <= LOCK_PX_EPS
+
+    def _near_ts(got: Any, want: float) -> bool:
+        try:
+            t = float(got or 0)
+        except (TypeError, ValueError):
+            return False
+        if t > 1e12:
+            t /= 1000.0
+        return abs(t - want) <= slop
+
+    hi = None
+    for i, b in enumerate(seq):
+        if high_ts is not None and not _near_ts(b.get("ts"), high_ts):
+            continue
+        if not _near_px(_f(b.get("h")), high):
+            continue
+        hi = i
+        break
+    if hi is None:
+        return None
+    li = None
+    for i, b in enumerate(seq[hi:], start=hi):
+        if low_ts is not None and not _near_ts(b.get("ts"), low_ts):
+            continue
+        if not _near_px(_f(b.get("l")), low):
+            continue
+        li = i
+        break
+    if li is None:
+        return None
+    return {
+        "high": high,
+        "low": low,
+        "high_i": hi,
+        "low_i": li,
+        "high_bar": name_bar(seq[hi]),
+        "low_bar": name_bar(seq[li]),
+        "drop_len": high - low,
+    }
+
+
+def _pump_high_after(
+    bars: Sequence[Bar], after_i: int, live: Optional[Dict[str, Any]] = None
+) -> Tuple[float, Optional[int]]:
+    seq = list(bars)
+    window = seq[after_i + 1 :] if after_i >= 0 else seq
+    if window:
+        j = max(range(len(window)), key=lambda k: float(window[k].get("h") or 0))
+        return float(window[j].get("h") or 0), after_i + 1 + j
+    if live and live.get("pump_high") is not None:
+        return float(live["pump_high"]), live.get("pump_high_i")
+    if seq:
+        j = max(range(len(seq)), key=lambda k: float(seq[k].get("h") or 0))
+        return float(seq[j].get("h") or 0), j
+    return 0.0, None
+
+
 def tag_state(bars: Sequence[Bar], bottom: float) -> str:
     if not bars or bottom is None:
         return "wait"
@@ -287,8 +473,9 @@ def decide_from_bars(
     min_drop_pct: float = MIN_DROP_PCT,
     min_bounce_frac: float = MIN_BOUNCE_FRAC,
     min_repeat: int = MIN_REPEAT,
+    locked: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Structured week-1 decide from already-fetched official bars."""
+    """First finished dump-then-pump on this tape, or Kenneth's locked length."""
     mkt = (market or "futures").strip().lower() or "futures"
     sym = (symbol or "").strip()
     tf_s = (tf or DEFAULT_TF).strip() or DEFAULT_TF
@@ -308,6 +495,7 @@ def decide_from_bars(
         "live_vol": None,
         "tag": None,
         "cycles": 0,
+        "locked": None,
     }
     seq = list(bars or [])
     if not seq:
@@ -317,38 +505,70 @@ def decide_from_bars(
         seq, min_drop_pct=min_drop_pct, min_bounce_frac=min_bounce_frac
     )
     base["cycles"] = len(cycles)
-    if len(cycles) < int(min_repeat):
-        base["reason"] = "no_repeat"
-        return base
 
-    first = cycles[0]
+    lock_used = None
+    first = None
+    reason = "walked"
+    if locked:
+        matched = match_locked_bars(seq, locked, tf=tf_s)
+        if not matched:
+            base["reason"] = "locked_bars_missing"
+            base["locked"] = {
+                "high": locked.get("high"),
+                "low": locked.get("low"),
+                "source": locked.get("source"),
+                "matched": False,
+            }
+            return base
+        first = matched
+        lock_used = {
+            "high": matched["high"],
+            "low": matched["low"],
+            "source": locked.get("source") or "staff",
+            "matched": True,
+        }
+        reason = "locked"
+        top, top_i = _pump_high_after(seq, int(matched["low_i"]), live)
+    else:
+        if len(cycles) < int(min_repeat):
+            base["reason"] = "no_repeat"
+            return base
+        first = cycles[0]
+        top = float(live.get("pump_high") or first["high"])
+        top_i = live.get("pump_high_i")
+
     high = float(first["high"])
     low = float(first["low"])
     drop_len = high - low
-    top = float(live.get("pump_high") or high)
+    if not locked:
+        top = float(live.get("pump_high") or high)
+        top_i = live.get("pump_high_i")
     bottom = top - drop_len
     habit = path_habit(cycles)
     live_reds = consecutive_red_streak(seq, include_forming=False)
+    high_bar = first.get("high_bar")
+    low_bar = first.get("low_bar")
     copy = {
         "top": top,
         "bottom": bottom,
         "text": live_copy_text(top, bottom),
-        "pump_high_bar": name_bar(seq[int(live["pump_high_i"])])
-        if live.get("pump_high_i") is not None
-        else name_bar(first.get("high_bar")),
+        "pump_high_bar": name_bar(seq[int(top_i)])
+        if top_i is not None
+        else name_bar(high_bar),
     }
     base.update(
         {
             "action": "line",
-            "reason": "walked",
+            "reason": reason,
+            "locked": lock_used,
             "initial_drop": {
                 "high": high,
                 "low": low,
-                "high_bar": first.get("high_bar"),
-                "low_bar": first.get("low_bar"),
+                "high_bar": high_bar,
+                "low_bar": low_bar,
                 "text": (
-                    f"{(first.get('high_bar') or {}).get('label') or ''} high {fmt_px(high)} → "
-                    f"{(first.get('low_bar') or {}).get('label') or ''} low {fmt_px(low)}"
+                    f"{(high_bar or {}).get('label') or ''} high {fmt_px(high)} → "
+                    f"{(low_bar or {}).get('label') or ''} low {fmt_px(low)}"
                 ).strip(),
                 "drop_len": drop_len,
             },
@@ -366,12 +586,47 @@ def decide_from_bars(
     return base
 
 
+def _fetch_symbol_candidates(market: str, symbol: str) -> List[str]:
+    raw = (symbol or "").strip()
+    out: List[str] = []
+    if raw:
+        out.append(raw)
+    if (market or "").lower() == "futures":
+        try:
+            from ..exchange import futures_symbol_candidates
+
+            out.extend(futures_symbol_candidates(raw))
+        except Exception:
+            pass
+        try:
+            from .symbols import normalize_learning_symbol
+
+            norm = normalize_learning_symbol(raw, "futures")
+            if norm:
+                out.append(norm)
+        except Exception:
+            pass
+    seen = set()
+    uniq: List[str] = []
+    for s in out:
+        key = str(s).upper()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        uniq.append(s)
+    return uniq
+
+
 def _default_fetch(market: str, symbol: str, tf: str, limit: int) -> List[Bar]:
     from ..movers.klines import KlineClient
 
     client = KlineClient()
     try:
-        return client.get_ohlcv(market, symbol, tf, limit=limit) or []
+        for cand in _fetch_symbol_candidates(market, symbol):
+            bars = client.get_ohlcv(market, cand, tf, limit=limit) or []
+            if bars:
+                return bars
+        return []
     finally:
         client.close()
 
@@ -383,24 +638,32 @@ def decide_symbol(
     tf: str = DEFAULT_TF,
     bars: Optional[Sequence[Bar]] = None,
     fetch_bars: Optional[FetchBars] = None,
-    limit: int = 240,
+    limit: Optional[int] = None,
+    locked: Optional[Dict[str, Any]] = None,
+    event_store: Any = None,
+    user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Walk official MEXC klines unless bars are injected (tests)."""
     mkt = (market or "futures").strip().lower() or "futures"
     sym = (symbol or "").strip()
+    tf_s = (tf or DEFAULT_TF).strip() or DEFAULT_TF
     if not sym:
-        return decide_from_bars([], symbol="", market=mkt, tf=tf)
+        return decide_from_bars([], symbol="", market=mkt, tf=tf_s)
+    lock = locked
+    if lock is None:
+        lock = find_locked_visual_ad(event_store, user_id, sym, mkt, tf_s)
     if bars is None:
         getter = fetch_bars or _default_fetch
+        n = int(limit if limit is not None else tape_bar_limit(tf_s))
         try:
-            bars = getter(mkt, sym, tf, int(limit))
+            bars = getter(mkt, sym, tf_s, n)
         except Exception:
             bars = []
-    return decide_from_bars(bars, symbol=sym, market=mkt, tf=tf)
+    return decide_from_bars(bars, symbol=sym, market=mkt, tf=tf_s, locked=lock)
 
 
 def collect_book_names(user_id: Optional[int] = None) -> List[Dict[str, str]]:
-    """Book / hunt names: targets + watchlist + open positions. No tape walk."""
+    """Book names: targets + watchlist + open positions. No tape walk."""
     from ..webapi import actions
 
     uid = user_id
@@ -435,6 +698,7 @@ def decide_book(
     user_id: Optional[int] = None,
     walk: bool = True,
     max_names: int = 30,
+    event_store: Any = None,
 ) -> Dict[str, Any]:
     """Staff: list book names, optionally walk each. No walk → no line."""
     rows = list(names) if names is not None else collect_book_names(user_id)
@@ -462,6 +726,8 @@ def decide_book(
             r["market"],
             tf=tf,
             fetch_bars=fetch_bars,
+            event_store=event_store,
+            user_id=user_id,
         )
         for r in slim
         if r["symbol"]

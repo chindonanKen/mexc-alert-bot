@@ -1044,6 +1044,37 @@ class EventStore:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def list_setup_cases_for_symbol(
+        self,
+        user_id: int,
+        symbol: str,
+        *,
+        market: Optional[str] = None,
+        limit: int = 40,
+    ) -> List[dict]:
+        """Recent cases for one book name. Scan is additive-read only."""
+        from .symbols import same_book_name
+
+        limit = max(1, min(int(limit), 80))
+        with self._lock:
+            rows = self._get_conn().execute(
+                "SELECT * FROM agent_setup_cases WHERE user_id = ? "
+                "ORDER BY frozen_at DESC LIMIT 200",
+                (int(user_id),),
+            ).fetchall()
+        mkt = (market or "").strip().lower()
+        out: List[dict] = []
+        for raw in rows:
+            row = dict(raw)
+            if not same_book_name(symbol, row.get("symbol") or ""):
+                continue
+            if mkt and (row.get("market") or "").strip().lower() not in ("", mkt):
+                continue
+            out.append(row)
+            if len(out) >= limit:
+                break
+        return out
+
     def list_position_flags(self, user_id: int) -> List[dict]:
         with self._lock:
             rows = self._get_conn().execute(

@@ -107,6 +107,14 @@ def sanitize_visual_ad(payload: Any) -> Dict[str, Any]:
     if ts is not None and ts != "":
         out["ts"] = float(ts)
 
+    for key in ("high_ts", "low_ts"):
+        if key in payload and payload.get(key) is not None and payload.get(key) != "":
+            out[key] = float(payload.get(key))
+    for key in ("high_label", "low_label"):
+        lab = payload.get(key)
+        if lab is not None and str(lab).strip():
+            out[key] = str(lab).strip()[:40]
+
     if not has_useful_visual_ad(out):
         raise ValueError("visual_ad needs tf, high, low, note, or image_relpath")
     return out

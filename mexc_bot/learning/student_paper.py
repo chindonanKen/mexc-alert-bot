@@ -260,6 +260,7 @@ def watch_once(
         fetch_bars=fetch_bars,
         user_id=user_id,
         walk=True,
+        event_store=book.store,
     )
     filled: List[Dict[str, Any]] = []
     notices: List[str] = []

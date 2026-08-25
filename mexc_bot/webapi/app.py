@@ -232,35 +232,22 @@ def create_app() -> FastAPI:
         """Where AD Desk is going — keep in sync with AGENTS.md + SESSION_HANDOFF."""
         return {
             "vision": (
-                "Fully autonomous AD agent on MEXC panic scale-ins: truth → cases → decide+log → "
-                "grade → AD policy → paper → advise → gated live. Telegram = sensors. "
-                "Desk = positions + teach + agent surfaces. Never silent live risk. "
-                "Canonical: docs/AD_AGENT_PLAN.md"
+                "Same-day path: encode taught chart rules → student decide → "
+                "paper fill on tag while away. Telegram = sensors. Desk = positions + teach. "
+                "No live orders. No hunt UX."
             ),
             "now": [
-                {"id": "p0_truth", "title": "P0 Truth & teach (money_truth, Learning V1, positions)", "status": "live"},
+                {"id": "teach", "title": "Teach + locked visual AD (same-day encode)", "status": "live"},
                 {"id": "targets_movers", "title": "Targets + multi-set movers + Telegram sensors", "status": "live"},
-                {"id": "intel", "title": "Multi-CEX delist intel (Binance CMS 161)", "status": "live"},
-                {"id": "voice_tools", "title": "Turn-based voice tools (teach, ask, pending)", "status": "beta"},
-                {"id": "desk_ui", "title": "AD Desk (small edits only while agent builds)", "status": "beta"},
+                {"id": "decide_paper", "title": "Student decide + paper fill on tag + notify", "status": "wip"},
             ],
             "next": [
-                {"id": "p1_cases", "title": "P1 Case factory — multi-TF AD + regime/vol/reds + retrieve", "status": "wip"},
-                {"id": "p2_decide", "title": "P2 Week-1 student decide + paper fill on tag (no live orders)", "status": "wip"},
-                {"id": "p3_grade", "title": "P3 Grade decisions vs teach_ok / ad_met", "status": "planned"},
-                {"id": "p4_policy", "title": "P4 AD policy proposals (layers/zones)", "status": "planned"},
-                {"id": "p5_paper", "title": "P5 Paper / replay + pass bar", "status": "planned"},
-                {"id": "p6_advise", "title": "P6 Advise / recs (owner re-open + P5 bar)", "status": "deferred"},
-                {"id": "p7_live", "title": "P7 Gated live AD (default off)", "status": "deferred"},
-                {"id": "desk_small", "title": "Occasional small AD Desk UX fixes", "status": "planned"},
+                {"id": "paper_notify", "title": "Unattended paper fill + student-entered notify + morning recut", "status": "wip"},
             ],
             "principles": [
-                "Follow docs/AD_AGENT_PLAN.md — do not skip phases",
-                "Telegram = panic push; Desk = positions + teach + agent",
-                "Structured cases over free-text scrapbook",
-                "Chart history on the working TF is the source of truth — size to how this dump matches that history",
+                "Encode Kenneth's chart lock the same day — do not guess a later dump",
+                "Telegram = panic push; Desk = positions + teach",
                 "Exchange money_truth only for $ (teach_ok window)",
-                "Decide+log then grade before any coach or live",
                 "Live exchange orders off unless explicitly enabled",
             ],
         }
@@ -1592,11 +1579,19 @@ def create_app() -> FastAPI:
         tf: str = "15m",
         _: bool = Depends(require_auth),
     ):
-        """Staff: walk official klines for one book name. No orders."""
+        """Staff: walk official klines for one book name. Prefer locked visual_ad. No orders."""
         from ..learning.student_decide import decide_symbol
+        from .learning_v1 import event_store, uid_or_raise
 
         try:
-            return decide_symbol(symbol, market, tf=tf)
+            uid = uid_or_raise()
+            return decide_symbol(
+                symbol,
+                market,
+                tf=tf,
+                event_store=event_store(),
+                user_id=uid,
+            )
         except Exception as e:
             raise HTTPException(400, str(e))
 
@@ -1608,9 +1603,13 @@ def create_app() -> FastAPI:
     ):
         """Staff: book names (default) or walk each if walk=1. No invented line."""
         from ..learning.student_decide import decide_book
+        from .learning_v1 import event_store, uid_or_raise
 
         try:
-            return decide_book(tf=tf, walk=bool(walk))
+            uid = uid_or_raise()
+            return decide_book(
+                tf=tf, walk=bool(walk), user_id=uid, event_store=event_store()
+            )
         except Exception as e:
             raise HTTPException(400, str(e))
 

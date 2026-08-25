@@ -41,7 +41,7 @@ Fine-tuning the desk burns tokens on silent regressions. **Do not end a Desk cha
 **Do not** mark pass without running the panel. Docs-only / pure Telegram bot work (no desk paths) is exempt.
 
 Full vision: **[docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md)** · strategy: **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** · handoff: **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)**.  
-**Autonomy roadmap (canonical):** **[docs/AD_AGENT_PLAN.md](docs/AD_AGENT_PLAN.md)** — P0 shipped → **P1 case factory next** → … → P7 gated live. Full focus = build this agent; desk UI only small edits.
+**Autonomy path (now):** encode taught chart rules the same day → student decide → paper fill on tag while away. No live orders. Desk UI only small edits. Canonical notes: **[docs/AD_AGENT_PLAN.md](docs/AD_AGENT_PLAN.md)**.
 
 ### Platform baseline (owner-accepted 2026-08-03)
 
