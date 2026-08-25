@@ -74,6 +74,22 @@ class TestMachineLogic(unittest.TestCase):
         self.assertEqual(pick["pick_reason"], "tie_slower")
         self.assertNotIn("average", str(pick).lower())
 
+    def test_room_state_tones(self):
+        from mexc_bot.machine.engine import room_state
+
+        empty = room_state([], [])
+        self.assertTrue(empty["empty"])
+        self.assertEqual(empty["tone"], "empty")
+        self.assertEqual(empty["open_slots"], 2)
+        watch = room_state([{"live": False}], [])
+        self.assertEqual(watch["tone"], "watch")
+        live = room_state([{"live": True}, {"live": False}], [])
+        self.assertEqual(live["tone"], "live")
+        self.assertEqual(live["open_slots"], 1)
+        need = room_state([{"live": True}], [{"id": 1}])
+        self.assertEqual(need["tone"], "needs_you")
+        self.assertFalse(need["needs_you_clear"])
+
     def test_exponential_layers_sum_and_deeper_larger(self):
         from mexc_bot.machine.logic import exponential_layers
 
@@ -236,11 +252,27 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         us = next(p for p in body["plans"] if p["symbol"] == "USUSDT")
         self.assertEqual(us["ad_status"], "unknown")
         self.assertEqual(us["ad"], "unknown")
+        self.assertIn("room", body)
+        self.assertEqual(body["room"]["live_count"], 0)
+        self.assertEqual(body["room"]["open_slots"], 2)
+        self.assertTrue(body["room"]["needs_you_clear"])
         page = c.get("/machine")
         self.assertEqual(page.status_code, 200)
         self.assertIn("AD top → bottom", page.text)
+        self.assertIn('class="chamber"', page.text)
+        self.assertIn("liveDeck", page.text)
+        self.assertIn("hangarList", page.text)
+        self.assertIn("needsYou", page.text)
+        self.assertNotIn("desk.css", page.text)
+        self.assertNotIn("Instrument Sans", page.text)
+        self.assertNotIn("<table", page.text.lower())
         self.assertNotIn("<canvas", page.text.lower())
         self.assertNotIn("tradingview", page.text.lower())
+        css = c.get("/assets/machine.css?v=m2")
+        self.assertEqual(css.status_code, 200)
+        self.assertIn("Newsreader", css.text)
+        self.assertNotIn("Instrument Sans", css.text)
+        self.assertNotIn("#22d3ee", css.text)
 
     def test_recut_kill_approve(self):
         c = self._client(True)

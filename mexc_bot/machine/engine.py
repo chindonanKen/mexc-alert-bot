@@ -656,6 +656,33 @@ def public_kb(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def room_state(
+    plans: List[Dict[str, Any]],
+    needs: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Page-room flags: empty / live / needs-you. Not a Desk overview strip."""
+    live = [p for p in plans if p.get("live")]
+    hangar = [p for p in plans if not p.get("live")]
+    need_n = len(needs or [])
+    if need_n:
+        tone = "needs_you"
+    elif live:
+        tone = "live"
+    elif not plans:
+        tone = "empty"
+    else:
+        tone = "watch"
+    return {
+        "empty": not plans,
+        "live_count": len(live),
+        "open_slots": max(0, 2 - len(live)),
+        "hangar_count": len(hangar),
+        "needs_you_count": need_n,
+        "needs_you_clear": need_n == 0,
+        "tone": tone,
+    }
+
+
 def account_view(store: MachineStore, user_id: int) -> Dict[str, Any]:
     live_n = store.live_count(user_id)
     allocated = store.live_allocated(user_id)

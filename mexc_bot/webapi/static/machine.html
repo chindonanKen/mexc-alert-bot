@@ -3,50 +3,37 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>AD Machine</title>
+  <title>Machine</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/machine.css?v=m1" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/machine.css?v=m2" />
 </head>
-<body>
-  <div class="wrap">
-    <header class="top">
-      <div>
-        <p class="kicker"><a href="/">AD Desk</a> · isolated book</p>
-        <h1>Machine</h1>
-        <p class="sub" id="accountLine">$200 equity · $100 / play · max 2 live · 1x · no live sends</p>
-      </div>
-      <div class="top-actions">
-        <button type="button" class="btn soft" id="btnRefresh">Refresh</button>
-      </div>
-    </header>
+<body class="chamber" data-tone="watch">
+  <a class="leave" href="/">Leave</a>
 
-    <section id="needsYou" class="needs" hidden></section>
+  <header class="threshold">
+    <p class="mark">Isolated paper book · no live send</p>
+    <h1>Machine</h1>
+    <p class="vault" id="vault">$200 · 0/2 live · 1x</p>
+    <p class="clear" id="needsClear">Needs-you · clear</p>
+  </header>
 
-    <section class="board">
-      <table class="data" id="rankTable">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>TF</th>
-            <th>AD top → bottom</th>
-            <th>Next layer $</th>
-            <th>Reds</th>
-            <th>Volume</th>
-            <th>News</th>
-            <th>Resting</th>
-          </tr>
-        </thead>
-        <tbody id="rankBody">
-          <tr><td colspan="8" class="mute">Loading…</td></tr>
-        </tbody>
-      </table>
-    </section>
+  <section id="needsYou" class="interrupt" hidden></section>
 
-    <section id="detail" class="detail" hidden></section>
-  </div>
+  <section class="berths" aria-label="Live plays">
+    <h2>Live <span>two slots</span></h2>
+    <div id="liveDeck" class="deck"></div>
+  </section>
+
+  <section class="hangar" aria-label="Hangar">
+    <h2>Hangar</h2>
+    <p class="legend">name · TF · AD top → bottom · next layer · reds · vol · news · resting</p>
+    <div id="hangarList" class="slips"></div>
+  </section>
+
+  <section id="planRoom" class="plan-room" hidden></section>
   <div id="toast" hidden></div>
-  <script src="/assets/machine.js?v=m1"></script>
+  <script src="/assets/machine.js?v=m2"></script>
 </body>
 </html>

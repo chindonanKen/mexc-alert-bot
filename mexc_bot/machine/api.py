@@ -21,6 +21,7 @@ from .engine import (
     rank_plans,
     recut,
     resolve_need,
+    room_state,
     seed_plans,
 )
 from .settings import machine_user_id
@@ -62,11 +63,14 @@ def list_plans(_: bool = Depends(require_auth)):
     store = _store()
     uid = _uid()
     seed_plans(store, uid)
+    plans = rank_plans(store, uid)
+    needs = [public_need(n) for n in store.list_needs(uid)]
     return {
         "ok": True,
         "account": account_view(store, uid),
-        "plans": rank_plans(store, uid),
-        "needs_you": [public_need(n) for n in store.list_needs(uid)],
+        "plans": plans,
+        "needs_you": needs,
+        "room": room_state(plans, needs),
         "live_orders_sent": False,
     }
 
@@ -174,10 +178,13 @@ def list_ranks(_: bool = Depends(require_auth)):
     store = _store()
     uid = _uid()
     seed_plans(store, uid)
+    plans = rank_plans(store, uid)
+    needs = [public_need(n) for n in store.list_needs(uid)]
     return {
         "ok": True,
         "account": account_view(store, uid),
-        "ranks": rank_plans(store, uid),
+        "ranks": plans,
+        "room": room_state(plans, needs),
     }
 
 
