@@ -218,6 +218,24 @@ def hang_ad(
     }
 
 
+def official_volume_n(bars: Optional[Iterable[Dict[str, Any]]]) -> Optional[float]:
+    """Last-bar or last-known official quote volume. Never invent a count."""
+    seq = [b for b in (bars or []) if isinstance(b, dict)]
+    for bar in reversed(seq):
+        raw = None
+        for key in ("v", "volume", "q", "quote_volume", "quoteVolume"):
+            if bar.get(key) is not None:
+                raw = bar.get(key)
+                break
+        if raw is None:
+            continue
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def volume_label(bars: Optional[Iterable[Dict[str, Any]]]) -> str:
     seq = [b for b in (bars or []) if isinstance(b, dict)]
     if len(seq) < 8:

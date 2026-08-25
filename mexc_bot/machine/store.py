@@ -118,6 +118,7 @@ class MachineStore:
                         armed_at REAL,
                         reds INTEGER,
                         volume TEXT,
+                        volume_n REAL,
                         news TEXT,
                         gate_json TEXT,
                         created_at REAL NOT NULL,
@@ -185,6 +186,7 @@ class MachineStore:
                 for col, decl in (
                     ("armed_at", "REAL"),
                     ("volume", "TEXT"),
+                    ("volume_n", "REAL"),
                     ("news", "TEXT"),
                     ("gate_json", "TEXT"),
                 ):
@@ -252,6 +254,12 @@ class MachineStore:
             "gate_json": _json(payload.get("gate")),
             "updated_at": now,
         }
+        if "volume_n" in payload:
+            fields["volume_n"] = payload.get("volume_n")
+        elif existing:
+            fields["volume_n"] = existing.get("volume_n")
+        else:
+            fields["volume_n"] = None
         if existing:
             sets = ", ".join(f"{k}=?" for k in fields)
             self._exec(

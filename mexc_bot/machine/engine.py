@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .hang import hang_ad, volume_label
+from .hang import hang_ad, official_volume_n, volume_label
 from .logic import (
     can_open_play,
     exponential_layers,
@@ -322,8 +322,10 @@ def _evaluate_plan(
         tf = plan.get("tf") or "15m"
         reds_map = {tf: snap.get("reds")}
     volume = snap.get("volume") or plan.get("volume") or "unknown"
+    volume_n = plan.get("volume_n")
     if snap.get("bars"):
         volume = volume_label(snap.get("bars"))
+        volume_n = official_volume_n(snap.get("bars"))
     heat = snap.get("heat_breadth")
     panic = bool(snap.get("panic_board"))
     ad_known = (plan.get("ad_status") == "known") and plan.get("ad_top") is not None
@@ -361,6 +363,7 @@ def _evaluate_plan(
         int(plan["id"]),
         reds=(chosen or {}).get("reds") if chosen else (tf_states[0].get("reds") if tf_states else None),
         volume=volume,
+        volume_n=volume_n,
         news=(kill or {}).get("class") if kill else None,
         gate=gate,
         tf=(chosen or {}).get("tf") or plan.get("tf"),
@@ -588,6 +591,7 @@ def public_plan(store: MachineStore, row: Optional[Dict[str, Any]]) -> Dict[str,
         "next_layer_usd": row.get("next_layer_usd"),
         "reds": row.get("reds") if row.get("reds") is not None else "unknown",
         "volume": row.get("volume") or "unknown",
+        "volume_n": row.get("volume_n"),
         "news": row.get("news"),
         "resting": bool(row.get("resting")),
         "armed_at": row.get("armed_at"),

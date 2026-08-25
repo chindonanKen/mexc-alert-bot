@@ -537,6 +537,59 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             store._exec("UPDATE alerts SET enabled=0")
 
+    def test_volume_n_from_official_bars_only(self):
+        from mexc_bot.machine.hang import official_volume_n
+
+        self.assertEqual(
+            official_volume_n([{"c": 1, "v": 100}, {"c": 2, "v": 1_200_000}]),
+            1_200_000.0,
+        )
+        self.assertEqual(official_volume_n([{"v": 50}, {"c": 2}]), 50.0)
+        self.assertIsNone(official_volume_n(None))
+        self.assertIsNone(official_volume_n([]))
+        self.assertIsNone(official_volume_n([{"c": 1}, {"c": 2}]))
+        self.assertIsNone(official_volume_n([{"volume": "climax"}]))
+
+        c = self._client(True)
+        seeded = c.get("/api/machine/plans").json()["plans"]
+        self.assertEqual(len(seeded), 6)
+        for p in seeded:
+            self.assertIn("volume", p)
+            self.assertTrue(p.get("volume_n") in (None,))
+
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "reds": {"15m": 4},
+                        "heat_breadth": 4,
+                        "volume": "climax",
+                        "bars": [{"t": i, "c": 0.2, "v": 1_000} for i in range(8)]
+                        + [{"t": 9, "c": 0.2, "v": 1_200_000}],
+                    },
+                    "AXTISTOCK_USDT|futures": {
+                        "reds": {"4h": 4},
+                        "heat_breadth": 4,
+                        "volume": "climax",
+                    },
+                }
+            },
+        )
+        self.assertEqual(ev.status_code, 200, ev.text)
+        self.assertFalse(ev.json().get("live_orders_sent"))
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertEqual(ansem["volume_n"], 1_200_000)
+        self.assertEqual(ansem["volume"], "climax")
+        axti = next(p for p in ev.json()["plans"] if p["symbol"] == "AXTISTOCK_USDT")
+        self.assertTrue(axti.get("volume_n") in (None,))
+        self.assertEqual(axti["volume"], "climax")
+        us = next(p for p in ev.json()["plans"] if p["symbol"] == "USUSDT")
+        self.assertTrue(us.get("volume_n") in (None,))
+        got = c.get(f"/api/machine/plans/{ansem['id']}").json()["plan"]
+        self.assertEqual(got["volume_n"], 1_200_000)
+        self.assertEqual(got["volume"], "climax")
+
     def test_named_bar_match_does_not_invent(self):
         from mexc_bot.machine.hang import hang_ad, match_named_bar
 
