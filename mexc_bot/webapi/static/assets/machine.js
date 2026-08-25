@@ -158,7 +158,7 @@
 
   function liveStage(p) {
     const newsCls = p.news ? " news-hot" : "";
-    return `<button type="button" class="stage live" data-id="${p.id}">
+    return `<article class="stage live" data-id="${p.id}">
       <div class="who"><span class="nm">${esc(instrument(p))}</span><span class="tf">${tfText(p)}</span></div>
       <div class="body">
         <div class="col ad-stack">
@@ -192,7 +192,7 @@
         <span class="line">LINE ${adTop(p)} / ${adBot(p)} · ${esc(p.remaining_layers || 0)} LEFT</span>
         <button type="button" class="kill" data-kill="${p.id}">Kill</button>
       </div>
-    </button>`;
+    </article>`;
   }
 
   function renderStages(plans) {

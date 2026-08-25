@@ -289,7 +289,7 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         self.assertNotIn("<table", page.text.lower())
         self.assertNotIn("<canvas", page.text.lower())
         self.assertNotIn("tradingview", page.text.lower())
-        css = c.get("/assets/machine.css?v=s1")
+        css = c.get("/assets/machine.css?v=s2")
         self.assertEqual(css.status_code, 200)
         self.assertIn("#010207", css.text)
         self.assertIn("#e8d5a3", css.text)

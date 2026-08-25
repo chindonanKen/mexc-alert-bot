@@ -125,6 +125,8 @@ body[data-live="0"] .hero { display: block; }
 
 .stage {
   position: relative;
+  display: flex;
+  flex-direction: column;
   height: 148px;
   padding: 0.85rem 1rem 0.7rem 1.15rem;
   border: 1px solid var(--hair);
@@ -238,8 +240,9 @@ body[data-live="0"] .hero { display: block; }
 .recut-bar {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 0.7rem;
-  margin-top: 0.55rem;
+  margin-top: auto;
   font-size: 0.68rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -253,6 +256,7 @@ body[data-live="0"] .hero { display: block; }
 }
 .kill {
   margin-left: auto;
+  flex: 0 0 auto;
   appearance: none;
   background: transparent;
   border: 1px solid var(--rose);
