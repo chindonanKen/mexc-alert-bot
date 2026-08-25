@@ -111,8 +111,38 @@
     return p && p.news ? esc(p.news) : "CLEAR";
   }
 
-  function restText(p) {
-    return p && p.resting ? "rest" : "—";
+  function linePrice(p) {
+    const orders = (p.working_orders || [])
+      .filter((o) => o && o.price != null)
+      .slice()
+      .sort((a, b) => Number(a.idx || 0) - Number(b.idx || 0));
+    if (orders[0]) return num(orders[0].price);
+    const layers = p.layers || [];
+    if (layers[0] && layers[0].price != null) return num(layers[0].price);
+    if (p.recut_line != null) return num(p.recut_line);
+    return "—";
+  }
+
+  function restClock(p) {
+    const start = Number(p && p.armed_at);
+    if (!p || !p.resting || !Number.isFinite(start) || start <= 0) return "";
+    const mins = Math.max(0, Math.round((Date.now() / 1000 - start) / 60));
+    if (mins < 60) return mins + "m";
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m ? h + "h" + m + "m" : h + "h";
+  }
+
+  function fmtVol(n) {
+    if (n >= 1e6) {
+      const x = n / 1e6;
+      return (x >= 10 ? x.toFixed(0) : x.toFixed(1).replace(/\.0$/, "")) + "M";
+    }
+    if (n >= 1e3) {
+      const x = n / 1e3;
+      return (x >= 10 ? x.toFixed(0) : x.toFixed(1).replace(/\.0$/, "")) + "K";
+    }
+    return String(Math.round(n));
   }
 
   function tfText(p) {
@@ -120,7 +150,16 @@
   }
 
   function volText(p) {
-    return p && p.volume && p.volume !== "unknown" ? esc(p.volume) : "—";
+    const labels = /^(dry|normal|elevated|climax|unknown)$/i;
+    const candidates = [p && p.volume_n, p && p.vol, p && p.quote_volume, p && p.volume];
+    for (const c of candidates) {
+      if (c == null || c === "") continue;
+      if (typeof c === "string" && labels.test(c.trim())) continue;
+      const n = Number(c);
+      if (Number.isFinite(n) && n > 0) return fmtVol(n);
+      if (typeof c === "string" && /^\d+(\.\d+)?[KMB]$/i.test(c.trim())) return esc(c.trim());
+    }
+    return "";
   }
 
   function select(id) {
@@ -209,11 +248,11 @@
         </div>
         <div>
           <span class="lbl">Rest</span>
-          <div class="fig">${restText(p)}</div>
+          <div class="fig">${restClock(p)}</div>
         </div>
       </div>
       <div class="recut-bar">
-        <span>LINE ${adTop(p)}</span>
+        <span>LINE ${linePrice(p)}</span>
         <span>${esc(p.remaining_layers || 0)} LEFT</span>
         <button type="button" class="kill" data-kill="${p.id}">Kill</button>
       </div>
@@ -265,7 +304,7 @@
           <span class="pips">${pips(p.reds)}</span>
           <span class="vol">${volText(p)}</span>
           <span class="news${p.news ? " news-hot" : ""}">${newsText(p)}</span>
-          <span class="rest">${restText(p)}</span>
+          <span class="rest">${restClock(p)}</span>
         </button>`;
       })
       .join("");
@@ -290,7 +329,7 @@
         <div class="sheet-row"><dt>Reds</dt><dd><span class="pips">${pips(p.reds)}</span></dd></div>
         <div class="sheet-row"><dt>Vol</dt><dd>${volText(p)}</dd></div>
         <div class="sheet-row"><dt>News</dt><dd>${newsText(p)}</dd></div>
-        <div class="sheet-row"><dt>Resting</dt><dd>${restText(p)}</dd></div>
+        <div class="sheet-row"><dt>Resting</dt><dd>${restClock(p)}</dd></div>
         <div class="sheet-row"><dt>Source</dt><dd>${esc(p.ad_source || "unknown")}</dd></div>
         <div class="sheet-row"><dt>Top bar</dt><dd>${esc(p.bar_top_label)}</dd></div>
         <div class="sheet-row"><dt>Bottom bar</dt><dd>${esc(p.bar_bottom_label)}</dd></div>
