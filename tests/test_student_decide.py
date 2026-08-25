@@ -286,6 +286,35 @@ class TestPaperFillOnTag(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
+    def test_tag_and_path_ok_writes_paper_row_else_not(self) -> None:
+        """Contract: tag + this-chart path ok → paper row; no repeat / waiting → none."""
+        ok = decide_from_bars(
+            fixture_tagged_habit(), symbol="FOO_USDT", market="futures"
+        )
+        self.assertEqual(ok["tag"], "tagged")
+        self.assertEqual(ok["live_streak"]["vs_habit"], "at")
+        self.assertTrue(should_paper_fill(ok))
+        row = self.book.open_on_tag(3, ok)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["status"], "open")
+        self.assertFalse(row["live_order"])
+        self.assertEqual(row["copy_text"], "top 1.25 → bottom 1.05")
+
+        waiting = decide_from_bars(
+            fixture_repeat(), symbol="FOO_USDT", market="futures"
+        )
+        self.assertEqual(waiting["tag"], "wait")
+        self.assertFalse(should_paper_fill(waiting))
+        self.assertIsNone(self.book.open_on_tag(3, waiting))
+
+        no_repeat = decide_from_bars(
+            fixture_no_repeat_grind(), symbol="GRIND", market="spot"
+        )
+        self.assertEqual(no_repeat["reason"], "no_repeat")
+        self.assertFalse(should_paper_fill(no_repeat))
+        self.assertIsNone(self.book.open_on_tag(3, no_repeat))
+        self.assertEqual(len(self.book.list_open(3)), 1)
+
     def test_wait_and_skip_do_not_fill(self) -> None:
         wait = decide_from_bars(
             fixture_repeat(), symbol="FOO", market="futures"
