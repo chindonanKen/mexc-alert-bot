@@ -15,7 +15,7 @@ LEVERAGE = 1.0  # 1x only
 
 DEFAULT_LAYER_COUNT = 5
 DEFAULT_REDS_REQUIRED = 3
-PANIC_BREADTH_MIN = 3  # board-wide exception to first-candle sit-out
+PANIC_BREADTH_MIN = 3  # board-wide exception to first/second-red sit-out
 
 MANILA_TZ = "Asia/Manila"
 

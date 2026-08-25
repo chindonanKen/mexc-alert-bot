@@ -19,9 +19,12 @@ class TestMachineLogic(unittest.TestCase):
         from mexc_bot.machine.logic import first_candle_sitout
 
         self.assertTrue(first_candle_sitout(1, heat_breadth=1, panic_board=False))
-        self.assertFalse(first_candle_sitout(1, heat_breadth=4, panic_board=False))
+        self.assertTrue(first_candle_sitout(2, heat_breadth=1, panic_board=False))
+        self.assertFalse(first_candle_sitout(3, heat_breadth=1, panic_board=False))
+        self.assertFalse(first_candle_sitout(1, heat_breadth=3, panic_board=False))
+        self.assertFalse(first_candle_sitout(2, heat_breadth=3, panic_board=False))
         self.assertFalse(first_candle_sitout(1, heat_breadth=1, panic_board=True))
-        self.assertFalse(first_candle_sitout(3, heat_breadth=1))
+        self.assertFalse(first_candle_sitout(2, heat_breadth=1, panic_board=True))
 
     def test_news_kill_not_rumor(self):
         from mexc_bot.machine.logic import news_kill
@@ -45,14 +48,16 @@ class TestMachineLogic(unittest.TestCase):
         two = tf_meets_rules(tf="15m", reds=2, ad_known=True)
         self.assertFalse(two["complete"])
         self.assertFalse(two["reds_ok"])
+        self.assertTrue(two["first_candle_sitout"])
         three = tf_meets_rules(tf="15m", reds=3, ad_known=True)
         self.assertTrue(three["complete"])
+        self.assertFalse(three["first_candle_sitout"])
 
     def test_one_tf_complete_vs_higher_first_candle(self):
         from mexc_bot.machine.logic import pick_working_tf, tf_meets_rules
 
         states = [
-            tf_meets_rules(tf="1h", reds=1, ad_known=True, heat_breadth=1),
+            tf_meets_rules(tf="1h", reds=2, ad_known=True, heat_breadth=1),
             tf_meets_rules(tf="15m", reds=4, ad_known=True, heat_breadth=1),
         ]
         self.assertTrue(states[0]["first_candle_sitout"])
@@ -439,6 +444,20 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         gate = pump.get("gate") or {}
         states = gate.get("tf_states") or []
         self.assertTrue(any(s.get("first_candle_sitout") for s in states))
+        ev3b = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "PUMPUSDT|spot": {"reds": {"15m": 2}, "heat_breadth": 1},
+                }
+            },
+        )
+        pump2 = next(p for p in ev3b.json()["plans"] if p["symbol"] == "PUMPUSDT")
+        self.assertFalse(pump2["live"])
+        gate2 = pump2.get("gate") or {}
+        self.assertTrue(
+            any(s.get("first_candle_sitout") for s in (gate2.get("tf_states") or []))
+        )
 
         # News kill flattens a live play even with later reds.
         axti = next(p for p in c.get("/api/machine/plans").json()["plans"] if p["symbol"] == "AXTISTOCK_USDT")

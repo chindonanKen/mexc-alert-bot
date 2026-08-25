@@ -29,10 +29,12 @@ def first_candle_sitout(
     heat_breadth: Optional[int] = None,
     panic_board: bool = False,
 ) -> bool:
-    """Sit out the first red of an isolated dump.
+    """Sit out the first or second red of an isolated dump.
 
-    Board-wide panic is the exception. A higher TF still on its first
-    candle does not block a different TF that already meets the rules.
+    Most charts we watch are not clickable yet on red 1 or 2.
+    Board-wide panic (panic_board or heat_breadth >= PANIC_BREADTH_MIN)
+    is the exception. Sit-out is per-TF: another TF that already meets
+    the rules can still play.
     """
     if reds is None:
         return False
@@ -40,7 +42,7 @@ def first_candle_sitout(
         n = int(reds)
     except (TypeError, ValueError):
         return False
-    if n != 1:
+    if n not in (1, 2):
         return False
     if panic_board:
         return False
@@ -133,7 +135,7 @@ def pick_working_tf(
     respected: Optional[Dict[str, float]] = None,
     locked_tf: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """One complete TF can play even if a higher TF is still first-candle.
+    """One complete TF can play even if a higher TF is still sitting out.
 
     If two (or more) TFs complete: pick the one this range respected.
     Slower if tied. Never average two ADs.
