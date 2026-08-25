@@ -243,6 +243,37 @@ class EventStore:
         )
         # book: 'ad' (default AD desk learning) | 'hold' (long-term invest — exclude from AD teach)
         self._ensure_column(conn, "position_flags", "book", "TEXT")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS student_paper_book (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                market TEXT NOT NULL,
+                tf TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                entry_px REAL NOT NULL,
+                copy_top REAL,
+                copy_bottom REAL,
+                copy_text TEXT,
+                tag TEXT,
+                habit_reds INTEGER,
+                live_reds INTEGER,
+                habit_vol TEXT,
+                live_vol TEXT,
+                decide_json TEXT,
+                note TEXT,
+                opened_at REAL NOT NULL,
+                notified_at REAL,
+                recut_at REAL,
+                live_order INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_student_paper_user_open "
+            "ON student_paper_book (user_id, status, opened_at DESC)"
+        )
 
     @staticmethod
     def _ensure_column(
@@ -1012,6 +1043,37 @@ class EventStore:
                 (int(user_id), limit),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def list_setup_cases_for_symbol(
+        self,
+        user_id: int,
+        symbol: str,
+        *,
+        market: Optional[str] = None,
+        limit: int = 40,
+    ) -> List[dict]:
+        """Recent cases for one book name. Scan is additive-read only."""
+        from .symbols import same_book_name
+
+        limit = max(1, min(int(limit), 80))
+        with self._lock:
+            rows = self._get_conn().execute(
+                "SELECT * FROM agent_setup_cases WHERE user_id = ? "
+                "ORDER BY frozen_at DESC LIMIT 200",
+                (int(user_id),),
+            ).fetchall()
+        mkt = (market or "").strip().lower()
+        out: List[dict] = []
+        for raw in rows:
+            row = dict(raw)
+            if not same_book_name(symbol, row.get("symbol") or ""):
+                continue
+            if mkt and (row.get("market") or "").strip().lower() not in ("", mkt):
+                continue
+            out.append(row)
+            if len(out) >= limit:
+                break
+        return out
 
     def list_position_flags(self, user_id: int) -> List[dict]:
         with self._lock:

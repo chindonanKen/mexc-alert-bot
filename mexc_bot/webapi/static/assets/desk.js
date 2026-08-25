@@ -286,6 +286,34 @@
       }
     }
 
+    const seEl = $("#ovStudentEntered");
+    if (seEl) {
+      const entered = h.student_entered || d.student_entered || [];
+      if (!entered.length) {
+        seEl.hidden = true;
+        seEl.innerHTML = "";
+      } else {
+        seEl.hidden = false;
+        let html = `<div class="ov-student-h">Student entered (paper) <button type="button" class="btn soft sm" data-jump="memory">Recut</button></div>`;
+        entered.forEach((r) => {
+          html += `<div class="ov-needs-row">
+            <div class="ov-needs-meta">${escHtml(
+              [r.symbol, r.market, r.copy_text, r.tag, "no live order"]
+                .filter(Boolean)
+                .join(" · ")
+            )}</div>
+          </div>`;
+        });
+        seEl.innerHTML = html;
+        $$("[data-jump]", seEl).forEach((b) =>
+          b.addEventListener("click", () => {
+            setView(b.dataset.jump);
+            refreshAll();
+          })
+        );
+      }
+    }
+
     // Bad intel strip — always top 5 delist/scam/hack/… (any age = reminder)
     const newsEl = $("#ovBookNews");
     if (newsEl) {
@@ -3184,6 +3212,144 @@
     if (state.learnSel && state.learnSel.entity_key) {
       setLearnSelection(state.learnSel);
     }
+    loadStudentDecideBook();
+    loadPaperBook();
+  }
+
+  function renderDecide(d) {
+    const out = $("#decideOut");
+    if (!out) return;
+    if (!d || !d.ok) {
+      out.className = "learn-decide-out mute";
+      out.textContent = "Decide failed.";
+      return;
+    }
+    const sym = `${d.symbol || "—"} [${d.market || ""} ${d.tf || ""}]`;
+    if (d.action === "skip") {
+      out.className = "learn-decide-out skip";
+      out.textContent = `${sym} · skip · ${d.reason || "no_repeat"} · no line`;
+      return;
+    }
+    const drop = d.initial_drop || {};
+    const copy = d.live_copy || {};
+    const habit = d.path_habit || {};
+    const streak = d.live_streak || {};
+    const bits = [
+      `<div>${escHtml(`${sym} · ${d.tz || "Asia/Manila"}`)}</div>`,
+      drop.text ? `<div>${escHtml(drop.text)}</div>` : "",
+      copy.text
+        ? `<div class="learn-decide-copy">${escHtml(copy.text)}</div>`
+        : "",
+      `<div>${escHtml(
+        `habit reds ${habit.reds ?? "—"} / ${habit.vol || "—"} · live ${
+          streak.reds ?? "—"
+        } ${streak.vs_habit || ""}`
+      )}</div>`,
+      `<div>${escHtml(`tag ${d.tag || "—"}`)}</div>`,
+    ];
+    out.className = "learn-decide-out line";
+    out.innerHTML = bits.filter(Boolean).join("");
+  }
+
+  async function runStudentDecide(symbol, market, tf) {
+    const out = $("#decideOut");
+    if (out) {
+      out.className = "learn-decide-out mute";
+      out.textContent = `Walking ${symbol}…`;
+    }
+    const q = new URLSearchParams({
+      symbol: String(symbol || ""),
+      market: String(market || "futures"),
+      tf: String(tf || "15m"),
+    });
+    const d = await api(`/api/learning/decide?${q}`);
+    renderDecide(d);
+    return d;
+  }
+
+  async function loadStudentDecideBook() {
+    const host = $("#decideNames");
+    if (!host) return;
+    try {
+      const r = await api("/api/learning/decide/book");
+      const names = r.names || [];
+      host.innerHTML = names.length
+        ? names
+            .map(
+              (n) =>
+                `<button type="button" class="chip" data-decide-sym="${escHtml(
+                  n.symbol
+                )}" data-decide-mkt="${escHtml(n.market)}">${escHtml(
+                  n.symbol
+                )}</button>`
+            )
+            .join("")
+        : `<span class="mute">No book names</span>`;
+      $$("[data-decide-sym]", host).forEach((b) => {
+        b.addEventListener("click", async () => {
+          const sym = b.dataset.decideSym;
+          const mkt = b.dataset.decideMkt || "futures";
+          const tf = ($("#decideTf") && $("#decideTf").value) || "15m";
+          if ($("#decideSymbol")) $("#decideSymbol").value = sym;
+          if ($("#decideMarket")) $("#decideMarket").value = mkt;
+          try {
+            await runStudentDecide(sym, mkt, tf);
+          } catch (e) {
+            toast(e.message);
+          }
+        });
+      });
+    } catch (e) {
+      host.innerHTML = `<span class="mute">${escHtml(e.message)}</span>`;
+    }
+  }
+
+  async function loadPaperBook() {
+    const host = $("#paperBook");
+    if (!host) return;
+    try {
+      const r = await api("/api/learning/paper");
+      const open = r.open || [];
+      if (!open.length) {
+        host.innerHTML = `<span class="mute">No paper entries. Recut after a tag fill.</span>`;
+        return;
+      }
+      host.innerHTML = open
+        .map(
+          (row) => `<div class="learn-card">
+            <div class="learn-card-h">${escHtml(row.symbol || "—")} · ${escHtml(
+            row.copy_text || ""
+          )}</div>
+            <div class="learn-card-meta">${escHtml(
+              `${row.tag || ""} · habit ${row.habit_reds ?? "—"} / ${
+                row.habit_vol || "—"
+              } · paper · no live order`
+            )}</div>
+            <div class="row-gap mt">
+              <button type="button" class="btn soft sm" data-recut="${
+                row.id
+              }">Recut</button>
+            </div>
+          </div>`
+        )
+        .join("");
+      $$("[data-recut]", host).forEach((b) => {
+        b.addEventListener("click", async () => {
+          try {
+            await api(`/api/learning/paper/${b.dataset.recut}/recut`, {
+              method: "POST",
+            });
+            toast("Recut (paper)");
+            loadPaperBook();
+            if (state.view === "overview") loadOverview();
+          } catch (e) {
+            toast(e.message);
+          }
+        });
+      });
+    } catch (e) {
+      host.innerHTML = `<span class="mute">${escHtml(e.message)}</span>`;
+    }
   }
 
   function wireLearningForms() {
@@ -3351,6 +3517,51 @@
           });
           const pre = $("#agentRecallReply");
           if (pre) pre.textContent = r.reply || "";
+        } catch (e) {
+          toast(e.message);
+        }
+      });
+    }
+    const df = $("#decideForm");
+    if (df && !df.dataset.bound) {
+      df.dataset.bound = "1";
+      df.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const fd = new FormData(df);
+        const symbol = (fd.get("symbol") || "").toString().trim();
+        const market = (fd.get("market") || "futures").toString();
+        const tf = (fd.get("tf") || "15m").toString();
+        if (!symbol) return;
+        try {
+          await runStudentDecide(symbol, market, tf);
+        } catch (e) {
+          toast(e.message);
+        }
+      });
+    }
+    const bb = $("#btnDecideBook");
+    if (bb && !bb.dataset.bound) {
+      bb.dataset.bound = "1";
+      bb.addEventListener("click", () => loadStudentDecideBook());
+    }
+    const bw = $("#btnDecideWatch");
+    if (bw && !bw.dataset.bound) {
+      bw.dataset.bound = "1";
+      bw.addEventListener("click", async () => {
+        const out = $("#decideOut");
+        if (out) {
+          out.className = "learn-decide-out mute";
+          out.textContent = "Watching book…";
+        }
+        try {
+          const r = await api("/api/learning/decide/watch", { method: "POST" });
+          if (out) {
+            out.className = "learn-decide-out line";
+            out.textContent = r.n_filled
+              ? `Student entered paper × ${r.n_filled}. Recut in the morning.`
+              : "Watch done · no tag+habit fill";
+          }
+          loadPaperBook();
         } catch (e) {
           toast(e.message);
         }

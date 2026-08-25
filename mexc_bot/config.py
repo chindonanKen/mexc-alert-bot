@@ -125,6 +125,10 @@ class Settings:
     # Cause→effect scoring horizon for isolated agent (default 4h)
     isolated_outcome_horizon_seconds: int
 
+    # Unattended student decide → paper fill on tag (never live orders)
+    feature_student_paper: bool
+    student_decide_poll_seconds: float
+
     @property
     def alerts_file_path(self) -> Path:
         return self.alerts_file
@@ -261,5 +265,9 @@ def load_settings() -> Settings:
         delist_radar_poll_seconds=float(os.getenv("DELIST_RADAR_POLL_SECONDS", "180")),
         isolated_outcome_horizon_seconds=int(
             os.getenv("ISOLATED_OUTCOME_HORIZON_SECONDS", "14400")
+        ),
+        feature_student_paper=_env_bool("FEATURE_STUDENT_PAPER", False),
+        student_decide_poll_seconds=float(
+            os.getenv("STUDENT_DECIDE_POLL_SECONDS", "90")
         ),
     )

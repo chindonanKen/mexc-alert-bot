@@ -41,7 +41,7 @@ Fine-tuning the desk burns tokens on silent regressions. **Do not end a Desk cha
 **Do not** mark pass without running the panel. Docs-only / pure Telegram bot work (no desk paths) is exempt.
 
 Full vision: **[docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md)** · strategy: **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** · handoff: **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)**.  
-**Autonomy roadmap (canonical):** **[docs/AD_AGENT_PLAN.md](docs/AD_AGENT_PLAN.md)** — P0 shipped → **P1 case factory next** → … → P7 gated live. Full focus = build this agent; desk UI only small edits.
+**Autonomy path (now):** encode taught chart rules the same day → student decide → paper fill on tag while away. No live orders. Desk UI only small edits. Canonical notes: **[docs/AD_AGENT_PLAN.md](docs/AD_AGENT_PLAN.md)**.
 
 ### Platform baseline (owner-accepted 2026-08-03)
 
@@ -452,7 +452,7 @@ Observe → Freeze case → Decide + log → Grade → AD policy → Paper → A
 |-------|------|--------|
 | **P0** | Truth & teach (money, chips, trade-bound lessons) | **Shipped** |
 | **P1** | **Case factory** — `agent_setup_cases`, freeze on fire/teach, Learning snapshot UI | **Core shipped** (index/retrieval → P2) |
-| **P2** | Decide + log (`agent_decisions`, nearest-case, soft remind) | Not started |
+| **P2** | Decide + log (`agent_decisions`, nearest-case, soft remind) | Week-1 tape decide + paper fill on tag (no live orders) |
 | **P3** | Grade vs path / `ad_met` / teach_ok PnL | Not started |
 | **P4** | AD policy proposals (layers/zones) | Not started |
 | **P5** | Paper / replay + pass bar | Not started |

@@ -75,6 +75,7 @@ def main() -> None:
     outcome_poller = None
     engagement_bridge = None
     fill_sync = None
+    student_watch = None
     if settings.feature_learning:
         from .learning import EventStore, OutcomePoller
 
@@ -401,6 +402,37 @@ def main() -> None:
             "MEXC_PRIVATE_TELEGRAM_USER_ID — fill sync not started"
         )
 
+    if (
+        settings.feature_learning
+        and settings.feature_student_paper
+        and event_store is not None
+    ):
+        from .learning.student_decide import collect_book_names
+        from .learning.student_paper import StudentWatchPoller
+
+        uid = settings.mexc_private_telegram_user_id
+        if not uid:
+            desk_uid = os.getenv("DESK_USER_ID", "").strip()
+            uid = int(desk_uid) if desk_uid.isdigit() else 0
+        if uid:
+            student_watch = StudentWatchPoller(
+                event_store,
+                int(uid),
+                notifier=send_telegram_notification,
+                names_fn=lambda: collect_book_names(int(uid)),
+                poll_seconds=settings.student_decide_poll_seconds,
+            )
+            logger.info(
+                "Student watch ready user=%s poll=%ss paper_only live_orders=off",
+                uid,
+                settings.student_decide_poll_seconds,
+            )
+        else:
+            logger.warning(
+                "FEATURE_STUDENT_PAPER on but no DESK_USER_ID / "
+                "MEXC_PRIVATE_TELEGRAM_USER_ID — watch not started"
+            )
+
     # Start background workers
     monitor.start()
     logger.info("Price monitor thread started")
@@ -428,6 +460,9 @@ def main() -> None:
     if inv_bridge is not None:
         inv_bridge.start()
         logger.info("Investigation outcome bridge started")
+    if student_watch is not None:
+        student_watch.start()
+        logger.info("Student watch poller started (paper fills only)")
 
     def _shutdown(signum=None, frame=None):
         logger.info("Shutdown signal received. Stopping workers...")
@@ -446,6 +481,8 @@ def main() -> None:
             isolated_agent.stop()
         if inv_bridge is not None:
             inv_bridge.stop()
+        if student_watch is not None:
+            student_watch.stop()
         try:
             price_provider.close()
         except Exception:
@@ -485,6 +522,8 @@ def main() -> None:
             isolated_agent.stop()
         if inv_bridge is not None:
             inv_bridge.stop()
+        if student_watch is not None:
+            student_watch.stop()
 
 
 if __name__ == "__main__":

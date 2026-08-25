@@ -47,6 +47,23 @@ def learning_base(symbol: str) -> str:
     return base
 
 
+def same_book_name(left: str, right: str) -> bool:
+    """AXTI matches AXTISTOCK_USDT. Used to bind a locked visual_ad to a decide."""
+    a = learning_base(left)
+    b = learning_base(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if a + "STOCK" == b or b + "STOCK" == a:
+        return True
+    if a.endswith("STOCK") and a[: -len("STOCK")] == b:
+        return True
+    if b.endswith("STOCK") and b[: -len("STOCK")] == a:
+        return True
+    return False
+
+
 def normalize_learning_symbol(symbol: str, market: Optional[str] = None) -> str:
     """Canonical symbol for storage on a given market.
 
