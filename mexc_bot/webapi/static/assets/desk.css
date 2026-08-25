@@ -97,13 +97,16 @@ body::before {
   opacity: 0.55;
   padding: 0.85rem 0.8rem 0.25rem;
 }
-.nav button {
+.nav button,
+.nav a.nav-ext {
   appearance: none; border: 1px solid transparent; background: transparent;
   color: var(--mute); text-align: left; padding: 0.68rem 0.8rem;
   border-radius: 12px; font: inherit; font-weight: 600; cursor: pointer;
   transition: .15s ease;
+  text-decoration: none; display: block;
 }
-.nav button.nav-dim {
+.nav button.nav-dim,
+.nav a.nav-ext.nav-dim {
   font-weight: 500;
   font-size: 0.88rem;
   opacity: 0.72;

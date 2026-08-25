@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AD Machine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/machine.css?v=m1" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <p class="kicker"><a href="/">AD Desk</a> · isolated book</p>
+        <h1>Machine</h1>
+        <p class="sub" id="accountLine">$200 equity · $100 / play · max 2 live · 1x · no live sends</p>
+      </div>
+      <div class="top-actions">
+        <button type="button" class="btn soft" id="btnRefresh">Refresh</button>
+      </div>
+    </header>
+
+    <section id="needsYou" class="needs" hidden></section>
+
+    <section class="board">
+      <table class="data" id="rankTable">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>TF</th>
+            <th>AD top → bottom</th>
+            <th>Next layer $</th>
+            <th>Reds</th>
+            <th>Volume</th>
+            <th>News</th>
+            <th>Resting</th>
+          </tr>
+        </thead>
+        <tbody id="rankBody">
+          <tr><td colspan="8" class="mute">Loading…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="detail" class="detail" hidden></section>
+  </div>
+  <div id="toast" hidden></div>
+  <script src="/assets/machine.js?v=m1"></script>
+</body>
+</html>
