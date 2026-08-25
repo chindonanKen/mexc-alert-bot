@@ -1,4 +1,4 @@
-/* Isolated Machine chamber. Numbers only. Own room — not Desk JS patterns. */
+/* Isolated Machine chamber. A room to return to — numbers only, no chart. */
 (function () {
   const $ = (s, el = document) => el.querySelector(s);
   const state = {
@@ -6,6 +6,7 @@
     plans: [],
     needs: [],
     room: {},
+    account: {},
     selected: null,
   };
 
@@ -135,15 +136,15 @@
     for (let i = 0; i < open; i += 1) {
       parts.push(
         `<div class="berth open">
-          <p class="slot">Slot ${live.length + i + 1} · open</p>
-          <p class="name">Nothing resting</p>
-          <p class="meta">A live play can take this berth. Max two. $100 into the layers.</p>
+          <p class="slot">Open berth ${live.length + i + 1}</p>
+          <p class="name">Powder ready</p>
+          <p class="meta">$100 into a line · 1x · first candle sits out unless the board is in panic.</p>
         </div>`
       );
     }
     if (!live.length && (room || {}).empty) {
       host.innerHTML =
-        '<div class="berth open" style="grid-column:1/-1"><p class="slot">Empty book</p><p class="name">No seed plans</p></div>';
+        '<div class="berth open" style="grid-column:1/-1"><p class="slot">Quiet book</p><p class="name">Powder ready</p><p class="meta">The room is open. Six seeds hang when the machine is on. No live send. Come back when a line is cut.</p></div>';
       return;
     }
     host.innerHTML = parts.join("");
@@ -165,22 +166,25 @@
     const host = $("#hangarList");
     const hangar = (plans || []).filter((p) => !p.live);
     if (!hangar.length) {
-      host.innerHTML = '<p class="empty-hangar">Hangar is empty — both names are live, or the book is bare.</p>';
+      host.innerHTML =
+        '<p class="empty-hangar">Both names are live. The hangar is empty on purpose.</p>';
       return;
     }
     host.innerHTML = hangar
       .map((p) => {
         const on = state.selected === p.id ? " on" : "";
         const killed = p.status === "killed" ? " killed" : "";
-        return `<button type="button" class="slip${on}${killed}" data-id="${p.id}">
+        return `<button type="button" class="plate${on}${killed}" data-id="${p.id}">
           <span class="nm">${esc(p.name || p.display)}</span>
-          <span class="tf">${esc(p.tf)}</span>
           <span class="adline ${p.ad_status === "known" ? "" : "uncut"}">${adText(p)}</span>
-          <span class="fig">${nextLayer(p)}</span>
-          <span class="fig">${esc(p.reds)}</span>
-          <span class="fig">${esc(p.volume)}</span>
-          <span class="fig ${p.news ? "news-hot" : ""}">${p.news ? esc(p.news) : "—"}</span>
-          <span class="fig">${p.resting ? "resting" : "dry"}</span>
+          <span class="row">
+            <b>${esc(p.tf)}</b>
+            <span>next ${nextLayer(p)}</span>
+            <span>reds ${esc(p.reds)}</span>
+            <span>vol ${esc(p.volume)}</span>
+            <span class="${p.news ? "news-hot" : ""}">news ${p.news ? esc(p.news) : "—"}</span>
+            <span>${p.resting ? "resting" : "dry"}</span>
+          </span>
         </button>`;
       })
       .join("");
@@ -228,9 +232,32 @@
   }
 
   function paint() {
-    document.body.dataset.tone = state.room.tone || "watch";
+    const room = state.room || {};
+    document.body.dataset.tone = room.tone || "watch";
+    const inv = $("#invite");
+    if (inv) inv.textContent = room.invitation || "Both berths are open.";
+    const chorus = $("#chorus");
+    if (chorus) {
+      const names = room.hung_names || [];
+      if (names.length) {
+        chorus.hidden = false;
+        chorus.textContent = names.join("  ·  ");
+      } else {
+        chorus.hidden = true;
+        chorus.textContent = "";
+      }
+    }
+    const clock = $("#clock");
+    if (clock) {
+      const last = room.last_close
+        ? ` · last ${room.last_close.symbol || ""} ${room.last_close.bounce_or_fail || room.last_close.reason}`
+        : "";
+      clock.textContent = `${room.manila || tickManila()} · ${room.hung_count || 0} hung · ${
+        room.uncut_count || 0
+      } uncut${last}`;
+    }
     renderNeeds(state.needs);
-    renderLive(state.plans, state.room);
+    renderLive(state.plans, room);
     renderHangar(state.plans);
   }
 
@@ -239,7 +266,8 @@
     state.plans = data.plans || [];
     state.needs = data.needs_you || [];
     state.room = data.room || {};
-    const acc = data.account || {};
+    state.account = data.account || {};
+    const acc = state.account;
     $("#vault").textContent =
       `$${acc.equity_usd} · ${acc.live_plays}/${acc.max_live_plays} live · 1x · cash $${acc.cash_usd}`;
     paint();
@@ -302,8 +330,38 @@
     }
   });
 
+  function tickManila() {
+    try {
+      return new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Manila",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZoneName: "short",
+      })
+        .format(new Date())
+        .replace("GMT+8", "PHT");
+    } catch (_) {
+      return "";
+    }
+  }
+
   load().catch((e) => {
     document.body.dataset.tone = "empty";
-    $("#hangarList").innerHTML = `<p class="empty-book">${esc(e.message)}</p>`;
+    $("#invite").textContent = "Quiet book. The chamber is closed — come back when the flag is on.";
+    $("#hangarList").innerHTML =
+      `<p class="empty-book">${esc(e.message)}. The line will be here. Powder stays ready.</p>`;
   });
+
+  setInterval(() => {
+    const clock = $("#clock");
+    if (!clock || !state.room) return;
+    const room = state.room;
+    const last = room.last_close
+      ? ` · last ${room.last_close.symbol || ""} ${room.last_close.bounce_or_fail || room.last_close.reason}`
+      : "";
+    clock.textContent = `${tickManila()} · ${room.hung_count || 0} hung · ${
+      room.uncut_count || 0
+    } uncut${last}`;
+  }, 30000);
 })();

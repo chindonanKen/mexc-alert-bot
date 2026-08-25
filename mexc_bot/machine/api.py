@@ -65,12 +65,14 @@ def list_plans(_: bool = Depends(require_auth)):
     seed_plans(store, uid)
     plans = rank_plans(store, uid)
     needs = [public_need(n) for n in store.list_needs(uid)]
+    closes = [public_close(c) for c in store.list_closes(uid)]
+    kb = [public_kb(k) for k in store.list_kb(uid)]
     return {
         "ok": True,
         "account": account_view(store, uid),
         "plans": plans,
         "needs_you": needs,
-        "room": room_state(plans, needs),
+        "room": room_state(plans, needs, closes=closes, kb=kb),
         "live_orders_sent": False,
     }
 
@@ -180,11 +182,13 @@ def list_ranks(_: bool = Depends(require_auth)):
     seed_plans(store, uid)
     plans = rank_plans(store, uid)
     needs = [public_need(n) for n in store.list_needs(uid)]
+    closes = [public_close(c) for c in store.list_closes(uid)]
+    kb = [public_kb(k) for k in store.list_kb(uid)]
     return {
         "ok": True,
         "account": account_view(store, uid),
         "ranks": plans,
-        "room": room_state(plans, needs),
+        "room": room_state(plans, needs, closes=closes, kb=kb),
     }
 
 

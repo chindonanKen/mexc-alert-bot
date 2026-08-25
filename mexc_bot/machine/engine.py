@@ -659,10 +659,25 @@ def public_kb(row: Dict[str, Any]) -> Dict[str, Any]:
 def room_state(
     plans: List[Dict[str, Any]],
     needs: List[Dict[str, Any]],
+    *,
+    closes: Optional[List[Dict[str, Any]]] = None,
+    kb: Optional[List[Dict[str, Any]]] = None,
+    now: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Page-room flags: empty / live / needs-you. Not a Desk overview strip."""
+    """Page-room flags + a living line. Never invents AD ticks."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from .settings import MANILA_TZ
+
     live = [p for p in plans if p.get("live")]
     hangar = [p for p in plans if not p.get("live")]
+    hung = [
+        p
+        for p in plans
+        if p.get("ad_status") == "known" and p.get("ad_top") is not None
+    ]
+    uncut = [p for p in plans if p not in hung]
     need_n = len(needs or [])
     if need_n:
         tone = "needs_you"
@@ -672,6 +687,17 @@ def room_state(
         tone = "empty"
     else:
         tone = "watch"
+    wall = float(now if now is not None else time.time())
+    manila = datetime.fromtimestamp(wall, tz=ZoneInfo(MANILA_TZ))
+    last = (closes or [None])[0] if closes else None
+    last_close = None
+    if last:
+        last_close = {
+            "symbol": last.get("symbol"),
+            "reason": last.get("reason"),
+            "bounce_or_fail": last.get("bounce_or_fail"),
+        }
+    hung_names = [str(p.get("name") or p.get("display") or p.get("symbol")) for p in hung]
     return {
         "empty": not plans,
         "live_count": len(live),
@@ -680,7 +706,33 @@ def room_state(
         "needs_you_count": need_n,
         "needs_you_clear": need_n == 0,
         "tone": tone,
+        "hung_count": len(hung),
+        "uncut_count": len(uncut),
+        "hung_names": hung_names,
+        "kb_count": len(kb or []),
+        "manila": manila.strftime("%H:%M PHT"),
+        "invitation": _invitation(tone, hung_names, len(live), need_n),
+        "last_close": last_close,
     }
+
+
+def _invitation(
+    tone: str,
+    hung_names: List[str],
+    live_n: int,
+    need_n: int,
+) -> str:
+    if tone == "needs_you":
+        return "The book is waiting on you."
+    if tone == "live":
+        return "A play is on. Recut the line or kill from the plan."
+    if tone == "empty":
+        return "Quiet book. Six seeds hang when the machine is on."
+    if hung_names:
+        shown = " and ".join(hung_names[:2])
+        extra = f" +{len(hung_names) - 2}" if len(hung_names) > 2 else ""
+        return f"{shown}{extra} already have a line. Both berths are open."
+    return "Both berths are open. Powder ready — $100 into a line, 1x."
 
 
 def account_view(store: MachineStore, user_id: int) -> Dict[str, Any]:
