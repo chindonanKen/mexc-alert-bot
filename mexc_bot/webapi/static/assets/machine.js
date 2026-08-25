@@ -1,4 +1,4 @@
-/* Isolated Machine chamber. A room to return to — numbers only, no chart. */
+/* Slate Machine room. Numbers only — no chart, no waveform. */
 (function () {
   const $ = (s, el = document) => el.querySelector(s);
   const state = {
@@ -64,7 +64,7 @@
   }
 
   function num(v) {
-    if (v == null || v === "unknown") return "unknown";
+    if (v == null || v === "unknown") return "—";
     const x = Number(v);
     if (Number.isNaN(x)) return esc(v);
     if (x >= 100) return x.toFixed(2);
@@ -72,40 +72,64 @@
     return String(x);
   }
 
-  function adClass(p) {
-    return p && p.ad_status === "known" ? "ad" : "ad uncut";
+  function money(v) {
+    if (v == null) return "—";
+    const x = Number(v);
+    if (Number.isNaN(x)) return "—";
+    return "$" + (x >= 100 ? x.toFixed(2) : String(Number(x.toPrecision(6))));
   }
 
-  function adText(p) {
-    if (!p || p.ad_status !== "known") return "uncut";
-    return esc(p.ad);
+  function instrument(p) {
+    return p.symbol || p.name || p.display || "";
   }
 
-  function nextLayer(p) {
-    return p && p.next_layer_usd != null ? "$" + num(p.next_layer_usd) : "—";
+  function adTop(p) {
+    return p && p.ad_status === "known" ? num(p.ad_top) : "—";
+  }
+
+  function adBot(p) {
+    return p && p.ad_status === "known" ? num(p.ad_bottom) : "—";
+  }
+
+  function pips(reds) {
+    const n = Number(reds);
+    if (!Number.isFinite(n) || n <= 0) return '<span class="pip-none">—</span>';
+    const count = Math.min(6, Math.round(n));
+    return Array.from({ length: count }, () => '<span class="pip"></span>').join("");
+  }
+
+  function newsText(p) {
+    return p && p.news ? esc(p.news) : "CLEAR";
+  }
+
+  function restText(p) {
+    return p && p.resting ? "rest" : "—";
+  }
+
+  function tfText(p) {
+    return p && p.tf && p.tf !== "unknown" ? esc(p.tf) : "—";
   }
 
   function select(id) {
     state.selected = Number(id);
-    paint();
-    renderPlan(state.plans.find((x) => x.id === state.selected) || null);
+    renderSheet(state.plans.find((x) => x.id === state.selected) || null);
+  }
+
+  function closeSheet() {
+    state.selected = null;
+    const sheet = $("#planSheet");
+    const back = $("#sheetBack");
+    sheet.hidden = true;
+    sheet.innerHTML = "";
+    back.hidden = true;
   }
 
   function renderNeeds(needs) {
-    const host = $("#needsYou");
-    const clear = $("#needsClear");
+    const host = $("#needsStack");
     if (!needs || !needs.length) {
       host.hidden = true;
       host.innerHTML = "";
-      if (clear) {
-        clear.textContent = "Needs-you · clear";
-        clear.setAttribute("data-hot", "0");
-      }
       return;
-    }
-    if (clear) {
-      clear.textContent = "Needs-you · " + needs.length;
-      clear.setAttribute("data-hot", "1");
     }
     host.hidden = false;
     host.innerHTML =
@@ -128,94 +152,131 @@
         .join("");
   }
 
-  function renderLive(plans, room) {
-    const host = $("#liveDeck");
-    const live = (plans || []).filter((p) => p.live).slice(0, 2);
-    const open = Math.max(0, 2 - live.length);
-    const parts = live.map((p, i) => berth(p, i + 1));
-    for (let i = 0; i < open; i += 1) {
-      parts.push(
-        `<div class="berth open">
-          <p class="slot">Open berth ${live.length + i + 1}</p>
-          <p class="name">Powder ready</p>
-          <p class="meta">$100 into a line · 1x · first candle sits out unless the board is in panic.</p>
-        </div>`
-      );
-    }
-    if (!live.length && (room || {}).empty) {
-      host.innerHTML =
-        '<div class="berth open" style="grid-column:1/-1"><p class="slot">Quiet book</p><p class="name">Powder ready</p><p class="meta">The room is open. Six seeds hang when the machine is on. No live send. Come back when a line is cut.</p></div>';
-      return;
-    }
-    host.innerHTML = parts.join("");
+  function ghost() {
+    return `<div class="stage open"><p class="ghost">open · $200</p></div>`;
   }
 
-  function berth(p, slot) {
-    const on = state.selected === p.id ? " on" : "";
-    return `<button type="button" class="berth live${on}" data-id="${p.id}">
-      <p class="slot">Live ${slot}${p.resting ? " · resting" : ""}</p>
-      <p class="name">${esc(p.name || p.display)}</p>
-      <p class="${adClass(p)}">${adText(p)}</p>
-      <p class="meta"><b>${esc(p.tf)}</b> · reds ${esc(p.reds)} · vol ${esc(p.volume)} · news ${
-        p.news ? esc(p.news) : "—"
-      } · next ${nextLayer(p)}</p>
+  function liveStage(p) {
+    const newsCls = p.news ? " news-hot" : "";
+    return `<button type="button" class="stage live" data-id="${p.id}">
+      <div class="who"><span class="nm">${esc(instrument(p))}</span><span class="tf">${tfText(p)}</span></div>
+      <div class="body">
+        <div class="col ad-stack">
+          <span class="lbl">AD</span>
+          <div class="pair"><span>Top</span>${adTop(p)}</div>
+          <div class="pair"><span>Bottom</span>${adBot(p)}</div>
+        </div>
+        <div class="col">
+          <span class="lbl">Next layer</span>
+          <div class="fig">${money(p.next_layer_usd)}</div>
+        </div>
+        <div class="col">
+          <span class="lbl">Pips</span>
+          <div class="pips">${pips(p.reds)}</div>
+        </div>
+        <div class="col col-vol">
+          <span class="lbl">Volume</span>
+          <div class="fig">${esc(p.volume && p.volume !== "unknown" ? p.volume : "—")}</div>
+        </div>
+        <div class="col col-news">
+          <span class="lbl">News</span>
+          <div class="fig${newsCls}">${newsText(p)}</div>
+        </div>
+        <div class="col">
+          <span class="lbl">Resting</span>
+          <div class="fig">${restText(p)}</div>
+        </div>
+      </div>
+      <div class="recut-bar">
+        Recut
+        <span class="line">LINE ${adTop(p)} / ${adBot(p)} · ${esc(p.remaining_layers || 0)} LEFT</span>
+        <button type="button" class="kill" data-kill="${p.id}">Kill</button>
+      </div>
     </button>`;
   }
 
-  function renderHangar(plans) {
-    const host = $("#hangarList");
-    const hangar = (plans || []).filter((p) => !p.live);
-    if (!hangar.length) {
-      host.innerHTML =
-        '<p class="empty-hangar">Both names are live. The hangar is empty on purpose.</p>';
+  function renderStages(plans) {
+    const host = $("#liveStages");
+    const live = (plans || []).filter((p) => p.live).slice(0, 2);
+    const parts = live.map(liveStage);
+    while (parts.length < 2) parts.push(ghost());
+    host.innerHTML = parts.join("");
+  }
+
+  function emptyRanks() {
+    return [1, 2, 3]
+      .map(
+        (i) => `<div class="rank">
+          <span class="idx">${String(i).padStart(2, "0")}</span>
+          <span class="dash">—</span>
+          <span></span><span class="dash">—</span><span class="dash">—</span>
+          <span class="dash">—</span><span class="dash">—</span>
+          <span class="dash">—</span><span class="dash">—</span><span></span>
+        </div>`
+      )
+      .join("");
+  }
+
+  function renderRanks(plans) {
+    const host = $("#rankList");
+    const rows = (plans || []).filter((p) => !p.live);
+    if (!rows.length && !(plans || []).length) {
+      host.className = "empty-ranks";
+      host.innerHTML = emptyRanks();
       return;
     }
-    host.innerHTML = hangar
-      .map((p) => {
-        const on = state.selected === p.id ? " on" : "";
+    host.className = "";
+    host.innerHTML = rows
+      .map((p, i) => {
         const killed = p.status === "killed" ? " killed" : "";
-        return `<button type="button" class="plate${on}${killed}" data-id="${p.id}">
-          <span class="nm">${esc(p.name || p.display)}</span>
-          <span class="adline ${p.ad_status === "known" ? "" : "uncut"}">${adText(p)}</span>
-          <span class="row">
-            <b>${esc(p.tf)}</b>
-            <span>next ${nextLayer(p)}</span>
-            <span>reds ${esc(p.reds)}</span>
-            <span>vol ${esc(p.volume)}</span>
-            <span class="${p.news ? "news-hot" : ""}">news ${p.news ? esc(p.news) : "—"}</span>
-            <span>${p.resting ? "resting" : "dry"}</span>
-          </span>
+        const ad =
+          p.ad_status === "known"
+            ? `${adTop(p)}<small>${adBot(p)}</small>`
+            : "—<small>uncut</small>";
+        return `<button type="button" class="rank${killed}" data-id="${p.id}" style="animation-delay:${i * 30}ms">
+          <span class="idx">${String(i + 1).padStart(2, "0")}</span>
+          <span class="nm">${esc(instrument(p))}</span>
+          <span class="tf">${tfText(p)}</span>
+          <span class="ad">${ad}</span>
+          <span class="next">${money(p.next_layer_usd)}</span>
+          <span class="pips">${pips(p.reds)}</span>
+          <span class="vol">${esc(p.volume && p.volume !== "unknown" ? p.volume : "—")}</span>
+          <span class="news${p.news ? " news-hot" : ""}">${newsText(p)}</span>
+          <span class="rest">${restText(p)}</span>
+          <span class="go">›</span>
         </button>`;
       })
       .join("");
   }
 
-  function renderPlan(p) {
-    const host = $("#planRoom");
+  function renderSheet(p) {
+    const host = $("#planSheet");
+    const back = $("#sheetBack");
     if (!p) {
-      host.hidden = true;
-      host.innerHTML = "";
+      closeSheet();
       return;
     }
+    back.hidden = false;
     host.hidden = false;
     const layers = (p.layers || [])
-      .map((l) => `${l.idx} ${num(l.price)} · $${num(l.usd)}`)
+      .map((l) => `${l.idx} ${num(l.price)} · ${money(l.usd)}`)
       .join("  ·  ");
     host.innerHTML = `
-      <h3>${esc(p.name)}</h3>
+      <button type="button" class="sheet-x" id="sheetClose">Close</button>
+      <h3>${esc(instrument(p))}</h3>
       <p class="sym">${esc(p.symbol)} · ${esc(p.market)} · ${esc(p.status)}</p>
       <dl class="facts">
-        <div class="fact"><dt>TF</dt><dd>${esc(p.tf)}</dd></div>
-        <div class="fact"><dt>AD top → bottom</dt><dd>${adText(p)}</dd></div>
+        <div class="fact"><dt>TF</dt><dd>${tfText(p)}</dd></div>
+        <div class="fact ad"><dt>AD top → bottom</dt><dd>${adTop(p)} → ${adBot(p)}</dd></div>
         <div class="fact"><dt>Source</dt><dd>${esc(p.ad_source || "unknown")}</dd></div>
         <div class="fact"><dt>Top bar</dt><dd>${esc(p.bar_top_label)}</dd></div>
         <div class="fact"><dt>Bottom bar</dt><dd>${esc(p.bar_bottom_label)}</dd></div>
         <div class="fact"><dt>Reds</dt><dd>${esc(p.reds)}</dd></div>
         <div class="fact"><dt>Volume</dt><dd>${esc(p.volume)}</dd></div>
-        <div class="fact"><dt>News</dt><dd>${p.news ? esc(p.news) : "—"}</dd></div>
-        <div class="fact"><dt>Resting</dt><dd>${p.resting ? "yes" : "no"}</dd></div>
-        <div class="fact"><dt>Next layer</dt><dd>${nextLayer(p)}</dd></div>
-        <div class="fact"><dt>Allocated</dt><dd>$${num(p.allocated_usd)}</dd></div>
+        <div class="fact"><dt>News</dt><dd>${newsText(p)}</dd></div>
+        <div class="fact"><dt>Resting</dt><dd>${restText(p)}</dd></div>
+        <div class="fact"><dt>Next layer</dt><dd>${money(p.next_layer_usd)}</dd></div>
+        <div class="fact"><dt>Allocated</dt><dd>${money(p.allocated_usd)}</dd></div>
         <div class="fact"><dt>Layers left</dt><dd>${esc(p.remaining_layers)}</dd></div>
       </dl>
       <p class="note">${esc(p.ad_note || "")}</p>
@@ -227,38 +288,40 @@
           p.remaining_layers || 5
         }" /></label>
         <button class="act" type="submit">Recut</button>
-        <button class="act kill" type="button" id="btnKill">Kill</button>
+        <button class="kill" type="button" id="btnKill">Kill</button>
       </form>`;
+  }
+
+  function tickLocal() {
+    const el = $("#localClock");
+    if (!el) return;
+    const t = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(new Date());
+    el.textContent = "LOCAL " + t;
   }
 
   function paint() {
     const room = state.room || {};
-    document.body.dataset.tone = room.tone || "watch";
-    const inv = $("#invite");
-    if (inv) inv.textContent = room.invitation || "Both berths are open.";
-    const chorus = $("#chorus");
-    if (chorus) {
-      const names = room.hung_names || [];
-      if (names.length) {
-        chorus.hidden = false;
-        chorus.textContent = names.join("  ·  ");
-      } else {
-        chorus.hidden = true;
-        chorus.textContent = "";
-      }
-    }
-    const clock = $("#clock");
-    if (clock) {
-      const last = room.last_close
-        ? ` · last ${room.last_close.symbol || ""} ${room.last_close.bounce_or_fail || room.last_close.reason}`
-        : "";
-      clock.textContent = `${room.manila || tickManila()} · ${room.hung_count || 0} hung · ${
-        room.uncut_count || 0
-      } uncut${last}`;
+    const liveN = room.live_count || 0;
+    document.body.dataset.tone = room.tone || "empty";
+    document.body.dataset.live = liveN > 0 ? "1" : "0";
+    const idle = $("#idleLine");
+    if (idle) {
+      idle.textContent =
+        liveN > 0
+          ? `$${Number(state.account.equity_usd || 200).toFixed(0)} book · ${liveN}/2 live`
+          : "$200 book idle · max 2 live";
     }
     renderNeeds(state.needs);
-    renderLive(state.plans, room);
-    renderHangar(state.plans);
+    renderStages(state.plans);
+    renderRanks(state.plans);
+    if (state.selected) {
+      const p = state.plans.find((x) => x.id === state.selected);
+      if (p) renderSheet(p);
+    }
   }
 
   async function load() {
@@ -268,24 +331,54 @@
     state.room = data.room || {};
     state.account = data.account || {};
     const acc = state.account;
-    $("#vault").textContent =
-      `$${acc.equity_usd} · ${acc.live_plays}/${acc.max_live_plays} live · 1x · cash $${acc.cash_usd}`;
+    $("#bookAmt").textContent = `$${Number(acc.equity_usd || 200).toFixed(2)}`;
     paint();
-    if (state.selected) {
-      renderPlan(state.plans.find((x) => x.id === state.selected) || null);
-    }
   }
 
   function onPick(e) {
+    if (e.target.closest("[data-kill]")) return;
     const btn = e.target.closest("[data-id]");
     if (!btn || btn.classList.contains("open")) return;
     select(btn.getAttribute("data-id"));
   }
 
-  $("#liveDeck").addEventListener("click", onPick);
-  $("#hangarList").addEventListener("click", onPick);
+  async function killPlan(id) {
+    await api(`/api/machine/plans/${id}/kill`, { method: "POST", body: "{}" });
+    toast("Killed");
+    closeSheet();
+    await load();
+  }
 
-  $("#needsYou").addEventListener("click", async (e) => {
+  $("#liveStages").addEventListener("click", async (e) => {
+    const k = e.target.closest("[data-kill]");
+    if (k) {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        await killPlan(k.getAttribute("data-kill"));
+      } catch (err) {
+        toast(err.message);
+      }
+      return;
+    }
+    onPick(e);
+  });
+  $("#rankList").addEventListener("click", onPick);
+  $("#sheetBack").addEventListener("click", closeSheet);
+  $("#planSheet").addEventListener("click", async (e) => {
+    if (e.target.id === "sheetClose") {
+      closeSheet();
+      return;
+    }
+    if (e.target.id !== "btnKill") return;
+    try {
+      await killPlan(state.selected);
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+
+  $("#needsStack").addEventListener("click", async (e) => {
     const acc = e.target.getAttribute("data-acc");
     const rej = e.target.getAttribute("data-rej");
     try {
@@ -297,7 +390,7 @@
     }
   });
 
-  $("#planRoom").addEventListener("submit", async (e) => {
+  $("#planSheet").addEventListener("submit", async (e) => {
     if (e.target.id !== "recutForm") return;
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -319,49 +412,16 @@
     }
   });
 
-  $("#planRoom").addEventListener("click", async (e) => {
-    if (e.target.id !== "btnKill") return;
-    try {
-      await api(`/api/machine/plans/${state.selected}/kill`, { method: "POST", body: "{}" });
-      toast("Killed");
-      await load();
-    } catch (err) {
-      toast(err.message);
-    }
-  });
-
-  function tickManila() {
-    try {
-      return new Intl.DateTimeFormat("en-GB", {
-        timeZone: "Asia/Manila",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-        timeZoneName: "short",
-      })
-        .format(new Date())
-        .replace("GMT+8", "PHT");
-    } catch (_) {
-      return "";
-    }
-  }
+  tickLocal();
+  setInterval(tickLocal, 30000);
 
   load().catch((e) => {
     document.body.dataset.tone = "empty";
-    $("#invite").textContent = "Quiet book. The chamber is closed — come back when the flag is on.";
-    $("#hangarList").innerHTML =
-      `<p class="empty-book">${esc(e.message)}. The line will be here. Powder stays ready.</p>`;
+    document.body.dataset.live = "0";
+    $("#idleLine").textContent = "$200 book idle · max 2 live";
+    $("#rankList").className = "empty-ranks";
+    $("#rankList").innerHTML = emptyRanks();
+    $("#liveStages").innerHTML = ghost() + ghost();
+    toast(e.message);
   });
-
-  setInterval(() => {
-    const clock = $("#clock");
-    if (!clock || !state.room) return;
-    const room = state.room;
-    const last = room.last_close
-      ? ` · last ${room.last_close.symbol || ""} ${room.last_close.bounce_or_fail || room.last_close.reason}`
-      : "";
-    clock.textContent = `${tickManila()} · ${room.hung_count || 0} hung · ${
-      room.uncut_count || 0
-    } uncut${last}`;
-  }, 30000);
 })();

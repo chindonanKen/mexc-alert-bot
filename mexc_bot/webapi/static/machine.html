@@ -6,37 +6,64 @@
   <title>Machine</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/machine.css?v=m3" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Serif:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/machine.css?v=s1" />
 </head>
-<body class="chamber" data-tone="watch">
-  <a class="leave" href="/">Leave</a>
+<body class="room" data-tone="empty" data-live="0">
+  <header class="mast">
+    <a class="wordmark" href="/machine">
+      <span class="seal" aria-hidden="true">AD</span>
+      <span class="wm">
+        <span class="wm-name">MACHINE</span>
+        <span class="wm-sub">TRADING SYSTEMS</span>
+      </span>
+    </a>
+    <div class="mast-right">
+      <time id="localClock" class="local">LOCAL</time>
+      <a class="book-pill" href="/" title="AD Desk">
+        <span id="bookAmt">$200.00</span>
+        <span class="ad-seal">AD</span>
+      </a>
+    </div>
+  </header>
 
-  <header class="threshold">
-    <p class="mark">Isolated paper book · no live send</p>
-    <h1>Machine</h1>
-    <p class="invite" id="invite">Both berths are open.</p>
-    <p class="chorus" id="chorus" hidden></p>
-    <p class="vault" id="vault">$200 · 0/2 live · 1x</p>
-    <p class="clock" id="clock"></p>
-    <p class="clear" id="needsClear">Needs-you · clear</p>
-    <p class="vow">No chart this week. The line is the room.</p>
+  <div class="hero" id="hero">
+    <h1>MACHINE</h1>
+    <p id="idleLine">$200 book idle · max 2 live</p>
+  </div>
 
-  <section id="needsYou" class="interrupt" hidden></section>
-
-  <section class="berths" aria-label="Live plays">
-    <h2>Live <span>two plays · $100 each</span></h2>
-    <div id="liveDeck" class="deck"></div>
+  <section class="stages" aria-label="Live stages">
+    <div id="liveStages" class="stage-row">
+      <div class="stage open"><p class="ghost">open · $200</p></div>
+      <div class="stage open"><p class="ghost">open · $200</p></div>
+    </div>
   </section>
 
-  <section class="hangar" aria-label="Hangar">
-    <h2>Hangar</h2>
-    <p class="legend">name · TF · AD top → bottom · next layer · reds · vol · news · resting</p>
-    <div id="hangarList" class="plates"></div>
+  <section id="needsStack" class="needs" hidden></section>
+
+  <section class="ranks" aria-label="Ranked instruments">
+    <div class="rank-head">
+      <span>Rank</span>
+      <span>Instrument</span>
+      <span>TF</span>
+      <span>AD top → bottom</span>
+      <span>Next layer</span>
+      <span>Pips</span>
+      <span>Vol</span>
+      <span>News</span>
+      <span>Resting</span>
+      <span></span>
+    </div>
+    <div id="rankList" class="empty-ranks">
+      <div class="rank"><span class="idx">01</span><span class="dash">—</span></div>
+      <div class="rank"><span class="idx">02</span><span class="dash">—</span></div>
+      <div class="rank"><span class="idx">03</span><span class="dash">—</span></div>
+    </div>
   </section>
 
-  <section id="planRoom" class="plan-room" hidden></section>
+  <div id="sheetBack" class="sheet-back" hidden></div>
+  <aside id="planSheet" class="sheet" hidden></aside>
   <div id="toast" hidden></div>
-  <script src="/assets/machine.js?v=m3"></script>
+  <script src="/assets/machine.js?v=s1"></script>
 </body>
 </html>
