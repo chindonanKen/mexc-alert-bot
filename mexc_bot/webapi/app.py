@@ -1621,8 +1621,10 @@ def create_app() -> FastAPI:
 
     if _feature_ad_machine():
         from ..machine.api import router as machine_router
+        from ..machine.loop import ensure_tape_loop
 
         app.include_router(machine_router)
+        ensure_tape_loop()
 
         @app.get("/machine")
         def machine_page():

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .hang import hang_ad, official_volume_n, volume_label
+from .tape import official_last_price, official_reds
 from .logic import (
     can_open_play,
     exponential_layers,
@@ -323,9 +324,20 @@ def _evaluate_plan(
         reds_map = {tf: snap.get("reds")}
     volume = snap.get("volume") or plan.get("volume") or "unknown"
     volume_n = plan.get("volume_n")
+    last_price = official_last_price(
+        ticker=snap.get("last_price") if snap.get("last_price") is not None else snap.get("ticker"),
+        bars=snap.get("bars"),
+    )
+    if last_price is None:
+        last_price = plan.get("last_price")
     if snap.get("bars"):
         volume = volume_label(snap.get("bars"))
         volume_n = official_volume_n(snap.get("bars"))
+        tape_reds = official_reds(snap.get("bars"))
+        if tape_reds is not None:
+            tf_key = str(plan.get("tf") or "15m")
+            reds_map = dict(reds_map)
+            reds_map[tf_key] = tape_reds
     heat = snap.get("heat_breadth")
     panic = bool(snap.get("panic_board"))
     ad_known = (plan.get("ad_status") == "known") and plan.get("ad_top") is not None
@@ -362,6 +374,7 @@ def _evaluate_plan(
         user_id,
         int(plan["id"]),
         reds=(chosen or {}).get("reds") if chosen else (tf_states[0].get("reds") if tf_states else None),
+        last_price=last_price,
         volume=volume,
         volume_n=volume_n,
         news=(kill or {}).get("class") if kill else None,
@@ -393,6 +406,17 @@ def _evaluate_plan(
             )
             return {"ok": True, "action": "news_kill", "plan_id": plan["id"]}
         return {"ok": True, "action": "news_blocked", "plan_id": plan["id"]}
+
+    if plan.get("live"):
+        filled = _paper_fill(store, user_id, plan, last_price)
+        if filled:
+            return {
+                "ok": True,
+                "action": "paper_fill",
+                "plan_id": plan["id"],
+                "filled": filled,
+                "live_orders_sent": False,
+            }
 
     if plan.get("live") and failed_ad(
         armed_at=plan.get("armed_at"),
@@ -481,6 +505,44 @@ def _evaluate_plan(
     return {"ok": True, "action": "arm", "plan_id": plan["id"], "tf": chosen.get("tf")}
 
 
+def _paper_fill(
+    store: MachineStore,
+    user_id: int,
+    plan: Dict[str, Any],
+    last_price: Optional[float],
+) -> List[Dict[str, Any]]:
+    """Mark working layers filled when official last tags the price. No send."""
+    if last_price is None:
+        return []
+    try:
+        px = float(last_price)
+    except (TypeError, ValueError):
+        return []
+    if px <= 0:
+        return []
+    working = store.list_orders(user_id, int(plan["id"]), status="working")
+    filled: List[Dict[str, Any]] = []
+    for order in working:
+        try:
+            line = float(order.get("price"))
+        except (TypeError, ValueError):
+            continue
+        if px <= line:
+            store.fill_order(user_id, int(order["id"]))
+            filled.append({"id": order["id"], "idx": order.get("layer_idx"), "price": line})
+    if not filled:
+        return []
+    left = store.list_orders(user_id, int(plan["id"]), status="working")
+    store.patch_plan(
+        user_id,
+        int(plan["id"]),
+        remaining_layers=len(left),
+        next_layer_usd=left[0]["usd"] if left else None,
+        resting=bool(left),
+    )
+    return filled
+
+
 def _close_and_kb(
     store: MachineStore,
     user_id: int,
@@ -562,11 +624,29 @@ def rank_plans(store: MachineStore, user_id: int) -> List[Dict[str, Any]]:
 def public_plan(store: MachineStore, row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not row:
         return {}
-    layers = parse_json(row.get("layers_json"), [])
+    raw_layers = parse_json(row.get("layers_json"), [])
     zones = parse_json(row.get("zones_json"), [])
-    working = store.list_orders(int(row["user_id"]), int(row["id"]), status="working")
+    known = (row.get("ad_status") == "known") and row.get("ad_top") is not None
+    # Unknown AD: never invent a ladder.
+    layers = list(raw_layers) if known else []
+    all_orders = store.list_orders(int(row["user_id"]), int(row["id"]))
+    working = [o for o in all_orders if o.get("status") == "working"]
+    by_idx = {int(o.get("layer_idx") or 0): o for o in all_orders}
+    next_idx = None
+    if working:
+        next_idx = int(working[0].get("layer_idx") or 0)
+    elif layers:
+        next_idx = int(layers[0].get("idx") or 0)
+    public_layers = []
+    for layer in layers:
+        item = dict(layer)
+        idx = int(item.get("idx") or 0)
+        order = by_idx.get(idx)
+        item["status"] = (order or {}).get("status") or "planned"
+        item["next"] = bool(next_idx and idx == next_idx)
+        public_layers.append(item)
     ad_line = "unknown"
-    if row.get("ad_status") == "known" and row.get("ad_top") is not None:
+    if known:
         ad_line = f"{_num(row.get('ad_top'))} → {_num(row.get('ad_bottom'))}"
     return {
         "id": row["id"],
@@ -586,9 +666,10 @@ def public_plan(store: MachineStore, row: Optional[Dict[str, Any]]) -> Dict[str,
         "initial_drop_top": row.get("initial_drop_top"),
         "initial_drop_bottom": row.get("initial_drop_bottom"),
         "zones": zones,
-        "layers": layers,
+        "layers": public_layers,
         "remaining_layers": row.get("remaining_layers"),
         "next_layer_usd": row.get("next_layer_usd"),
+        "last_price": row.get("last_price"),
         "reds": row.get("reds") if row.get("reds") is not None else "unknown",
         "volume": row.get("volume") or "unknown",
         "volume_n": row.get("volume_n"),

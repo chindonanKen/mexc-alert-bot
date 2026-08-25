@@ -135,9 +135,11 @@ class TestMachineIsolationAndApi(unittest.TestCase):
             "DESK_API_TOKEN": os.environ.get("DESK_API_TOKEN"),
             "WEB_UI_TOKEN": os.environ.get("WEB_UI_TOKEN"),
             "FEATURE_AD_MACHINE": os.environ.get("FEATURE_AD_MACHINE"),
+            "MACHINE_TAPE_LOOP": os.environ.get("MACHINE_TAPE_LOOP"),
         }
         os.environ["ALERTS_FILE"] = str(self.db)
         os.environ["DESK_USER_ID"] = "8630949601"
+        os.environ["MACHINE_TAPE_LOOP"] = "false"
         os.environ.pop("DESK_API_TOKEN", None)
         os.environ.pop("WEB_UI_TOKEN", None)
         self.uid = 8630949601
@@ -298,7 +300,7 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         self.assertNotIn("<table", page.text.lower())
         self.assertNotIn("<canvas", page.text.lower())
         self.assertNotIn("tradingview", page.text.lower())
-        css = c.get("/assets/machine.css?v=s5")
+        css = c.get("/assets/machine.css?v=s6")
         self.assertEqual(css.status_code, 200)
         self.assertIn("#010207", css.text)
         self.assertIn("#e8d5a3", css.text)
@@ -314,20 +316,34 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         self.assertNotIn("#38bdf8", css.text)
         self.assertIn("stage-col", css.text)
         self.assertIn("flex-direction: column", css.text)
-        js = c.get("/assets/machine.js?v=s5")
+        js = c.get("/assets/machine.js?v=s6")
         self.assertEqual(js.status_code, 200)
         self.assertIn("waiting · $200 book", js.text)
         self.assertIn("of 2 live", js.text)
-        self.assertIn("LINE ${linePrice(p)}", js.text)
+        self.assertIn("${linePrice(p)}", js.text)
+        self.assertIn("GLOSS.LINE", js.text)
         self.assertIn("working_orders", js.text)
         self.assertIn("function restClock", js.text)
         self.assertIn('+ "m"', js.text)
         self.assertIn("function fmtVol", js.text)
         self.assertIn('"M"', js.text)
+        self.assertIn("official last price", js.text)
+        self.assertIn("this copy, top → bottom", js.text)
+        self.assertIn("dollars for the next layer", js.text)
+        self.assertIn("red candles on this TF", js.text)
+        self.assertIn("last bar size", js.text)
+        self.assertIn("delist/scam or clear", js.text)
+        self.assertIn("time since the play armed", js.text)
+        self.assertIn("next layer price", js.text)
+        self.assertIn("layer ${L.idx}", js.text)
+        self.assertIn("unknown — no layers", js.text)
+        self.assertIn("last_price", js.text)
         self.assertNotIn('resting ? "rest"', js.text)
         self.assertNotIn("ASTEROID", js.text)
         self.assertNotIn("ORION", js.text)
         self.assertNotIn("ECLIPSE", js.text)
+        self.assertNotIn("<canvas", page.text.lower())
+        self.assertNotIn("tradingview", js.text.lower())
 
     def test_recut_kill_approve(self):
         c = self._client(True)
@@ -536,6 +552,87 @@ class TestMachineIsolationAndApi(unittest.TestCase):
             store._exec("DELETE FROM journal_trades")
         with self.assertRaises(RuntimeError):
             store._exec("UPDATE alerts SET enabled=0")
+
+    def test_last_price_layers_paper_fill_and_no_send(self):
+        from mexc_bot.machine.tape import official_last_price, official_reds
+        from mexc_bot.webapi.actions import live_orders_allowed
+
+        self.assertFalse(live_orders_allowed())
+        self.assertEqual(official_last_price(ticker=0.182), 0.182)
+        self.assertEqual(official_last_price(bars=[{"c": 0.171, "v": 9}]), 0.171)
+        self.assertEqual(
+            official_last_price(ticker=0.182, bars=[{"c": 0.171}]), 0.182
+        )
+        self.assertIsNone(official_last_price())
+        self.assertIsNone(official_last_price(ticker="climax"))
+        closed = [{"o": 3, "c": 2}, {"o": 2, "c": 1}]
+        self.assertEqual(official_reds(closed + [{"o": 1, "c": 1.2}]), 2)
+        self.assertEqual(official_reds(closed + [{"o": 1.2, "c": 1.0}]), 3)
+        self.assertIsNone(official_reds([]))
+        self.assertIsNone(official_reds(None))
+
+        c = self._client(True)
+        plans = {p["symbol"]: p for p in c.get("/api/machine/plans").json()["plans"]}
+        ansem = plans["ANSEMUSDT"]
+        self.assertTrue(ansem["layers"])
+        self.assertLessEqual(sum(float(L["usd"]) for L in ansem["layers"]), 100.0001)
+        for layer in ansem["layers"]:
+            self.assertIn("idx", layer)
+            self.assertIn("price", layer)
+            self.assertIn("usd", layer)
+        us = plans["USUSDT"]
+        self.assertEqual(us["ad_status"], "unknown")
+        self.assertEqual(us["layers"], [])
+        self.assertTrue(us.get("last_price") in (None,))
+
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.182,
+                        "reds": {"15m": 4},
+                        "heat_breadth": 4,
+                    }
+                }
+            },
+        )
+        self.assertEqual(ev.status_code, 200, ev.text)
+        self.assertFalse(ev.json().get("live_orders_sent"))
+        ansem2 = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertEqual(ansem2["last_price"], 0.182)
+        self.assertNotAlmostEqual(float(ansem2["last_price"]), float(ansem2["ad_top"]))
+        us2 = next(p for p in ev.json()["plans"] if p["symbol"] == "USUSDT")
+        self.assertTrue(us2.get("last_price") in (None,))
+        self.assertEqual(us2["layers"], [])
+
+        first = ansem2["layers"][0]
+        ev2 = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": float(first["price"]),
+                        "reds": {"15m": 4},
+                        "heat_breadth": 4,
+                    }
+                }
+            },
+        )
+        self.assertFalse(ev2.json().get("live_orders_sent"))
+        self.assertTrue(
+            any(a.get("action") == "paper_fill" for a in ev2.json().get("actions") or [])
+            or any(
+                o.get("status") == "filled"
+                for o in (
+                    next(p for p in ev2.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+                    .get("layers")
+                    or []
+                )
+            )
+        )
+        got = next(p for p in ev2.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertLess(int(got.get("remaining_layers") or 0), len(ansem2["layers"]))
 
     def test_volume_n_from_official_bars_only(self):
         from mexc_bot.machine.hang import official_volume_n

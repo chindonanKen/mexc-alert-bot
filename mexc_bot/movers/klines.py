@@ -71,9 +71,15 @@ class KlineClient:
         return out
 
     def get_ohlcv(
-        self, market: str, symbol: str, tf: str, limit: int = 96
+        self,
+        market: str,
+        symbol: str,
+        tf: str,
+        limit: int = 96,
+        *,
+        include_forming: bool = False,
     ) -> List[dict]:
-        """Full OHLCV closed bars oldest→newest. Soft-fail → []."""
+        """Full OHLCV oldest→newest. Soft-fail → []. Forming dropped unless asked."""
         if tf not in _INTERVALS:
             return []
         try:
@@ -81,7 +87,7 @@ class KlineClient:
                 bars = self._fetch_futures_ohlcv(symbol, tf, limit=limit)
             else:
                 bars = self._fetch_spot_ohlcv(symbol, tf, limit=limit)
-            if len(bars) > 1:
+            if len(bars) > 1 and not include_forming:
                 bars = bars[:-1]  # drop forming
             return bars
         except Exception as e:

@@ -107,8 +107,42 @@
     return Array.from({ length: count }, () => '<span class="pip"></span>').join("");
   }
 
+  const GLOSS = {
+    AD: "this copy, top → bottom",
+    LAST: "official last price",
+    NEXT: "dollars for the next layer",
+    REDS: "red candles on this TF",
+    VOL: "last bar size",
+    NEWS: "delist/scam or clear",
+    REST: "time since the play armed",
+    LINE: "next layer price",
+  };
+
   function newsText(p) {
     return p && p.news ? esc(p.news) : "CLEAR";
+  }
+
+  function lastText(p) {
+    if (!p || p.last_price == null || p.last_price === "") return "—";
+    return num(p.last_price);
+  }
+
+  function redsText(p) {
+    const n = Number(p && p.reds);
+    if (!Number.isFinite(n)) return "—";
+    return String(n);
+  }
+
+  function layerLine(L) {
+    return `layer ${L.idx} · ${money(L.usd)} at ${num(L.price)}`;
+  }
+
+  function field(key, value, extra) {
+    return `<div class="field">
+      <span class="lbl">${key}</span>
+      <span class="gloss">${esc(GLOSS[key] || "")}</span>
+      <div class="fig">${value}${extra || ""}</div>
+    </div>`;
   }
 
   function linePrice(p) {
@@ -226,33 +260,24 @@
         <span class="tf">${tfText(p)}</span>
       </div>
       <div class="body">
-        <div>
+        <div class="field">
           <span class="lbl">AD</span>
+          <span class="gloss">${esc(GLOSS.AD)}</span>
           <div class="ad-pair">${adTop(p)}<br>${adBot(p)}</div>
         </div>
-        <div>
-          <span class="lbl">Next</span>
-          <div class="fig">${money(p.next_layer_usd)}</div>
-        </div>
-        <div>
-          <span class="lbl">Pips</span>
-          <div class="pips">${pips(p.reds)}</div>
-        </div>
-        <div>
-          <span class="lbl">Vol</span>
-          <div class="fig">${volText(p)}</div>
-        </div>
-        <div>
-          <span class="lbl">News</span>
+        ${field("LAST", lastText(p))}
+        ${field("NEXT", money(p.next_layer_usd))}
+        ${field("REDS", redsText(p), `<span class="pips">${pips(p.reds)}</span>`)}
+        ${field("VOL", volText(p) || "—")}
+        <div class="field">
+          <span class="lbl">NEWS</span>
+          <span class="gloss">${esc(GLOSS.NEWS)}</span>
           <div class="fig${newsCls}">${newsText(p)}</div>
         </div>
-        <div>
-          <span class="lbl">Rest</span>
-          <div class="fig">${restClock(p)}</div>
-        </div>
+        ${field("REST", restClock(p) || "—")}
       </div>
       <div class="recut-bar">
-        <span>LINE ${linePrice(p)}</span>
+        <span><span class="lbl">LINE</span> <span class="gloss">${esc(GLOSS.LINE)}</span> ${linePrice(p)}</span>
         <span>${esc(p.remaining_layers || 0)} LEFT</span>
         <button type="button" class="kill" data-kill="${p.id}">Kill</button>
       </div>
@@ -289,25 +314,36 @@
       return;
     }
     host.className = "";
-    host.innerHTML = rows
-      .map((p, i) => {
-        const killed = p.status === "killed" ? " killed" : "";
-        const ad =
-          p.ad_status === "known"
-            ? `${adTop(p)}<br>${adBot(p)}`
-            : "—";
-        return `<button type="button" class="rank${killed}" data-id="${p.id}" style="animation-delay:${i * 30}ms">
+    const head = `<div class="rank-head">
+      <span></span>
+      <span></span>
+      <span><span class="lbl">AD</span><span class="gloss">${esc(GLOSS.AD)}</span></span>
+      <span><span class="lbl">LAST</span><span class="gloss">${esc(GLOSS.LAST)}</span></span>
+      <span><span class="lbl">NEXT</span><span class="gloss">${esc(GLOSS.NEXT)}</span></span>
+      <span><span class="lbl">REDS</span><span class="gloss">${esc(GLOSS.REDS)}</span></span>
+      <span><span class="lbl">VOL</span><span class="gloss">${esc(GLOSS.VOL)}</span></span>
+      <span><span class="lbl">NEWS</span><span class="gloss">${esc(GLOSS.NEWS)}</span></span>
+      <span><span class="lbl">REST</span><span class="gloss">${esc(GLOSS.REST)}</span></span>
+    </div>`;
+    host.innerHTML =
+      head +
+      rows
+        .map((p, i) => {
+          const killed = p.status === "killed" ? " killed" : "";
+          const ad = p.ad_status === "known" ? `${adTop(p)}<br>${adBot(p)}` : "unknown";
+          return `<button type="button" class="rank${killed}" data-id="${p.id}" style="animation-delay:${i * 30}ms">
           <span class="idx">${String(i + 1).padStart(2, "0")}</span>
           <span class="who"><span class="nm">${esc(instrument(p))}${esc(fut(p))}</span><span class="tf">${tfText(p)}</span></span>
           <span class="ad">${ad}</span>
+          <span class="last">${lastText(p)}</span>
           <span class="next">${money(p.next_layer_usd)}</span>
-          <span class="pips">${pips(p.reds)}</span>
-          <span class="vol">${volText(p)}</span>
+          <span class="reds">${redsText(p)}<span class="pips">${pips(p.reds)}</span></span>
+          <span class="vol">${volText(p) || "—"}</span>
           <span class="news${p.news ? " news-hot" : ""}">${newsText(p)}</span>
-          <span class="rest">${restClock(p)}</span>
+          <span class="rest">${restClock(p) || "—"}</span>
         </button>`;
-      })
-      .join("");
+        })
+        .join("");
   }
 
   function renderSheet(p) {
@@ -319,21 +355,43 @@
     }
     back.hidden = false;
     host.hidden = false;
+    const adKnown = p.ad_status === "known";
+    const layers = adKnown ? p.layers || [] : [];
+    let ladder;
+    if (!adKnown) {
+      ladder = `<p class="ladder-empty">unknown — no layers</p>`;
+    } else if (!layers.length) {
+      ladder = `<p class="ladder-empty">unknown — no layers</p>`;
+    } else {
+      ladder = `<ol class="ladder">${layers
+        .map((L) => {
+          const cls = L.next ? " next" : "";
+          const mark = L.next ? " · next" : "";
+          return `<li class="${cls}">${esc(layerLine(L))}${mark}</li>`;
+        })
+        .join("")}</ol>`;
+    }
     host.innerHTML = `
       <p class="plan-kicker"><span>Plan</span><button type="button" class="sheet-x" id="sheetClose">Close</button></p>
       <h3>${esc(instrument(p))}${esc(fut(p))}</h3>
       <dl>
         <div class="sheet-row"><dt>TF</dt><dd>${tfText(p)}</dd></div>
-        <div class="sheet-row ad"><dt>AD</dt><dd>${adTop(p)} / ${adBot(p)}</dd></div>
-        <div class="sheet-row"><dt>Next</dt><dd>${money(p.next_layer_usd)}</dd></div>
-        <div class="sheet-row"><dt>Reds</dt><dd><span class="pips">${pips(p.reds)}</span></dd></div>
-        <div class="sheet-row"><dt>Vol</dt><dd>${volText(p)}</dd></div>
-        <div class="sheet-row"><dt>News</dt><dd>${newsText(p)}</dd></div>
-        <div class="sheet-row"><dt>Resting</dt><dd>${restClock(p)}</dd></div>
+        <div class="sheet-row ad"><dt>AD</dt><dd>${
+          adKnown ? `${adTop(p)} → ${adBot(p)}` : "unknown"
+        }<span class="gloss">${esc(GLOSS.AD)}</span></dd></div>
+        <div class="sheet-row"><dt>LAST</dt><dd>${lastText(p)}<span class="gloss">${esc(GLOSS.LAST)}</span></dd></div>
+        <div class="sheet-row"><dt>NEXT</dt><dd>${money(p.next_layer_usd)}<span class="gloss">${esc(GLOSS.NEXT)}</span></dd></div>
+        <div class="sheet-row"><dt>REDS</dt><dd>${redsText(p)} <span class="pips">${pips(p.reds)}</span><span class="gloss">${esc(GLOSS.REDS)}</span></dd></div>
+        <div class="sheet-row"><dt>VOL</dt><dd>${volText(p) || "—"}<span class="gloss">${esc(GLOSS.VOL)}</span></dd></div>
+        <div class="sheet-row"><dt>NEWS</dt><dd>${newsText(p)}<span class="gloss">${esc(GLOSS.NEWS)}</span></dd></div>
+        <div class="sheet-row"><dt>REST</dt><dd>${restClock(p) || "—"}<span class="gloss">${esc(GLOSS.REST)}</span></dd></div>
+        <div class="sheet-row"><dt>LINE</dt><dd>${linePrice(p)}<span class="gloss">${esc(GLOSS.LINE)}</span></dd></div>
         <div class="sheet-row"><dt>Source</dt><dd>${esc(p.ad_source || "unknown")}</dd></div>
         <div class="sheet-row"><dt>Top bar</dt><dd>${esc(p.bar_top_label)}</dd></div>
         <div class="sheet-row"><dt>Bottom bar</dt><dd>${esc(p.bar_bottom_label)}</dd></div>
       </dl>
+      <h4 class="ladder-h">Layers</h4>
+      ${ladder}
       <form class="console" id="recutForm">
         <label>Line<input name="ad_top" inputmode="decimal" value="${p.ad_top ?? ""}" placeholder="top" /></label>
         <label>Bottom<input name="ad_bottom" inputmode="decimal" value="${p.ad_bottom ?? ""}" /></label>
@@ -463,4 +521,7 @@
     $("#liveStages").innerHTML = ghost(1, 0) + ghost(2, 0);
     toast(e.message);
   });
+  setInterval(() => {
+    load().catch(() => {});
+  }, 2000);
 })();

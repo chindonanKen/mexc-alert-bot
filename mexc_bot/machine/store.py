@@ -117,6 +117,7 @@ class MachineStore:
                         allocated_usd REAL NOT NULL DEFAULT 0,
                         armed_at REAL,
                         reds INTEGER,
+                        last_price REAL,
                         volume TEXT,
                         volume_n REAL,
                         news TEXT,
@@ -185,6 +186,7 @@ class MachineStore:
                 )
                 for col, decl in (
                     ("armed_at", "REAL"),
+                    ("last_price", "REAL"),
                     ("volume", "TEXT"),
                     ("volume_n", "REAL"),
                     ("news", "TEXT"),
@@ -249,6 +251,7 @@ class MachineStore:
             "allocated_usd": float(payload.get("allocated_usd") or 0),
             "armed_at": payload.get("armed_at"),
             "reds": payload.get("reds"),
+            "last_price": payload.get("last_price"),
             "volume": payload.get("volume"),
             "news": payload.get("news"),
             "gate_json": _json(payload.get("gate")),
@@ -260,6 +263,12 @@ class MachineStore:
             fields["volume_n"] = existing.get("volume_n")
         else:
             fields["volume_n"] = None
+        if "last_price" in payload:
+            fields["last_price"] = payload.get("last_price")
+        elif existing:
+            fields["last_price"] = existing.get("last_price")
+        else:
+            fields["last_price"] = None
         if existing:
             sets = ", ".join(f"{k}=?" for k in fields)
             self._exec(
@@ -355,6 +364,14 @@ class MachineStore:
                 ),
             )
         return self.list_orders(user_id, plan_id, status="working")
+
+    def fill_order(self, user_id: int, order_id: int) -> None:
+        """Paper fill only. Never writes journal_fills or talks to MEXC."""
+        self._exec(
+            "UPDATE machine_orders SET status='filled', updated_at=? "
+            "WHERE id=? AND user_id=? AND status='working'",
+            (time.time(), int(order_id), int(user_id)),
+        )
 
     def cancel_working(self, user_id: int, plan_id: int) -> None:
         self._exec(
