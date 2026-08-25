@@ -6,64 +6,43 @@
   <title>Machine</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Serif:wght@600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/assets/machine.css?v=s2" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/machine.css?v=s3" />
 </head>
 <body class="room" data-tone="empty" data-live="0">
   <header class="mast">
-    <a class="wordmark" href="/machine">
-      <span class="seal" aria-hidden="true">AD</span>
-      <span class="wm">
-        <span class="wm-name">MACHINE</span>
-        <span class="wm-sub">TRADING SYSTEMS</span>
-      </span>
-    </a>
-    <div class="mast-right">
-      <time id="localClock" class="local">LOCAL</time>
-      <a class="book-pill" href="/" title="AD Desk">
-        <span id="bookAmt">$200.00</span>
-        <span class="ad-seal">AD</span>
-      </a>
-    </div>
+    <a class="brand" href="/machine">MACHINE</a>
+    <p class="book" id="bookLine">$200 book idle · max 2 live</p>
+    <a class="desk" href="/">desk</a>
   </header>
 
-  <div class="hero" id="hero">
-    <h1>MACHINE</h1>
-    <p id="idleLine">$200 book idle · max 2 live</p>
-  </div>
-
   <section class="stages" aria-label="Live stages">
-    <div id="liveStages" class="stage-row">
-      <div class="stage open"><p class="ghost">open · $200</p></div>
-      <div class="stage open"><p class="ghost">open · $200</p></div>
+    <div id="liveStages" class="stage-col">
+      <div class="stage open">
+        <p class="slot-lbl">SLOT 1</p>
+        <p class="ghost">waiting · $200 book</p>
+      </div>
+      <div class="stage open">
+        <p class="slot-lbl">SLOT 2</p>
+        <p class="ghost">waiting · max 2 live</p>
+      </div>
     </div>
   </section>
 
   <section id="needsStack" class="needs" hidden></section>
 
   <section class="ranks" aria-label="Ranked instruments">
-    <div class="rank-head">
-      <span>Rank</span>
-      <span>Instrument</span>
-      <span>TF</span>
-      <span>AD top → bottom</span>
-      <span>Next layer</span>
-      <span>Pips</span>
-      <span>Vol</span>
-      <span>News</span>
-      <span>Resting</span>
-      <span></span>
-    </div>
+    <h2>Ranked</h2>
     <div id="rankList" class="empty-ranks">
-      <div class="rank"><span class="idx">01</span><span class="dash">—</span></div>
-      <div class="rank"><span class="idx">02</span><span class="dash">—</span></div>
-      <div class="rank"><span class="idx">03</span><span class="dash">—</span></div>
+      <div class="rank skeleton"><span class="idx">01</span><span class="bone"></span><span class="bone short"></span><span class="bone"></span></div>
+      <div class="rank skeleton"><span class="idx">02</span><span class="bone"></span><span class="bone short"></span><span class="bone"></span></div>
+      <div class="rank skeleton"><span class="idx">03</span><span class="bone"></span><span class="bone short"></span><span class="bone"></span></div>
     </div>
   </section>
 
   <div id="sheetBack" class="sheet-back" hidden></div>
   <aside id="planSheet" class="sheet" hidden></aside>
   <div id="toast" hidden></div>
-  <script src="/assets/machine.js?v=s2"></script>
+  <script src="/assets/machine.js?v=s3"></script>
 </body>
 </html>

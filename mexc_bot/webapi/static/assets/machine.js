@@ -1,4 +1,4 @@
-/* Slate Machine room. Numbers only — no chart, no waveform. */
+/* Slate Machine — live / empty / needs. Seed names, no chart. */
 (function () {
   const $ = (s, el = document) => el.querySelector(s);
   const state = {
@@ -53,7 +53,7 @@
     clearTimeout(toast._t);
     toast._t = setTimeout(() => {
       el.hidden = true;
-    }, 2200);
+    }, 1800);
   }
 
   function esc(s) {
@@ -76,11 +76,20 @@
     if (v == null) return "—";
     const x = Number(v);
     if (Number.isNaN(x)) return "—";
-    return "$" + (x >= 100 ? x.toFixed(2) : String(Number(x.toPrecision(6))));
+    return "$" + (Math.abs(x) >= 1 ? String(Math.round(x)) : String(Number(x.toPrecision(4))));
+  }
+
+  function cashInt() {
+    const x = Number(state.account.cash_usd);
+    return Number.isFinite(x) ? Math.round(x) : 200;
   }
 
   function instrument(p) {
-    return p.symbol || p.name || p.display || "";
+    return p.name || p.display || p.symbol || "";
+  }
+
+  function fut(p) {
+    return p && p.market === "futures" ? " · FUT" : "";
   }
 
   function adTop(p) {
@@ -93,7 +102,7 @@
 
   function pips(reds) {
     const n = Number(reds);
-    if (!Number.isFinite(n) || n <= 0) return '<span class="pip-none">—</span>';
+    if (!Number.isFinite(n) || n <= 0) return "";
     const count = Math.min(6, Math.round(n));
     return Array.from({ length: count }, () => '<span class="pip"></span>').join("");
   }
@@ -108,6 +117,10 @@
 
   function tfText(p) {
     return p && p.tf && p.tf !== "unknown" ? esc(p.tf) : "—";
+  }
+
+  function volText(p) {
+    return p && p.volume && p.volume !== "unknown" ? esc(p.volume) : "—";
   }
 
   function select(id) {
@@ -152,44 +165,56 @@
         .join("");
   }
 
-  function ghost() {
-    return `<div class="stage open"><p class="ghost">open · $200</p></div>`;
+  function ghost(slot, liveN) {
+    if (liveN > 0) {
+      return `<div class="stage open">
+        <p class="slot-lbl">SLOT ${slot}</p>
+        <p class="ghost">open · $${cashInt()} of $200</p>
+      </div>`;
+    }
+    const wait = slot === 1 ? "waiting · $200 book" : "waiting · max 2 live";
+    return `<div class="stage open">
+      <p class="slot-lbl">SLOT ${slot}</p>
+      <p class="ghost">${wait}</p>
+    </div>`;
   }
 
   function liveStage(p) {
     const newsCls = p.news ? " news-hot" : "";
     return `<article class="stage live" data-id="${p.id}">
-      <div class="who"><span class="nm">${esc(instrument(p))}</span><span class="tf">${tfText(p)}</span></div>
+      <div class="who">
+        <span class="nm">${esc(instrument(p))}${esc(fut(p))}</span>
+        <span class="tf">${tfText(p)}</span>
+      </div>
       <div class="body">
-        <div class="col ad-stack">
+        <div>
           <span class="lbl">AD</span>
-          <div class="pair"><span>Top</span>${adTop(p)}</div>
-          <div class="pair"><span>Bottom</span>${adBot(p)}</div>
+          <div class="ad-pair">${adTop(p)}<br>${adBot(p)}</div>
         </div>
-        <div class="col">
-          <span class="lbl">Next layer</span>
+        <div>
+          <span class="lbl">Next</span>
           <div class="fig">${money(p.next_layer_usd)}</div>
         </div>
-        <div class="col">
+        <div>
           <span class="lbl">Pips</span>
           <div class="pips">${pips(p.reds)}</div>
         </div>
-        <div class="col col-vol">
-          <span class="lbl">Volume</span>
-          <div class="fig">${esc(p.volume && p.volume !== "unknown" ? p.volume : "—")}</div>
+        <div>
+          <span class="lbl">Vol</span>
+          <div class="fig">${volText(p)}</div>
         </div>
-        <div class="col col-news">
+        <div>
           <span class="lbl">News</span>
           <div class="fig${newsCls}">${newsText(p)}</div>
         </div>
-        <div class="col">
-          <span class="lbl">Resting</span>
+        <div>
+          <span class="lbl">Rest</span>
           <div class="fig">${restText(p)}</div>
         </div>
       </div>
       <div class="recut-bar">
-        Recut
-        <span class="line">LINE ${adTop(p)} / ${adBot(p)} · ${esc(p.remaining_layers || 0)} LEFT</span>
+        <span>LINE ${adTop(p)}</span>
+        <span>${esc(p.remaining_layers || 0)} LEFT</span>
         <button type="button" class="kill" data-kill="${p.id}">Kill</button>
       </div>
     </article>`;
@@ -199,19 +224,18 @@
     const host = $("#liveStages");
     const live = (plans || []).filter((p) => p.live).slice(0, 2);
     const parts = live.map(liveStage);
-    while (parts.length < 2) parts.push(ghost());
+    while (parts.length < 2) parts.push(ghost(parts.length + 1, live.length));
     host.innerHTML = parts.join("");
   }
 
   function emptyRanks() {
     return [1, 2, 3]
       .map(
-        (i) => `<div class="rank">
+        (i) => `<div class="rank skeleton">
           <span class="idx">${String(i).padStart(2, "0")}</span>
-          <span class="dash">—</span>
-          <span></span><span class="dash">—</span><span class="dash">—</span>
-          <span class="dash">—</span><span class="dash">—</span>
-          <span class="dash">—</span><span class="dash">—</span><span></span>
+          <span class="bone"></span>
+          <span class="bone short"></span>
+          <span class="bone"></span>
         </div>`
       )
       .join("");
@@ -220,7 +244,7 @@
   function renderRanks(plans) {
     const host = $("#rankList");
     const rows = (plans || []).filter((p) => !p.live);
-    if (!rows.length && !(plans || []).length) {
+    if (!rows.length) {
       host.className = "empty-ranks";
       host.innerHTML = emptyRanks();
       return;
@@ -231,19 +255,17 @@
         const killed = p.status === "killed" ? " killed" : "";
         const ad =
           p.ad_status === "known"
-            ? `${adTop(p)}<small>${adBot(p)}</small>`
-            : "—<small>uncut</small>";
+            ? `${adTop(p)}<br>${adBot(p)}`
+            : "—";
         return `<button type="button" class="rank${killed}" data-id="${p.id}" style="animation-delay:${i * 30}ms">
           <span class="idx">${String(i + 1).padStart(2, "0")}</span>
-          <span class="nm">${esc(instrument(p))}</span>
-          <span class="tf">${tfText(p)}</span>
+          <span class="who"><span class="nm">${esc(instrument(p))}${esc(fut(p))}</span><span class="tf">${tfText(p)}</span></span>
           <span class="ad">${ad}</span>
           <span class="next">${money(p.next_layer_usd)}</span>
           <span class="pips">${pips(p.reds)}</span>
-          <span class="vol">${esc(p.volume && p.volume !== "unknown" ? p.volume : "—")}</span>
+          <span class="vol">${volText(p)}</span>
           <span class="news${p.news ? " news-hot" : ""}">${newsText(p)}</span>
           <span class="rest">${restText(p)}</span>
-          <span class="go">›</span>
         </button>`;
       })
       .join("");
@@ -258,49 +280,32 @@
     }
     back.hidden = false;
     host.hidden = false;
-    const layers = (p.layers || [])
-      .map((l) => `${l.idx} ${num(l.price)} · ${money(l.usd)}`)
-      .join("  ·  ");
     host.innerHTML = `
-      <button type="button" class="sheet-x" id="sheetClose">Close</button>
-      <h3>${esc(instrument(p))}</h3>
-      <p class="sym">${esc(p.symbol)} · ${esc(p.market)} · ${esc(p.status)}</p>
-      <dl class="facts">
-        <div class="fact"><dt>TF</dt><dd>${tfText(p)}</dd></div>
-        <div class="fact ad"><dt>AD top → bottom</dt><dd>${adTop(p)} → ${adBot(p)}</dd></div>
-        <div class="fact"><dt>Source</dt><dd>${esc(p.ad_source || "unknown")}</dd></div>
-        <div class="fact"><dt>Top bar</dt><dd>${esc(p.bar_top_label)}</dd></div>
-        <div class="fact"><dt>Bottom bar</dt><dd>${esc(p.bar_bottom_label)}</dd></div>
-        <div class="fact"><dt>Reds</dt><dd>${esc(p.reds)}</dd></div>
-        <div class="fact"><dt>Volume</dt><dd>${esc(p.volume)}</dd></div>
-        <div class="fact"><dt>News</dt><dd>${newsText(p)}</dd></div>
-        <div class="fact"><dt>Resting</dt><dd>${restText(p)}</dd></div>
-        <div class="fact"><dt>Next layer</dt><dd>${money(p.next_layer_usd)}</dd></div>
-        <div class="fact"><dt>Allocated</dt><dd>${money(p.allocated_usd)}</dd></div>
-        <div class="fact"><dt>Layers left</dt><dd>${esc(p.remaining_layers)}</dd></div>
+      <p class="plan-kicker"><span>Plan</span><button type="button" class="sheet-x" id="sheetClose">Close</button></p>
+      <h3>${esc(instrument(p))}${esc(fut(p))}</h3>
+      <dl>
+        <div class="sheet-row"><dt>TF</dt><dd>${tfText(p)}</dd></div>
+        <div class="sheet-row ad"><dt>AD</dt><dd>${adTop(p)} / ${adBot(p)}</dd></div>
+        <div class="sheet-row"><dt>Next</dt><dd>${money(p.next_layer_usd)}</dd></div>
+        <div class="sheet-row"><dt>Reds</dt><dd><span class="pips">${pips(p.reds)}</span></dd></div>
+        <div class="sheet-row"><dt>Vol</dt><dd>${volText(p)}</dd></div>
+        <div class="sheet-row"><dt>News</dt><dd>${newsText(p)}</dd></div>
+        <div class="sheet-row"><dt>Resting</dt><dd>${restText(p)}</dd></div>
+        <div class="sheet-row"><dt>Source</dt><dd>${esc(p.ad_source || "unknown")}</dd></div>
+        <div class="sheet-row"><dt>Top bar</dt><dd>${esc(p.bar_top_label)}</dd></div>
+        <div class="sheet-row"><dt>Bottom bar</dt><dd>${esc(p.bar_bottom_label)}</dd></div>
       </dl>
-      <p class="note">${esc(p.ad_note || "")}</p>
-      <p class="layer-line">${layers || "no layers — AD uncut"}</p>
       <form class="console" id="recutForm">
-        <label>Line top<input name="ad_top" inputmode="decimal" value="${p.ad_top ?? ""}" /></label>
-        <label>Line bottom<input name="ad_bottom" inputmode="decimal" value="${p.ad_bottom ?? ""}" /></label>
-        <label>Layers<input name="remaining_layers" type="number" min="1" max="12" value="${
+        <label>Line<input name="ad_top" inputmode="decimal" value="${p.ad_top ?? ""}" placeholder="top" /></label>
+        <label>Bottom<input name="ad_bottom" inputmode="decimal" value="${p.ad_bottom ?? ""}" /></label>
+        <label>Left<input name="remaining_layers" type="number" min="1" max="12" value="${
           p.remaining_layers || 5
         }" /></label>
-        <button class="act" type="submit">Recut</button>
-        <button class="kill" type="button" id="btnKill">Kill</button>
+        <div class="sheet-actions">
+          <button class="act" type="submit">Recut</button>
+          <button class="kill" type="button" id="btnKill">Kill</button>
+        </div>
       </form>`;
-  }
-
-  function tickLocal() {
-    const el = $("#localClock");
-    if (!el) return;
-    const t = new Intl.DateTimeFormat("en-GB", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(new Date());
-    el.textContent = "LOCAL " + t;
   }
 
   function paint() {
@@ -308,11 +313,11 @@
     const liveN = room.live_count || 0;
     document.body.dataset.tone = room.tone || "empty";
     document.body.dataset.live = liveN > 0 ? "1" : "0";
-    const idle = $("#idleLine");
-    if (idle) {
-      idle.textContent =
+    const book = $("#bookLine");
+    if (book) {
+      book.textContent =
         liveN > 0
-          ? `$${Number(state.account.equity_usd || 200).toFixed(0)} book · ${liveN}/2 live`
+          ? `$200 book · ${liveN} of 2 live`
           : "$200 book idle · max 2 live";
     }
     renderNeeds(state.needs);
@@ -330,15 +335,13 @@
     state.needs = data.needs_you || [];
     state.room = data.room || {};
     state.account = data.account || {};
-    const acc = state.account;
-    $("#bookAmt").textContent = `$${Number(acc.equity_usd || 200).toFixed(2)}`;
     paint();
   }
 
   function onPick(e) {
     if (e.target.closest("[data-kill]")) return;
     const btn = e.target.closest("[data-id]");
-    if (!btn || btn.classList.contains("open")) return;
+    if (!btn || btn.classList.contains("open") || btn.classList.contains("skeleton")) return;
     select(btn.getAttribute("data-id"));
   }
 
@@ -412,16 +415,13 @@
     }
   });
 
-  tickLocal();
-  setInterval(tickLocal, 30000);
-
   load().catch((e) => {
     document.body.dataset.tone = "empty";
     document.body.dataset.live = "0";
-    $("#idleLine").textContent = "$200 book idle · max 2 live";
+    $("#bookLine").textContent = "$200 book idle · max 2 live";
     $("#rankList").className = "empty-ranks";
     $("#rankList").innerHTML = emptyRanks();
-    $("#liveStages").innerHTML = ghost() + ghost();
+    $("#liveStages").innerHTML = ghost(1, 0) + ghost(2, 0);
     toast(e.message);
   });
 })();
