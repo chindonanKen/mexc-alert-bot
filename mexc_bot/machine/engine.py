@@ -13,8 +13,10 @@ from .hang import hang_ad, official_volume_n, volume_label
 from .tape import official_last_price, official_reds
 from .logic import (
     can_open_play,
+    decision_line,
     exponential_layers,
     failed_ad,
+    last_under_ad,
     news_kill,
     pick_working_tf,
     reds_required,
@@ -85,6 +87,11 @@ def seed_plans(
                 "resting": False,
                 "volume": "unknown",
                 "news": None,
+                **(
+                    decision_line(kind="watch")
+                    if hung.get("ad_status") != "known"
+                    else {}
+                ),
             },
         )
         out.append(public_plan(store, row))
@@ -158,6 +165,7 @@ def kill(store: MachineStore, user_id: int, plan_id: int) -> Dict[str, Any]:
         allocated_usd=0,
         armed_at=None,
         next_layer_usd=None,
+        **decision_line(kind="kill"),
     )
     return public_plan(store, store.get_plan(user_id, plan_id))
 
@@ -252,6 +260,11 @@ def resolve_need(
                 "remaining_layers": len(layers) if layers else 0,
                 "next_layer_usd": layers[0]["usd"] if layers else None,
                 "status": "watch",
+                **(
+                    decision_line(kind="watch")
+                    if hung.get("ad_status") != "known"
+                    else {}
+                ),
             },
         )
         plan = public_plan(store, row)
@@ -307,6 +320,26 @@ def try_arm(
         "reason": "not_armed",
         "plan": public_plan(store, store.get_plan(user_id, plan_id)),
     }
+
+
+def _set_decision(
+    store: MachineStore,
+    user_id: int,
+    plan_id: int,
+    kind: str,
+    plan: Optional[Dict[str, Any]] = None,
+    **extra: Any,
+) -> Dict[str, str]:
+    src = plan or {}
+    why = decision_line(
+        kind=kind,
+        reds=extra.get("reds", src.get("reds")),
+        tf=extra.get("tf", src.get("tf")),
+        volume=extra.get("volume", src.get("volume")),
+        volume_n=extra.get("volume_n", src.get("volume_n")),
+    )
+    store.patch_plan(user_id, int(plan_id), **why)
+    return why
 
 
 def _evaluate_plan(
@@ -370,20 +403,41 @@ def _evaluate_plan(
         "news_kill": kill,
         "volume": volume,
     }
+    sit = next((s for s in tf_states if s.get("first_candle_sitout")), None)
+    tape_reds = (
+        (chosen or {}).get("reds")
+        if chosen
+        else (sit or {}).get("reds")
+        if sit
+        else (tf_states[0].get("reds") if tf_states else None)
+    )
+    tape_tf = (chosen or {}).get("tf") or plan.get("tf")
     store.patch_plan(
         user_id,
         int(plan["id"]),
-        reds=(chosen or {}).get("reds") if chosen else (tf_states[0].get("reds") if tf_states else None),
+        reds=tape_reds,
         last_price=last_price,
         volume=volume,
         volume_n=volume_n,
         news=(kill or {}).get("class") if kill else None,
         gate=gate,
-        tf=(chosen or {}).get("tf") or plan.get("tf"),
+        tf=tape_tf,
     )
     plan = store.get_plan(user_id, int(plan["id"]))
+    spent = last_under_ad(
+        last_price, plan.get("ad_bottom"), ad_known=ad_known
+    )
+    why_kw = {
+        "reds": plan.get("reds"),
+        "tf": plan.get("tf"),
+        "volume": volume,
+        "volume_n": volume_n,
+    }
 
     if kill:
+        why = _set_decision(
+            store, user_id, int(plan["id"]), "news", plan=plan, **why_kw
+        )
         if plan.get("live") or plan.get("status") not in ("killed",):
             store.cancel_working(user_id, int(plan["id"]))
             _close_and_kb(
@@ -403,27 +457,25 @@ def _evaluate_plan(
                 resting=False,
                 allocated_usd=0,
                 armed_at=None,
+                **why,
             )
-            return {"ok": True, "action": "news_kill", "plan_id": plan["id"]}
-        return {"ok": True, "action": "news_blocked", "plan_id": plan["id"]}
-
-    if plan.get("live"):
-        filled = _paper_fill(store, user_id, plan, last_price)
-        if filled:
             return {
                 "ok": True,
-                "action": "paper_fill",
+                "action": "news_kill",
                 "plan_id": plan["id"],
-                "filled": filled,
-                "live_orders_sent": False,
+                **why,
             }
+        return {
+            "ok": True,
+            "action": "news_blocked",
+            "plan_id": plan["id"],
+            **why,
+        }
 
-    if plan.get("live") and failed_ad(
-        armed_at=plan.get("armed_at"),
-        now=now,
-        tf=plan.get("tf"),
-        bounced=bool(snap.get("bounced")),
-    ):
+    if plan.get("live") and spent:
+        why = _set_decision(
+            store, user_id, int(plan["id"]), "fail", plan=plan, **why_kw
+        )
         store.cancel_working(user_id, int(plan["id"]))
         _close_and_kb(
             store,
@@ -442,10 +494,60 @@ def _evaluate_plan(
             resting=False,
             allocated_usd=0,
             armed_at=None,
+            **why,
         )
-        return {"ok": True, "action": "failed_ad", "plan_id": plan["id"]}
+        return {"ok": True, "action": "failed_ad", "plan_id": plan["id"], **why}
+
+    if plan.get("live"):
+        filled = _paper_fill(store, user_id, plan, last_price)
+        why = _set_decision(
+            store, user_id, int(plan["id"]), "arm", plan=plan, **why_kw
+        )
+        if filled:
+            return {
+                "ok": True,
+                "action": "paper_fill",
+                "plan_id": plan["id"],
+                "filled": filled,
+                "live_orders_sent": False,
+                **why,
+            }
+
+    if plan.get("live") and failed_ad(
+        armed_at=plan.get("armed_at"),
+        now=now,
+        tf=plan.get("tf"),
+        bounced=bool(snap.get("bounced")),
+    ):
+        why = _set_decision(
+            store, user_id, int(plan["id"]), "fail", plan=plan, **why_kw
+        )
+        store.cancel_working(user_id, int(plan["id"]))
+        _close_and_kb(
+            store,
+            user_id,
+            plan,
+            reason="failed_ad",
+            bounce_or_fail="fail",
+            process_ok=True,
+            money_pnl=0.0,
+        )
+        store.patch_plan(
+            user_id,
+            int(plan["id"]),
+            status="closed",
+            live=False,
+            resting=False,
+            allocated_usd=0,
+            armed_at=None,
+            **why,
+        )
+        return {"ok": True, "action": "failed_ad", "plan_id": plan["id"], **why}
 
     if snap.get("bounced") and plan.get("live"):
+        why = _set_decision(
+            store, user_id, int(plan["id"]), "bounce", plan=plan, **why_kw
+        )
         store.cancel_working(user_id, int(plan["id"]))
         _close_and_kb(
             store,
@@ -464,21 +566,50 @@ def _evaluate_plan(
             resting=False,
             allocated_usd=0,
             armed_at=None,
+            **why,
         )
-        return {"ok": True, "action": "bounce", "plan_id": plan["id"]}
+        return {"ok": True, "action": "bounce", "plan_id": plan["id"], **why}
 
     if plan.get("live") or plan.get("status") in ("killed", "blocked"):
         return None
+
+    if spent and ad_known:
+        why = _set_decision(
+            store, user_id, int(plan["id"]), "fail", plan=plan, **why_kw
+        )
+        return {"ok": True, "action": "fail", "plan_id": plan["id"], **why}
+
     if not chosen:
-        return None
+        if not ad_known:
+            kind = "watch"
+        elif sit:
+            kind = "sit_out"
+        else:
+            kind = "wait"
+        why = _set_decision(
+            store, user_id, int(plan["id"]), kind, plan=plan, **why_kw
+        )
+        return {"ok": True, "action": kind, "plan_id": plan["id"], **why}
 
     cap = can_open_play(store.live_count(user_id), store.live_allocated(user_id))
     if not cap["ok"]:
-        return {"ok": False, "action": "cap", "reason": cap["reason"], "plan_id": plan["id"]}
+        why = _set_decision(
+            store, user_id, int(plan["id"]), "cap", plan=plan, **why_kw
+        )
+        return {
+            "ok": False,
+            "action": "cap",
+            "reason": cap["reason"],
+            "plan_id": plan["id"],
+            **why,
+        }
 
     layers = parse_json(plan.get("layers_json"), [])
     if not layers:
-        return None
+        why = _set_decision(
+            store, user_id, int(plan["id"]), "watch", plan=plan, **why_kw
+        )
+        return {"ok": True, "action": "watch", "plan_id": plan["id"], **why}
     budget = cap["budget_usd"]
     if budget < MAX_PER_PLAY_USD:
         layers = exponential_layers(
@@ -488,6 +619,13 @@ def _evaluate_plan(
             budget_usd=budget,
             zone_prices=parse_json(plan.get("zones_json"), []),
         )
+    why = decision_line(
+        kind="arm",
+        reds=chosen.get("reds"),
+        tf=chosen.get("tf"),
+        volume=volume,
+        volume_n=volume_n,
+    )
     store.replace_working_orders(user_id, int(plan["id"]), layers)
     store.patch_plan(
         user_id,
@@ -501,8 +639,15 @@ def _evaluate_plan(
         layers=layers,
         armed_at=now,
         tf=chosen.get("tf"),
+        **why,
     )
-    return {"ok": True, "action": "arm", "plan_id": plan["id"], "tf": chosen.get("tf")}
+    return {
+        "ok": True,
+        "action": "arm",
+        "plan_id": plan["id"],
+        "tf": chosen.get("tf"),
+        **why,
+    }
 
 
 def _paper_fill(
@@ -674,6 +819,8 @@ def public_plan(store: MachineStore, row: Optional[Dict[str, Any]]) -> Dict[str,
         "volume": row.get("volume") or "unknown",
         "volume_n": row.get("volume_n"),
         "news": row.get("news"),
+        "decision": row.get("decision") or "",
+        "decision_reason": row.get("decision_reason"),
         "resting": bool(row.get("resting")),
         "armed_at": row.get("armed_at"),
         "live": bool(row.get("live")),
