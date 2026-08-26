@@ -264,6 +264,88 @@ def failed_ad(
     return (float(now) - float(armed_at)) >= bounce_seconds(tf)
 
 
+def last_under_ad(
+    last_price: Any,
+    ad_bottom: Any,
+    *,
+    ad_known: bool = False,
+) -> bool:
+    """Fail is last at or under AD bottom. Not a wait timer."""
+    if not ad_known:
+        return False
+    try:
+        px = float(last_price)
+        bot = float(ad_bottom)
+    except (TypeError, ValueError):
+        return False
+    return px <= bot
+
+
+def volume_at_ad(volume: Optional[str], volume_n: Any = None) -> bool:
+    if volume_n is not None:
+        try:
+            if float(volume_n) > 0:
+                return True
+        except (TypeError, ValueError):
+            pass
+    return str(volume or "").strip().lower() in {"normal", "elevated", "climax"}
+
+
+def decision_line(
+    *,
+    kind: str,
+    reds: Optional[int] = None,
+    tf: Optional[str] = None,
+    volume: Optional[str] = None,
+    volume_n: Any = None,
+) -> Dict[str, str]:
+    """One plain why from evaluate gates. Engine-written. No gloss."""
+    if kind == "news":
+        return {"decision": "News flatten.", "decision_reason": "news"}
+    if kind == "fail":
+        return {"decision": "Last under the AD, spent.", "decision_reason": "fail"}
+    if kind == "kill":
+        return {"decision": "Kill.", "decision_reason": "kill"}
+    if kind == "bounce":
+        return {"decision": "Bounce.", "decision_reason": "bounce"}
+    if kind == "sit_out":
+        try:
+            n = int(reds) if reds is not None else 1
+        except (TypeError, ValueError):
+            n = 1
+        word = "Second" if n == 2 else "First"
+        return {
+            "decision": f"{word} red at the AD, sit out.",
+            "decision_reason": "sit_out",
+        }
+    if kind == "arm":
+        bits: List[str] = []
+        try:
+            n = int(reds) if reds is not None else None
+        except (TypeError, ValueError):
+            n = None
+        tf_s = str(tf or "").strip()
+        if n is not None and tf_s:
+            bits.append(f"{n} red {tf_s}")
+        elif n is not None:
+            bits.append(f"{n} red")
+        if volume_at_ad(volume, volume_n):
+            bits.append("volume at the AD")
+        bits.append("no news")
+        return {
+            "decision": ", ".join(bits) + ", taking it.",
+            "decision_reason": "arm",
+        }
+    if kind == "cap":
+        return {"decision": "Two live, wait.", "decision_reason": "cap"}
+    if kind == "watch":
+        return {
+            "decision": "Watch. Waiting for the line.",
+            "decision_reason": "watch",
+        }
+    return {"decision": "Grind, no volume, wait.", "decision_reason": "wait"}
+
+
 def price_eq(a: Any, b: Any) -> bool:
     """Match official ticks. Tight — do not treat nearby pixels as the bar."""
     try:

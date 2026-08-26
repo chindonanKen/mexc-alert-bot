@@ -183,6 +183,17 @@
     return p && p.tf && p.tf !== "unknown" ? esc(p.tf) : "—";
   }
 
+  function whyText(p) {
+    const s = p && p.decision;
+    if (s == null || s === "") return "";
+    return String(s);
+  }
+
+  function whyLine(p) {
+    const s = whyText(p);
+    return s ? `<span class="why">${esc(s)}</span>` : "";
+  }
+
   function volText(p) {
     const labels = /^(dry|normal|elevated|climax|unknown)$/i;
     const candidates = [p && p.volume_n, p && p.vol, p && p.quote_volume, p && p.volume];
@@ -258,6 +269,7 @@
       <div class="who">
         <span class="nm">${esc(instrument(p))}${esc(fut(p))}</span>
         <span class="tf">${tfText(p)}</span>
+        ${whyLine(p)}
       </div>
       <div class="body">
         <div class="field">
@@ -341,6 +353,7 @@
           <span class="vol">${volText(p) || "—"}</span>
           <span class="news${p.news ? " news-hot" : ""}">${newsText(p)}</span>
           <span class="rest">${restClock(p) || "—"}</span>
+          ${whyLine(p)}
         </button>`;
         })
         .join("");
@@ -374,6 +387,7 @@
     host.innerHTML = `
       <p class="plan-kicker"><span>Plan</span><button type="button" class="sheet-x" id="sheetClose">Close</button></p>
       <h3>${esc(instrument(p))}${esc(fut(p))}</h3>
+      ${p.decision ? `<p class="why">${esc(p.decision)}</p>` : ""}
       <dl>
         <div class="sheet-row"><dt>TF</dt><dd>${tfText(p)}</dd></div>
         <div class="sheet-row ad"><dt>AD</dt><dd>${

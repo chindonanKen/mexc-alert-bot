@@ -122,6 +122,8 @@ class MachineStore:
                         volume_n REAL,
                         news TEXT,
                         gate_json TEXT,
+                        decision TEXT,
+                        decision_reason TEXT,
                         created_at REAL NOT NULL,
                         updated_at REAL NOT NULL,
                         UNIQUE(user_id, symbol, market)
@@ -191,6 +193,8 @@ class MachineStore:
                     ("volume_n", "REAL"),
                     ("news", "TEXT"),
                     ("gate_json", "TEXT"),
+                    ("decision", "TEXT"),
+                    ("decision_reason", "TEXT"),
                 ):
                     ensure_column(conn, "machine_plans", col, decl)
                 conn.commit()
@@ -257,6 +261,18 @@ class MachineStore:
             "gate_json": _json(payload.get("gate")),
             "updated_at": now,
         }
+        if "decision" in payload:
+            fields["decision"] = payload.get("decision")
+        elif existing:
+            fields["decision"] = existing.get("decision")
+        else:
+            fields["decision"] = None
+        if "decision_reason" in payload:
+            fields["decision_reason"] = payload.get("decision_reason")
+        elif existing:
+            fields["decision_reason"] = existing.get("decision_reason")
+        else:
+            fields["decision_reason"] = None
         if "volume_n" in payload:
             fields["volume_n"] = payload.get("volume_n")
         elif existing:
