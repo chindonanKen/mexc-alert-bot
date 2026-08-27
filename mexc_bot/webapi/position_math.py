@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
+from .contract_size import resolve_futures_contract_size
+
 _PARTIAL_STATUS = frozenset(
     {
         "NEW",
@@ -115,19 +117,59 @@ def order_id_from_fill(fill: dict) -> str:
     return ""
 
 
-def fill_notional_usd(fill: dict, *, book: str = "spot", contract_size: float = 1.0) -> float:
-    """Layer volume in dollars. Spot: qty×price. Futures: qty×cs×price when quote missing."""
-    qq = _sf(fill.get("quote_qty"))
-    if qq is not None and qq > 0:
-        return qq
+def fill_px_qty_notional(fill: dict) -> float:
+    """price × qty (contract notional units). Not leftover-cost cash on futures."""
     px = _sf(fill.get("price")) or 0.0
     qty = _sf(fill.get("qty")) or 0.0
-    if px <= 0 or qty <= 0:
+    if px > 0 and qty > 0:
+        return px * qty
+    qq = _sf(fill.get("quote_qty"))
+    return qq if qq is not None and qq > 0 else 0.0
+
+
+def fill_cash_usd(
+    fill: dict, *, book: str = "spot", contract_size: Optional[float] = None
+) -> Optional[float]:
+    """Leftover-cost dollars. Spot: qty×price. Futures: qty×price×contractSize.
+
+    Futures deal quote_qty in this repo is price×vol (notional). Do not paint
+    that as In/Out. Unknown contractSize → None (caller stores 0).
+    """
+    px = _sf(fill.get("price")) or 0.0
+    qty = _sf(fill.get("qty")) or 0.0
+    notional = px * qty if px > 0 and qty > 0 else 0.0
+    qq = _sf(fill.get("quote_qty"))
+    if (book or "spot").lower() != "futures":
+        if qq is not None and qq > 0:
+            return qq
+        return notional
+
+    cs = contract_size if contract_size is not None and contract_size > 0 else None
+    if cs is None:
+        cs = resolve_futures_contract_size(fill.get("symbol"), fill)
+    if cs is None or cs <= 0:
+        return None
+    if notional > 0:
+        if qq is not None and qq > 0:
+            # Already cash if quote ≈ notional × cs; else quote is stored notional.
+            if abs(qq - notional * cs) <= max(1e-6, 0.02 * notional * cs):
+                return qq
+            if abs(qq - notional) <= max(1e-6, 0.02 * notional):
+                return notional * cs
+        return notional * cs
+    if qq is not None and qq > 0:
+        return qq * cs
+    return 0.0
+
+
+def fill_notional_usd(fill: dict, *, book: str = "spot", contract_size: float = 1.0) -> float:
+    """Back-compat: cash when provable, else 0 on futures without size."""
+    cash = fill_cash_usd(fill, book=book, contract_size=contract_size or None)
+    if cash is not None:
+        return cash
+    if (book or "spot").lower() == "futures":
         return 0.0
-    cs = contract_size if (book or "spot").lower() == "futures" else 1.0
-    if cs <= 0:
-        cs = 1.0
-    return px * qty * cs
+    return fill_px_qty_notional(fill)
 
 
 def price_key(price: Any) -> Optional[float]:
@@ -306,10 +348,24 @@ def remaining_cost_average(
     return (bought - sold) / rem
 
 
-def _layers_notional(orders: Optional[List[dict]], *, book: str = "spot") -> float:
+def _layers_px_qty(orders: Optional[List[dict]]) -> float:
     tot = 0.0
     for o in orders or []:
-        tot += fill_notional_usd(o, book=book)
+        tot += fill_px_qty_notional(o)
+    return tot
+
+
+def _layers_cash(
+    orders: Optional[List[dict]], *, book: str = "spot", contract_size: Optional[float] = None
+) -> Optional[float]:
+    if (book or "spot").lower() != "futures":
+        return _layers_px_qty(orders)
+    if contract_size is None or contract_size <= 0:
+        return None
+    tot = 0.0
+    for o in orders or []:
+        cash = fill_cash_usd(o, book=book, contract_size=contract_size)
+        tot += 0.0 if cash is None else cash
     return tot
 
 
@@ -338,29 +394,48 @@ def apply_open_remaining_cost_avg(entity: dict) -> dict:
     if not has_money and not has_layers:
         return entity
 
-    bought = _sf(entity.get("bought_usd"))
-    sold = _sf(entity.get("sold_usd"))
-    if bought is None:
-        bought = _layers_notional(entity.get("buy_orders"), book=book)
-    if sold is None:
-        sold = _layers_notional(entity.get("sell_orders"), book=book)
-    bought = bought or 0.0
-    sold = sold or 0.0
-    if bought == 0.0 and sold == 0.0:
+    n_in = _layers_px_qty(entity.get("buy_orders"))
+    n_out = _layers_px_qty(entity.get("sell_orders"))
+    if n_in <= 0 and n_out <= 0:
+        bought = _sf(entity.get("bought_usd"))
+        sold = _sf(entity.get("sold_usd"))
+        if bought is None and sold is None:
+            return entity
+        n_in = bought or 0.0
+        n_out = sold or 0.0
+    if n_in <= 0 and n_out <= 0:
         return entity
 
-    if entity.get("bought_usd") is None:
-        entity["bought_usd"] = round(bought, 4)
-    if entity.get("sold_usd") is None:
-        entity["sold_usd"] = round(sold, 4)
-    leftover = bought - sold
-    entity["remaining_cost_usd"] = round(leftover, 4)
-    avg = remaining_cost_average(bought, sold, rem)
+    # Leftover avg is a PRICE: (bought notional − sold notional) / rem qty.
+    avg = remaining_cost_average(n_in, n_out, rem)
     if avg is not None:
         entity["entry_avg"] = avg
         entity["entry_display"] = avg
         entity["leftover_avg"] = avg
         entity["remaining_avg"] = avg
+
+    if book == "futures":
+        cs = resolve_futures_contract_size(
+            entity.get("symbol"), entity, entity.get("contract_size")
+        )
+        if cs is None or cs <= 0:
+            if entity.get("bought_usd") is None:
+                entity["bought_usd"] = 0.0
+            if entity.get("sold_usd") is None:
+                entity["sold_usd"] = 0.0
+            entity["remaining_cost_usd"] = 0.0
+            return entity
+        entity["contract_size"] = cs
+        cash_in = n_in * cs
+        cash_out = n_out * cs
+        entity["bought_usd"] = round(cash_in, 4)
+        entity["sold_usd"] = round(cash_out, 4)
+        entity["remaining_cost_usd"] = round(cash_in - cash_out, 4)
+        return entity
+
+    entity["bought_usd"] = round(n_in, 4)
+    entity["sold_usd"] = round(n_out, 4)
+    entity["remaining_cost_usd"] = round(n_in - n_out, 4)
     return entity
 
 
@@ -451,43 +526,53 @@ def apply_open_mark_math(d: dict) -> None:
         d["upnl_usd_est"] = 0.0
 
 
+def _closed_px_qty(d: dict, *, side: str) -> float:
+    qty = _sf(d.get("size_sold")) or _sf(d.get("size_qty")) or 0.0
+    if side == "buy":
+        px = _sf(d.get("entry_avg")) or _sf(d.get("entry_display")) or 0.0
+    else:
+        px = _sf(d.get("exit_avg")) or 0.0
+    if px > 0 and qty > 0:
+        return px * qty
+    return 0.0
+
+
 def ensure_position_display_fields(d: dict) -> dict:
-    """P4: every Positions/PnL money · qty · avg cell has a number."""
+    """P4: every Positions/PnL money · qty · avg cell has a number.
+
+    Futures In/Out are leftover-cost cash (price×qty×contractSize). Raw
+    contract×price is notional — never paint it as dollars.
+    Leftover avg is a PRICE: (bought notional − sold notional) / rem qty.
+    """
     tag_book(d)
     collapse_entity_layers(d)
     is_open = d.get("status") == "open" or d.get("is_open")
     book = d.get("book") or "spot"
-    bought = _sf(d.get("bought_usd"))
-    sold = _sf(d.get("sold_usd"))
-    if bought is None:
-        layer_in = _layers_notional(d.get("buy_orders"), book=book)
-        if layer_in > 0:
-            bought = layer_in
-        elif not is_open:
-            # Closed futures history often has VWAP + qty, no deal rows.
-            qty = _sf(d.get("size_qty")) or _sf(d.get("size_sold")) or 0.0
-            px = _sf(d.get("entry_avg")) or _sf(d.get("entry_display")) or 0.0
-            cs = 1.0
-            if book == "futures":
-                cs = float(d.get("contract_size") or 1.0) or 1.0
-            bought = px * qty * cs if px > 0 and qty > 0 else 0.0
+    n_in = _layers_px_qty(d.get("buy_orders"))
+    n_out = _layers_px_qty(d.get("sell_orders"))
+    if n_in <= 0 and not is_open:
+        n_in = _closed_px_qty(d, side="buy")
+    if n_out <= 0 and not is_open:
+        n_out = _closed_px_qty(d, side="sell")
+    if n_in <= 0 and book != "futures":
+        n_in = _sf(d.get("bought_usd")) or 0.0
+    if n_out <= 0 and book != "futures":
+        n_out = _sf(d.get("sold_usd")) or 0.0
+
+    cs = None
+    if book == "futures":
+        cs = resolve_futures_contract_size(d.get("symbol"), d, d.get("contract_size"))
+        if cs is not None and cs > 0:
+            d["contract_size"] = cs
+        if cs is None or cs <= 0:
+            d["bought_usd"] = 0.0
+            d["sold_usd"] = 0.0
         else:
-            bought = 0.0
-    if sold is None:
-        layer_out = _layers_notional(d.get("sell_orders"), book=book)
-        if layer_out > 0:
-            sold = layer_out
-        elif not is_open:
-            qty = _sf(d.get("size_sold")) or _sf(d.get("size_qty")) or 0.0
-            px = _sf(d.get("exit_avg")) or 0.0
-            cs = 1.0
-            if book == "futures":
-                cs = float(d.get("contract_size") or 1.0) or 1.0
-            sold = px * qty * cs if px > 0 and qty > 0 else 0.0
-        else:
-            sold = 0.0
-    d["bought_usd"] = round(float(bought or 0.0), 4)
-    d["sold_usd"] = round(float(sold or 0.0), 4)
+            d["bought_usd"] = round(n_in * cs, 4)
+            d["sold_usd"] = round(n_out * cs, 4)
+    else:
+        d["bought_usd"] = round(float(n_in or 0.0), 4)
+        d["sold_usd"] = round(float(n_out or 0.0), 4)
 
     rem = _sf(d.get("size_remaining"))
     if rem is None:
@@ -498,38 +583,39 @@ def ensure_position_display_fields(d: dict) -> dict:
     if _sf(d.get("size_sold")) is None:
         d["size_sold"] = 0.0 if is_open else float(d.get("size_qty") or 0.0)
 
-    leftover = _sf(d.get("remaining_cost_usd"))
-    if leftover is None:
-        leftover = (float(d["bought_usd"]) - float(d["sold_usd"])) if is_open else 0.0
-    d["remaining_cost_usd"] = round(float(leftover), 4)
-
-    has_fill_money = float(d["bought_usd"]) > 0 or float(d["sold_usd"]) > 0
-    avg = None
-    if is_open and rem > 1e-12 and has_fill_money:
-        avg = remaining_cost_average(d["bought_usd"], d["sold_usd"], rem)
-    if avg is None:
-        avg = _sf(d.get("remaining_avg"))
-    if avg is None:
-        avg = _sf(d.get("leftover_avg"))
-    if avg is None:
-        avg = _sf(d.get("entry_display"))
-    if avg is None:
-        avg = _sf(d.get("entry_avg"))
-    if avg is None:
-        avg = 0.0
-    d["entry_avg"] = float(avg)
-    d["entry_display"] = float(avg)
+    has_notional = n_in > 0 or n_out > 0
+    leftover_price = remaining_cost_average(n_in, n_out, rem) if is_open else None
     if is_open:
-        d["leftover_avg"] = float(avg)
-        d["remaining_avg"] = float(avg)
-        if not has_fill_money:
-            d["remaining_cost_usd"] = 0.0
+        d["remaining_cost_usd"] = round(float(d["bought_usd"]) - float(d["sold_usd"]), 4)
+        if leftover_price is not None:
+            d["entry_avg"] = float(leftover_price)
+            d["entry_display"] = float(leftover_price)
+            d["leftover_avg"] = float(leftover_price)
+            d["remaining_avg"] = float(leftover_price)
+        else:
+            avg = (
+                _sf(d.get("remaining_avg"))
+                or _sf(d.get("leftover_avg"))
+                or _sf(d.get("entry_display"))
+                or _sf(d.get("entry_avg"))
+                or 0.0
+            )
+            d["entry_avg"] = float(avg)
+            d["entry_display"] = float(avg)
+            d["leftover_avg"] = float(avg)
+            d["remaining_avg"] = float(avg)
+            if not has_notional:
+                d["remaining_cost_usd"] = 0.0
     else:
         if _sf(d.get("exit_avg")) is None:
             d["exit_avg"] = 0.0
         d["leftover_avg"] = 0.0
         d["remaining_avg"] = 0.0
         d["remaining_cost_usd"] = 0.0
+        if _sf(d.get("entry_avg")) is None:
+            d["entry_avg"] = _sf(d.get("entry_display")) or 0.0
+        if _sf(d.get("entry_display")) is None:
+            d["entry_display"] = float(d.get("entry_avg") or 0.0)
         if _sf(d.get("mark_price")) is None:
             d["mark_price"] = float(d.get("exit_avg") or 0.0)
         d["upnl_usd_est"] = 0.0

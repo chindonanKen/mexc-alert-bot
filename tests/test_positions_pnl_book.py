@@ -346,34 +346,30 @@ class TestP4NoEmptyFields(unittest.TestCase):
         self.assertAlmostEqual(syn["sold_usd"], 0.0, places=4)
         self.assertAlmostEqual(syn["remaining_cost_usd"], 0.0, places=4)
 
-    def test_p4_closed_futures_mrnastock_ong_money_filled(self):
-        for sym, entry, exit_, qty in (
-            ("MRNASTOCK_USDT", 12.5, 11.0, 40.0),
-            ("ONG_USDT", 0.22, 0.25, 800.0),
+    def test_p4_closed_futures_unknown_size_stays_zero(self):
+        ent = {
+            "symbol": "NOSUCHFUT_USDT",
+            "market": "futures",
+            "status": "closed",
+            "is_open": False,
+            "entry_avg": 1.0,
+            "exit_avg": 1.1,
+            "size_qty": 10.0,
+            "size_sold": 10.0,
+            "size_remaining": 0.0,
+            "bought_usd": None,
+            "sold_usd": None,
+        }
+        from mexc_bot.webapi.contract_size import resolve_futures_contract_size
+
+        with patch(
+            "mexc_bot.webapi.contract_size.refresh_contract_size_catalog",
+            return_value=False,
         ):
-            ent = {
-                "symbol": sym,
-                "market": "futures",
-                "status": "closed",
-                "is_open": False,
-                "entry_avg": entry,
-                "entry_display": entry,
-                "exit_avg": exit_,
-                "size_qty": qty,
-                "size_sold": qty,
-                "size_remaining": 0.0,
-                "bought_usd": None,
-                "sold_usd": None,
-                "remaining_cost_usd": None,
-                "contract_size": 1.0,
-            }
+            self.assertIsNone(resolve_futures_contract_size("NOSUCHFUT_USDT", fetch=True))
             ensure_position_display_fields(ent)
-            self.assertIsInstance(ent["bought_usd"], (int, float), sym)
-            self.assertIsInstance(ent["sold_usd"], (int, float), sym)
-            self.assertAlmostEqual(ent["bought_usd"], entry * qty, places=4)
-            self.assertAlmostEqual(ent["sold_usd"], exit_ * qty, places=4)
-            self.assertAlmostEqual(ent["remaining_cost_usd"], 0.0, places=4)
-            self.assertAlmostEqual(ent["remaining_avg"], 0.0, places=4)
+        self.assertEqual(ent["bought_usd"], 0.0)
+        self.assertEqual(ent["sold_usd"], 0.0)
 
     def test_p4_all_40_closed_have_mark_and_upnl(self):
         for i in range(40):
@@ -545,6 +541,143 @@ class TestP5P6PnlHistoryAndMath(unittest.TestCase):
         self.assertIn("closed_history", js)
         self.assertIn('data-pnl-win="all"', html)
         self.assertIn('data-pnl-win="all">All', html.replace("\n", ""))
+
+
+class TestPikeClosedFuturesCashNotNotional(unittest.TestCase):
+    """Live-shaped ONG / MRNASTOCK: In/Out are leftover-cost cash, not price×vol."""
+
+    def test_ong_entry_times_qty_is_notional_not_cash(self):
+        # Pike: In/Out 77.74/81.62 from entry×qty (0 fills) vs exchange Real 38.14.
+        notional_in, notional_out = 77.74, 81.62
+        qty = 1000.0
+        entry = notional_in / qty
+        exit_ = notional_out / qty
+        cs = 10.0  # public /contract/detail ONG_USDT
+        exch_real = 38.14
+        notional_pnl = notional_out - notional_in
+        self.assertAlmostEqual(notional_pnl, 3.88, places=2)
+        self.assertLess(notional_pnl * 2, exch_real)  # 3.88 is not the cash PnL
+        cash_in = notional_in * cs
+        cash_out = notional_out * cs
+        cash_real = cash_out - cash_in
+        self.assertAlmostEqual(cash_in, 777.4, places=2)
+        self.assertAlmostEqual(cash_out, 816.2, places=2)
+        self.assertAlmostEqual(cash_real, 38.8, places=2)
+        self.assertLess(abs(cash_real - exch_real) / exch_real, 0.05)
+
+        ent = {
+            "symbol": "ONG_USDT",
+            "market": "futures",
+            "status": "closed",
+            "is_open": False,
+            "entry_avg": entry,
+            "entry_display": entry,
+            "exit_avg": exit_,
+            "size_qty": qty,
+            "size_sold": qty,
+            "size_remaining": 0.0,
+            "bought_usd": None,
+            "sold_usd": None,
+            "realized_pnl_usd": exch_real,
+            "buy_orders": [],
+            "sell_orders": [],
+        }
+        ensure_position_display_fields(ent)
+        self.assertAlmostEqual(ent["contract_size"], 10.0, places=6)
+        self.assertAlmostEqual(ent["bought_usd"], cash_in, places=2)
+        self.assertAlmostEqual(ent["sold_usd"], cash_out, places=2)
+        self.assertAlmostEqual(ent["realized_pnl_usd"], exch_real, places=2)
+        self.assertAlmostEqual(ent["remaining_avg"], 0.0, places=8)
+        self.assertNotAlmostEqual(ent["bought_usd"], notional_in, places=1)
+
+    def test_mrnastock_fill_notionals_are_1000x_cash(self):
+        # Pike: 9 buy / 29 sell layers, In 10,941,817 / Out 11,446,697 vs ~$505 Real.
+        cs = 0.001  # public spec: 1 Cont = 0.001 MRNA
+        target_in = 10_941_817.0
+        target_out = 11_446_697.0
+        buy_px = [150.0 + i for i in range(9)]
+        sell_px = [160.0 + i for i in range(29)]
+        buys = []
+        for i, px in enumerate(buy_px):
+            notional = target_in / 9.0
+            qty = notional / px
+            buys.append(
+                _fill(
+                    "MRNASTOCK_USDT",
+                    "buy",
+                    px,
+                    qty,
+                    1000 + i,
+                    market="futures",
+                    order_id=f"deal-b-{i}",
+                    raw={"id": f"deal-b-{i}", "orderId": f"deal-b-{i}"},
+                )
+            )
+        sells = []
+        for i, px in enumerate(sell_px):
+            notional = target_out / 29.0
+            qty = notional / px
+            sells.append(
+                _fill(
+                    "MRNASTOCK_USDT",
+                    "sell",
+                    px,
+                    qty,
+                    2000 + i,
+                    market="futures",
+                    order_id=f"deal-s-{i}",
+                    raw={"id": f"deal-s-{i}", "orderId": f"deal-s-{i}"},
+                )
+            )
+        self.assertAlmostEqual(sum(f["price"] * f["qty"] for f in buys), target_in, places=0)
+        self.assertAlmostEqual(sum(f["price"] * f["qty"] for f in sells), target_out, places=0)
+        rows = collapse_fills_to_orders(buys + sells)
+        self.assertEqual(len([r for r in rows if r["side"] == "buy"]), 9)
+        self.assertEqual(len([r for r in rows if r["side"] == "sell"]), 29)
+
+        ent = {
+            "symbol": "MRNASTOCK_USDT",
+            "market": "futures",
+            "status": "closed",
+            "is_open": False,
+            "entry_avg": 155.0,
+            "exit_avg": 170.0,
+            "size_qty": 1.0,
+            "size_sold": 1.0,
+            "size_remaining": 0.0,
+            "realized_pnl_usd": 505.0,
+            "buy_orders": buys,
+            "sell_orders": sells,
+        }
+        ensure_position_display_fields(ent)
+        self.assertEqual(ent["n_buys"], 9)
+        self.assertEqual(ent["n_sells"], 29)
+        self.assertAlmostEqual(ent["contract_size"], cs, places=6)
+        self.assertAlmostEqual(ent["bought_usd"], target_in * cs, places=1)
+        self.assertAlmostEqual(ent["sold_usd"], target_out * cs, places=1)
+        cash_real = ent["sold_usd"] - ent["bought_usd"]
+        self.assertAlmostEqual(cash_real, 504.88, places=1)
+        self.assertLess(abs(cash_real - 505.0) / 505.0, 0.02)
+        self.assertLess(ent["bought_usd"], 20_000)
+        self.assertGreater(ent["bought_usd"], 1_000)
+        self.assertAlmostEqual(ent["realized_pnl_usd"], 505.0, places=2)
+        self.assertAlmostEqual(ent["remaining_avg"], 0.0, places=8)
+
+    def test_prl_spot_leftover_does_not_regress(self):
+        ent = {
+            "symbol": "PRLUSDT",
+            "market": "spot",
+            "status": "open",
+            "is_open": True,
+            "size_remaining": 13494.37,
+            "bought_usd": 2740.7733,
+            "sold_usd": 0.0,
+        }
+        apply_open_remaining_cost_avg(ent)
+        ensure_position_display_fields(ent)
+        self.assertAlmostEqual(ent["remaining_cost_usd"], 2740.7733, places=4)
+        self.assertAlmostEqual(ent["remaining_avg"], 0.203105, places=6)
+        self.assertAlmostEqual(ent["bought_usd"], 2740.7733, places=4)
 
 
 class TestFuturesRemainingCostOnEntity(unittest.TestCase):

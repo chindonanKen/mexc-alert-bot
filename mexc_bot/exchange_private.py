@@ -562,6 +562,10 @@ def history_position_to_closed_entity(pos: dict) -> Optional[dict]:
         if opened_at is not None and closed_at is not None:
             hold_s = max(0.0, closed_at - opened_at)
         pid = pos.get("positionId") or pos.get("id")
+        try:
+            cs = float(pos.get("contractSize") or pos.get("contract_size") or 0)
+        except (TypeError, ValueError):
+            cs = 0.0
         return {
             "symbol": symbol,
             "market": "futures",
@@ -578,10 +582,11 @@ def history_position_to_closed_entity(pos: dict) -> Optional[dict]:
             "size_remaining": 0.0,
             "size_qty": close_vol,
             "size_sold": close_vol,
-            "bought_usd": round((entry_f or 0.0) * close_vol, 4)
-            if entry_f
-            else 0.0,
-            "sold_usd": round((exit_f or 0.0) * close_vol, 4) if exit_f else 0.0,
+            # price×vol is notional, not leftover-cost cash. Display layer
+            # multiplies by contractSize. Leave In/Out empty until then.
+            "bought_usd": None,
+            "sold_usd": None,
+            "contract_size": cs if cs > 0 else None,
             "remaining_cost_usd": 0.0,
             "remaining_mark_usd": 0.0,
             "leftover_avg": 0.0,

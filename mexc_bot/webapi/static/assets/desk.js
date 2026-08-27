@@ -766,13 +766,14 @@
 
   function _fillUsd(o, p) {
     const book = posBookOf(p || {});
-    const cs =
-      book === "futures" ? Number((p && p.contract_size) || 1) || 1 : 1;
     if (o.quote_qty != null && !Number.isNaN(Number(o.quote_qty))) {
       return "$" + Number(o.quote_qty).toFixed(0);
     }
     if (o.price != null && o.qty != null) {
-      const q = Number(o.price) * Number(o.qty) * cs;
+      const cs =
+        book === "futures" ? Number((p && p.contract_size) || 0) : 1;
+      if (book === "futures" && !(cs > 0)) return "$0";
+      const q = Number(o.price) * Number(o.qty) * (cs || 1);
       return !Number.isNaN(q) ? "$" + q.toFixed(0) : "$0";
     }
     return "$0";

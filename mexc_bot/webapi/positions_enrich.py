@@ -724,29 +724,41 @@ def _attach_fills_window(
             continue
         matched.append(f)
     # One layer per user order at one price — never one line per deal/fill.
-    cs = 1.0
+    # quote_qty stored as leftover-cost cash. Futures deal rows are price×vol
+    # (notional); cash = notional × contractSize. Unknown size → no $ on the layer.
+    cs = None
     if mwant == "futures":
-        try:
-            cs = float(ent.get("contract_size") or 0) or 1.0
-        except (TypeError, ValueError):
-            cs = 1.0
+        from .contract_size import resolve_futures_contract_size
+
+        cs = resolve_futures_contract_size(
+            ent.get("symbol"), ent, ent.get("contract_size")
+        )
+        if cs is not None and cs > 0:
+            ent["contract_size"] = cs
     buys: List[dict] = []
     sells: List[dict] = []
     for f in collapse_fills_to_orders(matched):
         ts = float(f.get("ts") or 0)
         qty = f.get("qty")
         px = f.get("price")
-        qq = f.get("quote_qty")
-        if qq in (None, "") and px is not None and qty is not None:
-            try:
-                qq = float(px) * float(qty) * (cs if mwant == "futures" else 1.0)
-            except (TypeError, ValueError):
-                qq = None
-        elif mwant == "futures" and qq not in (None, "") and cs != 1.0:
-            try:
-                qq = float(qq) * cs
-            except (TypeError, ValueError):
-                pass
+        qq = None
+        try:
+            px_f = float(px) if px not in (None, "") else 0.0
+            qty_f = float(qty) if qty not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            px_f = qty_f = 0.0
+        notional = px_f * qty_f if px_f > 0 and qty_f > 0 else 0.0
+        if mwant == "futures":
+            qq = (notional * cs) if (cs is not None and cs > 0 and notional > 0) else None
+        else:
+            raw_qq = f.get("quote_qty")
+            if raw_qq not in (None, ""):
+                try:
+                    qq = float(raw_qq)
+                except (TypeError, ValueError):
+                    qq = notional or None
+            else:
+                qq = notional or None
         layer = {
             "price": px,
             "qty": qty,
