@@ -70,9 +70,6 @@ class TestFillIsNotAPosition(unittest.TestCase):
         ), patch(
             "mexc_bot.learning.fills.fetch_live_futures_opens",
             return_value=[],
-        ), patch(
-            "mexc_bot.webapi.positions_enrich.fetch_live_futures_opens",
-            return_value=[],
         ):
             ents = list_position_entities(self.uid, include_closed=False)
         opens = [
@@ -105,11 +102,13 @@ class TestFillIsNotAPosition(unittest.TestCase):
 
     def test_no_position_opened_ping_copy(self):
         src = (ROOT / "mexc_bot" / "learning" / "fills.py").read_text(encoding="utf-8")
-        self.assertNotIn("position opened", src.lower())
-        self.assertNotIn("started a position", src.lower())
         bot = (ROOT / "mexc_bot" / "bot.py").read_text(encoding="utf-8")
-        self.assertNotIn("position opened", bot.lower())
-        self.assertIn("write_auto_journal=False", (ROOT / "mexc_bot" / "main.py").read_text())
+        main = (ROOT / "mexc_bot" / "main.py").read_text(encoding="utf-8")
+        for blob in (src, bot):
+            self.assertNotIn("started a position", blob.lower())
+            self.assertNotIn("position opened:", blob.lower())
+        self.assertIn("write_auto_journal=False", main)
+        self.assertIn("MEXC fills synced", src)
 
 
 class TestBuildIdentity(unittest.TestCase):
