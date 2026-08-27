@@ -469,7 +469,7 @@ class TestP5P6PnlHistoryAndMath(unittest.TestCase):
         self.assertEqual(all_sum["window"], "all")
         self.assertTrue(any(h["symbol"].startswith("OLD") for h in hist))
 
-        self.assertEqual(len(d30["closed_history"]), 80)
+        self.assertEqual(len(d30["closed_history"]), 52)
         self.assertEqual(d30["realized"]["closed_n"], 52)
         self.assertEqual(d30["realized"]["closed_all_n"], 80)
 
@@ -513,7 +513,8 @@ class TestP5P6PnlHistoryAndMath(unittest.TestCase):
         self.assertEqual(win_all.json()["realized"]["closed_n"], 80)
         self.assertEqual(win30.json()["window"], "30d")
         self.assertEqual(win30.json()["realized"]["closed_n"], 52)
-        self.assertEqual(len(win30.json()["closed_history"]), 80)
+        self.assertEqual(len(win30.json()["closed_history"]), 52)
+        self.assertEqual(win30.json()["realized"]["closed_all_n"], 80)
 
     def test_p5_range_all_overrides_window_30d(self):
         os.environ.pop("DESK_API_TOKEN", None)
@@ -536,9 +537,10 @@ class TestP5P6PnlHistoryAndMath(unittest.TestCase):
         self.assertIn("remaining_avg", js)
         self.assertIn("collapseLayersByPrice", js)
         self.assertIn('state.pnlWindow = "all"', js)
-        self.assertIn("range=", js)
-        self.assertIn("Leftover", js)
+        self.assertIn('params.set("range"', js)
+        self.assertIn("LEFT $", js)
         self.assertIn("closed_history", js)
+        self.assertIn("remaining_cost_usd", js)
         self.assertIn('data-pnl-win="all"', html)
         self.assertIn('data-pnl-win="all">All', html.replace("\n", ""))
 
