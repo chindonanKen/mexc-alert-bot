@@ -168,11 +168,10 @@ def segment_positions_from_fills(
     (success/miss on realized PnL). Next buy starts a new position.
     Returns newest-first.
     """
-    from ..webapi.position_math import collapse_fills_to_orders
-
-    # One walk row per user order (never one row per exchange fill/sub-order).
-    walk = collapse_fills_to_orders(list(fills or []))
-    all_fills = _all_fills_chronological(walk, symbol=symbol, market=market)
+    # Walk fills in time order. Do not collapse by price here — the same
+    # price can appear in two later cycles, and merging would reorder the book.
+    # Display collapse (one row per price) happens on the entity layers.
+    all_fills = _all_fills_chronological(list(fills or []), symbol=symbol, market=market)
     positions: List[Dict[str, Any]] = []
     qty = 0.0
     cost = 0.0

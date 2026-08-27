@@ -35,7 +35,7 @@ DISPLAY_MONEY_FIELDS = (
     "upnl_usd_est",
 )
 DISPLAY_QTY_FIELDS = ("size_remaining", "size_qty", "size_sold")
-DISPLAY_AVG_FIELDS = ("entry_avg", "entry_display", "leftover_avg")
+DISPLAY_AVG_FIELDS = ("entry_avg", "entry_display", "leftover_avg", "remaining_avg")
 
 
 def parse_raw(obj: Any) -> Dict[str, Any]:
@@ -130,34 +130,61 @@ def fill_notional_usd(fill: dict, *, book: str = "spot", contract_size: float = 
     return px * qty * cs
 
 
+def price_key(price: Any) -> Optional[float]:
+    """Stable price bucket: one user order at one price."""
+    n = _sf(price)
+    if n is None or n <= 0:
+        return None
+    return round(n, 10)
+
+
 def collapse_fills_to_orders(fills: List[dict]) -> List[dict]:
-    """One dict per (order_id, side). Fills with no id stay one-each (legacy)."""
+    """One row per user order at one price (side + price).
+
+    Live fills are often keyed by deal/fill id with no shared orderId.
+    Grouping by fill id paints 50 lines for 16 prices. Price+side is the
+    user-visible order. Same price, several pieces → one VWAP row.
+    """
     groups: Dict[tuple, List[dict]] = {}
-    singles: List[dict] = []
+    leftovers: List[dict] = []
     for i, fill in enumerate(fills or []):
         if not isinstance(fill, dict):
             continue
-        oid = order_id_from_fill(fill)
         side = str(fill.get("side") or "").upper() or "?"
-        if not oid:
+        pk = price_key(fill.get("price"))
+        if pk is None:
             row = dict(fill)
             row["_fully_filled"] = True
-            row["_order_id"] = f"legacy-{fill.get('id') or fill.get('exchange_trade_id') or i}"
+            row["_order_id"] = (
+                f"legacy-{fill.get('id') or fill.get('exchange_trade_id') or i}"
+            )
             row["_fill_count"] = 1
-            if row.get("quote_qty") in (None, ""):
-                px = _sf(row.get("price")) or 0.0
-                qty = _sf(row.get("qty")) or 0.0
-                row["quote_qty"] = px * qty
-            singles.append(row)
+            leftovers.append(row)
             continue
-        groups.setdefault((oid, side), []).append(fill)
+        groups.setdefault((side, pk), []).append(fill)
 
     out: List[dict] = []
-    for (oid, _side), parts in groups.items():
+    for (side, pk), parts in groups.items():
+        oid = order_id_from_fill(parts[0]) if len(parts) == 1 else ""
+        if not oid or any(order_id_from_fill(p) != oid for p in parts):
+            oid = f"px:{side}:{pk}"
         out.append(_merge_order_fills(oid, parts))
-    out.extend(singles)
+    out.extend(leftovers)
     out.sort(key=lambda x: float(x.get("ts") or 0))
     return out
+
+
+def collapse_entity_layers(ent: dict) -> dict:
+    """Rewrite buy/sell layers to one row per price. Mutates ``ent``."""
+    if not ent:
+        return ent
+    buys = collapse_fills_to_orders(list(ent.get("buy_orders") or []))
+    sells = collapse_fills_to_orders(list(ent.get("sell_orders") or []))
+    ent["buy_orders"] = buys
+    ent["sell_orders"] = sells
+    ent["n_buys"] = len(buys)
+    ent["n_sells"] = len(sells)
+    return ent
 
 
 def is_order_fully_filled(order: dict) -> bool:
@@ -333,6 +360,7 @@ def apply_open_remaining_cost_avg(entity: dict) -> dict:
         entity["entry_avg"] = avg
         entity["entry_display"] = avg
         entity["leftover_avg"] = avg
+        entity["remaining_avg"] = avg
     return entity
 
 
@@ -426,6 +454,7 @@ def apply_open_mark_math(d: dict) -> None:
 def ensure_position_display_fields(d: dict) -> dict:
     """P4: every Positions/PnL money · qty · avg cell has a number."""
     tag_book(d)
+    collapse_entity_layers(d)
     is_open = d.get("status") == "open" or d.get("is_open")
     book = d.get("book") or "spot"
     bought = _sf(d.get("bought_usd"))
@@ -434,24 +463,29 @@ def ensure_position_display_fields(d: dict) -> dict:
         layer_in = _layers_notional(d.get("buy_orders"), book=book)
         if layer_in > 0:
             bought = layer_in
-        else:
+        elif not is_open:
+            # Closed futures history often has VWAP + qty, no deal rows.
             qty = _sf(d.get("size_qty")) or _sf(d.get("size_sold")) or 0.0
             px = _sf(d.get("entry_avg")) or _sf(d.get("entry_display")) or 0.0
             cs = 1.0
             if book == "futures":
                 cs = float(d.get("contract_size") or 1.0) or 1.0
             bought = px * qty * cs if px > 0 and qty > 0 else 0.0
+        else:
+            bought = 0.0
     if sold is None:
         layer_out = _layers_notional(d.get("sell_orders"), book=book)
         if layer_out > 0:
             sold = layer_out
-        else:
+        elif not is_open:
             qty = _sf(d.get("size_sold")) or _sf(d.get("size_qty")) or 0.0
             px = _sf(d.get("exit_avg")) or 0.0
             cs = 1.0
             if book == "futures":
                 cs = float(d.get("contract_size") or 1.0) or 1.0
             sold = px * qty * cs if px > 0 and qty > 0 else 0.0
+        else:
+            sold = 0.0
     d["bought_usd"] = round(float(bought or 0.0), 4)
     d["sold_usd"] = round(float(sold or 0.0), 4)
 
@@ -466,24 +500,41 @@ def ensure_position_display_fields(d: dict) -> dict:
 
     leftover = _sf(d.get("remaining_cost_usd"))
     if leftover is None:
-        leftover = (bought - sold) if is_open else 0.0
+        leftover = (float(d["bought_usd"]) - float(d["sold_usd"])) if is_open else 0.0
     d["remaining_cost_usd"] = round(float(leftover), 4)
 
-    avg = _sf(d.get("entry_display"))
+    has_fill_money = float(d["bought_usd"]) > 0 or float(d["sold_usd"]) > 0
+    avg = None
+    if is_open and rem > 1e-12 and has_fill_money:
+        avg = remaining_cost_average(d["bought_usd"], d["sold_usd"], rem)
+    if avg is None:
+        avg = _sf(d.get("remaining_avg"))
+    if avg is None:
+        avg = _sf(d.get("leftover_avg"))
+    if avg is None:
+        avg = _sf(d.get("entry_display"))
     if avg is None:
         avg = _sf(d.get("entry_avg"))
-    if avg is None and is_open and rem > 1e-12:
-        avg = remaining_cost_average(bought, sold, rem)
     if avg is None:
         avg = 0.0
     d["entry_avg"] = float(avg)
     d["entry_display"] = float(avg)
     if is_open:
         d["leftover_avg"] = float(avg)
+        d["remaining_avg"] = float(avg)
+        if not has_fill_money:
+            d["remaining_cost_usd"] = 0.0
     else:
         if _sf(d.get("exit_avg")) is None:
             d["exit_avg"] = 0.0
         d["leftover_avg"] = 0.0
+        d["remaining_avg"] = 0.0
+        d["remaining_cost_usd"] = 0.0
+        if _sf(d.get("mark_price")) is None:
+            d["mark_price"] = float(d.get("exit_avg") or 0.0)
+        d["upnl_usd_est"] = 0.0
+        d["upnl_pct"] = 0.0
+        d["remaining_mark_usd"] = 0.0
 
     if _sf(d.get("remaining_mark_usd")) is None:
         d["remaining_mark_usd"] = 0.0
@@ -496,12 +547,10 @@ def ensure_position_display_fields(d: dict) -> dict:
             d["realized_pnl_usd"] = 0.0
     if is_open and _sf(d.get("upnl_usd_est")) is None:
         d["upnl_usd_est"] = 0.0
-    if not is_open:
-        d["upnl_usd_est"] = 0.0
-        d["remaining_mark_usd"] = 0.0
-        d["remaining_cost_usd"] = 0.0
     if _sf(d.get("realized_pnl_pct")) is None:
         d["realized_pnl_pct"] = 0.0
     if is_open and _sf(d.get("upnl_pct")) is None:
         d["upnl_pct"] = 0.0
+    if _sf(d.get("mark_price")) is None:
+        d["mark_price"] = 0.0
     return d

@@ -52,6 +52,7 @@ def _closed_row(e: dict) -> Dict[str, Any]:
         "realized_pnl_pct": _n(e.get("realized_pnl_pct")),
         "remaining_cost_usd": _n(e.get("remaining_cost_usd")),
         "leftover_avg": _n(e.get("leftover_avg")),
+        "remaining_avg": _n(e.get("remaining_avg") or e.get("leftover_avg")),
         "entry_avg": _n(e.get("entry_avg") or e.get("entry_display")),
         "exit_avg": _n(e.get("exit_avg")),
         "size_qty": _n(e.get("size_qty")),
@@ -75,6 +76,9 @@ def _open_row(e: dict) -> Dict[str, Any]:
         "remaining_mark_usd": _n(e.get("remaining_mark_usd")),
         "remaining_cost_usd": _n(e.get("remaining_cost_usd")),
         "leftover_avg": _n(e.get("leftover_avg") or e.get("entry_display")),
+        "remaining_avg": _n(
+            e.get("remaining_avg") or e.get("leftover_avg") or e.get("entry_display")
+        ),
         "entry_avg": _n(e.get("entry_avg") or e.get("entry_display")),
         "size_remaining": _n(e.get("size_remaining")),
         "upnl_usd_est": _n(e.get("upnl_usd_est")),
@@ -203,6 +207,11 @@ def build_pnl_summary(
                 "realized_pnl_usd": _n(e.get("realized_pnl_usd")),
                 "remaining_cost_usd": _n(e.get("remaining_cost_usd")),
                 "leftover_avg": _n(e.get("leftover_avg") or e.get("entry_display")),
+                "remaining_avg": _n(
+                    e.get("remaining_avg")
+                    or e.get("leftover_avg")
+                    or e.get("entry_display")
+                ),
                 "entity_key": e.get("entity_key"),
             }
             for e in free_bags

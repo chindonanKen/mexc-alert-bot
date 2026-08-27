@@ -10,8 +10,9 @@ from . import db
 from .position_math import (
     apply_open_mark_math,
     apply_open_remaining_cost_avg,
+    collapse_entity_layers,
+    collapse_fills_to_orders,
     ensure_position_display_fields,
-    fully_filled_orders,
     tag_book,
 )
 from .prices import ticker_24h
@@ -168,10 +169,11 @@ def list_position_entities(
             if e.get("recon_from_fills") or e.get("exchange_history")
         }
         try:
+            jc_limit = closed_limit if closed_limit and closed_limit > 0 else 100_000
             jc = db.fetch_all(
                 "SELECT * FROM journal_trades WHERE user_id=? AND status='closed' "
                 "ORDER BY closed_at DESC LIMIT ?",
-                (user_id, closed_limit),
+                (user_id, jc_limit),
             )
         except Exception:
             jc = []
@@ -251,6 +253,7 @@ def list_position_entities(
         if "journal_id" not in e:
             e["journal_id"] = None
         e["band"] = "open" if e.get("status") == "open" else "closed"
+        collapse_entity_layers(e)
         ensure_position_display_fields(e)
     return entities
 
@@ -720,7 +723,7 @@ def _attach_fills_window(
         if ts < o - pad_s or ts > c + pad_s:
             continue
         matched.append(f)
-    # One layer per fully filled order. Partial in-progress orders stay off the card.
+    # One layer per user order at one price — never one line per deal/fill.
     cs = 1.0
     if mwant == "futures":
         try:
@@ -729,7 +732,7 @@ def _attach_fills_window(
             cs = 1.0
     buys: List[dict] = []
     sells: List[dict] = []
-    for f in fully_filled_orders(matched):
+    for f in collapse_fills_to_orders(matched):
         ts = float(f.get("ts") or 0)
         qty = f.get("qty")
         px = f.get("price")

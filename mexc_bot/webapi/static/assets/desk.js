@@ -727,6 +727,43 @@
     return x === "futures" ? "futures" : "spot";
   }
 
+  /** One user order at one price = one BUY/SELL line. Never one line per fill. */
+  function collapseLayersByPrice(layers) {
+    const map = new Map();
+    (layers || []).forEach((o) => {
+      if (!o) return;
+      const px = Number(o.price);
+      const side = String(o.side || "").toUpperCase() || "?";
+      const key = Number.isFinite(px)
+        ? side + ":" + Math.round(px * 1e10) / 1e10
+        : side + ":na";
+      const cur = map.get(key);
+      const qty = Number(o.qty != null ? o.qty : 0);
+      const qq =
+        o.quote_qty != null && !Number.isNaN(Number(o.quote_qty))
+          ? Number(o.quote_qty)
+          : Number.isFinite(px)
+            ? px * qty
+            : 0;
+      if (!cur) {
+        map.set(key, {
+          ...o,
+          price: Number.isFinite(px) ? px : 0,
+          qty,
+          quote_qty: qq,
+          _fill_count: 1,
+        });
+        return;
+      }
+      cur.qty += qty;
+      cur.quote_qty = Number(cur.quote_qty || 0) + qq;
+      if (cur.qty > 0) cur.price = cur.quote_qty / cur.qty;
+      cur.ts = Math.max(Number(cur.ts || 0), Number(o.ts || 0));
+      cur._fill_count = (cur._fill_count || 1) + 1;
+    });
+    return [...map.values()].sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+  }
+
   function _fillUsd(o, p) {
     const book = posBookOf(p || {});
     const cs =
@@ -744,13 +781,15 @@
   function posCardHtml(p) {
     const isOpen = p.status === "open" || p.is_open;
     const entry =
-      p.entry_display != null
-        ? p.entry_display
+      p.remaining_avg != null
+        ? p.remaining_avg
         : p.leftover_avg != null
           ? p.leftover_avg
-          : p.entry_avg != null
-            ? p.entry_avg
-            : 0;
+          : p.entry_display != null
+            ? p.entry_display
+            : p.entry_avg != null
+              ? p.entry_avg
+              : 0;
     const exit_ = p.exit_avg != null ? p.exit_avg : 0;
     const mark = p.mark_price != null ? p.mark_price : 0;
     const bought = Number(p.bought_usd != null ? p.bought_usd : 0);
@@ -792,10 +831,11 @@
     const flow3v = isOpen ? _usd(held, false) : _usd(real, true);
 
     const when = _holdWhen(p, isOpen);
-    const layers =
-      p.n_buys || p.n_sells
-        ? `B${p.n_buys || 0}/S${p.n_sells || 0}`
-        : "";
+    const buyLayers = collapseLayersByPrice(p.buy_orders || []);
+    const sellLayers = collapseLayersByPrice(p.sell_orders || []);
+    const nBuys = buyLayers.length;
+    const nSells = sellLayers.length;
+    const layers = nBuys || nSells ? `B${nBuys}/S${nSells}` : "";
 
     const truth =
       p.exchange_history || p.money_truth === "exchange"
@@ -805,8 +845,7 @@
           : p.money_truth === "fill_recon_unverified" || p.verified === false
             ? `<span class="pos-src" title="Fill residual">FILL?</span>`
             : "";
-
-    const buys = (p.buy_orders || [])
+    const buys = buyLayers
       .map(
         (o) =>
           `<div class="pos-layer buy"><span>BUY</span><span class="pos-layer-usd">${_fillUsd(
@@ -817,7 +856,7 @@
           }</span><span class="mute">${fmtTime(o.ts)}</span></div>`
       )
       .join("");
-    const sells = (p.sell_orders || [])
+    const sells = sellLayers
       .map(
         (o) =>
           `<div class="pos-layer sell"><span>SELL</span><span class="pos-layer-usd">${_fillUsd(
@@ -866,9 +905,15 @@
       : "";
 
     const leftoverQty = Number(p.size_remaining != null ? p.size_remaining : 0);
+    const leftoverAvgPx =
+      p.remaining_avg != null
+        ? p.remaining_avg
+        : p.leftover_avg != null
+          ? p.leftover_avg
+          : entry;
     const markLine = isOpen
       ? `Avg ${fmtPx(entry)} · leftover ${fmtPx(
-          p.leftover_avg != null ? p.leftover_avg : entry
+          leftoverAvgPx
         )} · qty ${leftoverQty} · Mark ${fmtPx(mark)}${
           " · " +
           (Number(p.upnl_pct != null ? p.upnl_pct : 0) >= 0 ? "+" : "") +
@@ -966,9 +1011,9 @@
       p.closed_at ? " → " + fmtTime(p.closed_at) : ""
     }</div>
         <div class="pos-g">Layers</div>
-        <div class="pos-fills-h">Buys (${p.n_buys || 0})</div>
+        <div class="pos-fills-h">Buys (${nBuys})</div>
         ${buys || "<div class='mute'>No buys yet</div>"}
-        <div class="pos-fills-h">Sells (${p.n_sells || 0})</div>
+        <div class="pos-fills-h">Sells (${nSells})</div>
         ${
           sells ||
           (isOpen
@@ -1349,7 +1394,9 @@
     if (!host) return;
     try {
       const d = await api(
-        `/api/pnl?window=${encodeURIComponent(state.pnlWindow || "all")}`
+        `/api/pnl?window=${encodeURIComponent(
+          state.pnlWindow || "all"
+        )}&range=${encodeURIComponent(state.pnlWindow || "all")}`
       );
       const b = d.bankroll || {};
       const r = d.realized || {};
@@ -1390,12 +1437,19 @@
         ${
           book.length
             ? `<div class="scroll pnl-book-wrap">${table(
-                ["Sym", "In", "Out", "Real", "Held", "Free"],
+                ["Sym", "In", "Out", "Real", "Held", "Leftover", "Avg", "Free"],
                 book
                   .map((p) => {
                     const fr = p.free_coins
                       ? `<span class="pnl-free-cell">FREE</span>`
-                      : "—";
+                      : "0";
+                    const leftoverAvg = _pnlNum(
+                      p.remaining_avg != null
+                        ? p.remaining_avg
+                        : p.leftover_avg != null
+                          ? p.leftover_avg
+                          : p.entry_avg
+                    );
                     return `<tr class="${
                       p.free_coins ? "pnl-row-free" : ""
                     }"><td>${escHtml(p.symbol)}</td><td>${_pnlNum(
@@ -1406,7 +1460,9 @@
                       0
                     )}</td><td>${_pnlNum(p.remaining_mark_usd).toFixed(
                       0
-                    )}</td><td>${fr}</td></tr>`;
+                    )}</td><td>${_pnlNum(p.remaining_cost_usd).toFixed(
+                      0
+                    )}</td><td>${leftoverAvg}</td><td>${fr}</td></tr>`;
                   })
                   .join("")
               )}</div>`
