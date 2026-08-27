@@ -446,12 +446,35 @@ def tag_book(d: dict) -> None:
     d["math"] = book
 
 
-def _entry_px(d: dict) -> float:
-    for key in ("entry_display", "leftover_avg", "avg_entry", "entry_avg", "hold_avg"):
+def _entry_px(d: dict) -> Optional[float]:
+    """Leftover remaining-cost first, including negative leftover (SYN).
+
+    Do not skip n < 0 — that zeroed uPnL $ when leftover avg went below 0.
+    Prefer leftover over exchange hold_avg so mark-vs-leftover stays consistent.
+    Explicit 0 leftover is a real basis; missing fields stay None.
+    """
+    for key in (
+        "remaining_avg",
+        "leftover_avg",
+        "entry_display",
+        "entry_avg",
+        "avg_entry",
+        "hold_avg",
+    ):
         n = _sf(d.get(key))
-        if n is not None and n > 0:
+        if n is not None and n != 0:
             return n
-    return 0.0
+    for key in ("remaining_avg", "leftover_avg", "entry_display", "entry_avg"):
+        n = _sf(d.get(key))
+        if n is not None:
+            return n
+    return None
+
+
+def _upnl_pct(mark: float, entry: Optional[float]) -> Optional[float]:
+    if entry is None or entry == 0:
+        return None
+    return round((float(mark) - float(entry)) / abs(float(entry)) * 100.0, 3)
 
 
 def _mark_px(d: dict) -> Optional[float]:
@@ -469,7 +492,11 @@ def _is_short(d: dict) -> bool:
 
 
 def apply_open_mark_math(d: dict) -> None:
-    """Remaining notional / uPnL. Spot: qty×price. Futures: qty×cs×mark."""
+    """Remaining notional / uPnL. Spot: qty×price. Futures: qty×cs×mark.
+
+    uPnL $ is mark vs leftover avg, including negative leftover (SYN).
+    Leftover remaining_avg formula is unchanged: (bought − sold) / rem.
+    """
     tag_book(d)
     rem = float(d.get("size_remaining") or d.get("remaining_qty") or 0)
     entry = _entry_px(d)
@@ -486,30 +513,28 @@ def apply_open_mark_math(d: dict) -> None:
             d.setdefault("upnl_usd_est", 0.0)
             return
         exch_upnl = d.get("unrealized_pnl")
+        if mark is None and exch_upnl not in (None, "") and rem > 0 and cs > 0 and entry is not None:
+            derived = entry + side * float(exch_upnl) / (rem * cs)
+            d["mark_price"] = derived
+            d["mark"] = derived
+            if not d.get("mark_source"):
+                d["mark_source"] = "mexc_position"
+            mark = derived
+        if mark is not None and entry is not None:
+            mark_f = float(mark)
+            d["upnl_usd_est"] = (mark_f - entry) * rem * cs * side
+            d["remaining_mark_usd"] = rem * cs * mark_f
+            pct = _upnl_pct(mark_f, entry)
+            if pct is not None:
+                d["upnl_pct"] = pct
+            return
+        if mark is not None:
+            d["remaining_mark_usd"] = rem * cs * float(mark)
         if exch_upnl not in (None, ""):
-            upnl = float(exch_upnl)
-            d["upnl_usd_est"] = upnl
-            if mark is None and rem > 0 and cs > 0 and entry > 0:
-                derived = entry + side * upnl / (rem * cs)
-                d["mark_price"] = derived
-                d["mark"] = derived
-                if not d.get("mark_source"):
-                    d["mark_source"] = "mexc_position"
-                mark = derived
-            if mark is not None:
-                d["remaining_mark_usd"] = rem * cs * float(mark)
-            if mark is not None and entry > 0:
-                d["upnl_pct"] = round((float(mark) - entry) / entry * 100.0, 3)
+            d["upnl_usd_est"] = float(exch_upnl)
             return
-        if mark is None or entry <= 0:
-            d.setdefault("remaining_mark_usd", 0.0)
-            d.setdefault("upnl_usd_est", 0.0)
-            return
-        mark_f = float(mark)
-        d["upnl_usd_est"] = (mark_f - entry) * rem * cs * side
-        d["remaining_mark_usd"] = rem * cs * mark_f
-        if entry > 0:
-            d["upnl_pct"] = round((mark_f - entry) / entry * 100.0, 3)
+        d.setdefault("remaining_mark_usd", 0.0)
+        d.setdefault("upnl_usd_est", 0.0)
         return
 
     d["contract_size"] = 1.0
@@ -519,9 +544,11 @@ def apply_open_mark_math(d: dict) -> None:
         return
     mark_f = float(mark)
     d["remaining_mark_usd"] = rem * mark_f
-    if entry > 0:
+    if entry is not None:
         d["upnl_usd_est"] = (mark_f - entry) * rem
-        d["upnl_pct"] = round((mark_f - entry) / entry * 100.0, 3)
+        pct = _upnl_pct(mark_f, entry)
+        if pct is not None:
+            d["upnl_pct"] = pct
     else:
         d["upnl_usd_est"] = 0.0
 
