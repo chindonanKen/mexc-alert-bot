@@ -592,8 +592,10 @@ Covers: stable_id crossing, market isolation, stock resolve (compact `TSLAUSDT` 
 | `FEATURE_MEXC_PRIVATE_READ` | `false` | Read-only fills/positions → journal_fills + engagement bridge |
 | `FEATURE_NEWS_MONITOR` | `false` | Fatal news (when wired) |
 | `FEATURE_VOICE` | `false` | Voice channel into same agent tools |
+| `FEATURE_AD_MACHINE` | `false` | Isolated Machine page + `machine_*` paper book. No live MEXC sends. |
 
 Tables: `learning_events`, `learning_labels`, `learning_outcomes`, `journal_trades`, `journal_fills` (+ planned lessons / pending questions) — same DB file, **never** delete `alerts`.
+Machine tables (`machine_plans`, `machine_orders`, `machine_closes`, `machine_kb`) are a separate book — never mix into Positions leftover-avg.
 
 ---
 
