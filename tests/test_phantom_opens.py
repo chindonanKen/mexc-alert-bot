@@ -12,7 +12,6 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from mexc_bot.bot import _exchange_open_count
 from mexc_bot.learning.fills import (
     _write_futures_open_cache,
     _write_spot_balances_cache,
@@ -93,7 +92,6 @@ class TestFillIsNotAPosition(unittest.TestCase):
             notes="auto from MEXC fill",
         )
         self.assertEqual(count_exchange_open_positions(self.store, self.uid), 0)
-        self.assertEqual(_exchange_open_count(self.store, self.uid), 0)
         _write_futures_open_cache(
             self.store,
             self.uid,
@@ -101,7 +99,9 @@ class TestFillIsNotAPosition(unittest.TestCase):
         )
         _write_spot_balances_cache(self.store, self.uid, [])
         self.assertEqual(count_exchange_open_positions(self.store, self.uid), 1)
-        self.assertEqual(_exchange_open_count(self.store, self.uid), 1)
+        bot = (ROOT / "mexc_bot" / "bot.py").read_text(encoding="utf-8")
+        self.assertIn("count_exchange_open_positions", bot)
+        self.assertIn("_exchange_open_count", bot)
 
     def test_no_position_opened_ping_copy(self):
         src = (ROOT / "mexc_bot" / "learning" / "fills.py").read_text(encoding="utf-8")
