@@ -24,5 +24,11 @@ USER appuser
 # Default alerts location inside container (override via env + volume)
 ENV ALERTS_FILE=/app/data/alerts.json
 
+# Optional build identity for GET /api/health (do not bake tokens)
+ARG GIT_SHA=
+ARG IMAGE_TAG=
+ENV GIT_SHA=${GIT_SHA}
+ENV IMAGE_TAG=${IMAGE_TAG}
+
 # Run the bot
 CMD ["python", "-m", "mexc_bot.main"]

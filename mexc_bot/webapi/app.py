@@ -208,15 +208,30 @@ class VisualAdBody(BaseModel):
     ts: Optional[float] = None
 
 
+def _feature_ad_machine() -> bool:
+    from ..machine.settings import feature_ad_machine
+
+    return feature_ad_machine()
+
+
+def _machine_not_found() -> None:
+    raise HTTPException(status_code=404, detail="Not found")
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="AD Desk", version="2.1.0-beta")
 
     @app.get("/api/health")
     def health():
+        from .build_info import build_identity
+
         path = db.db_path()
+        ident = build_identity()
         return {
             "ok": True,
             "version": "2.1.0-beta",
+            "git_sha": ident.get("git_sha"),
+            "image_tag": ident.get("image_tag"),
             "db": str(path),
             "db_exists": path.exists(),
             "auth_required": bool(_desk_token()),
@@ -224,6 +239,7 @@ def create_app() -> FastAPI:
                 os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY")
             ),
             "live_orders_allowed": actions.live_orders_allowed(),
+            "feature_ad_machine": _feature_ad_machine(),
             "ts": time.time(),
         }
 
@@ -252,6 +268,7 @@ def create_app() -> FastAPI:
                 {"id": "p5_paper", "title": "P5 Paper / replay + pass bar", "status": "planned"},
                 {"id": "p6_advise", "title": "P6 Advise / recs (owner re-open + P5 bar)", "status": "deferred"},
                 {"id": "p7_live", "title": "P7 Gated live AD (default off)", "status": "deferred"},
+                {"id": "ad_machine", "title": "AD Machine isolated paper book (FEATURE_AD_MACHINE, default off)", "status": "planned"},
                 {"id": "desk_small", "title": "Occasional small AD Desk UX fixes", "status": "planned"},
             ],
             "principles": [
@@ -917,17 +934,27 @@ def create_app() -> FastAPI:
 
     @app.get("/api/pnl")
     def get_pnl(
-        window: str = Query("30d"),
+        window: str = Query("all"),
+        range_name: Optional[str] = Query(None, alias="range"),
+        from_date: Optional[str] = Query(None, alias="from"),
+        to_date: Optional[str] = Query(None, alias="to"),
         _: bool = Depends(require_auth),
     ):
-        """Smart PnL — dollar bankroll, realized, free bags, open book."""
+        """Smart PnL — full closed history by default (window/range=all).
+
+        ``from`` / ``to`` are Manila calendar dates (YYYY-MM-DD). They filter
+        the displayed closed list only — history is never deleted.
+        """
         from .pnl import build_pnl_summary
 
         try:
             uid = db.default_user_id()
             if not uid:
                 return {"error": "no user", "bankroll": {}, "realized": {}}
-            return build_pnl_summary(int(uid), window=window)
+            w = (range_name or window or "all").strip() or "all"
+            return build_pnl_summary(
+                int(uid), window=w, from_date=from_date, to_date=to_date
+            )
         except Exception as e:
             raise HTTPException(400, str(e))
 
@@ -1607,6 +1634,34 @@ def create_app() -> FastAPI:
             },
         }
 
+    if _feature_ad_machine():
+        from ..machine.api import router as machine_router
+        from ..machine.loop import ensure_tape_loop
+
+        app.include_router(machine_router)
+        ensure_tape_loop()
+
+        @app.get("/machine")
+        def machine_page():
+            path = STATIC_DIR / "machine.html"
+            if not path.is_file():
+                raise HTTPException(status_code=404, detail="Not found")
+            return FileResponse(path)
+    else:
+
+        @app.api_route("/api/machine", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+        @app.api_route(
+            "/api/machine/{full_path:path}",
+            methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        )
+        def machine_api_off(full_path: str = ""):
+            _machine_not_found()
+
+        @app.get("/machine")
+        @app.get("/machine.html")
+        def machine_page_off():
+            _machine_not_found()
+
     if STATIC_DIR.is_dir():
         app.mount(
             "/assets",
@@ -1620,6 +1675,8 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}")
         def spa_fallback(full_path: str):
+            if full_path in {"machine", "machine.html"} and not _feature_ad_machine():
+                raise HTTPException(status_code=404, detail="Not found")
             candidate = STATIC_DIR / full_path
             if candidate.is_file():
                 return FileResponse(candidate)

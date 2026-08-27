@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
   <noscript><link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" /></noscript>
-  <link rel="stylesheet" href="/assets/desk.css?v=slicelab1" />
+  <link rel="stylesheet" href="/assets/desk.css?v=openlive1" />
 </head>
 <body>
   <div class="bg-orb orb-a"></div>
@@ -27,6 +27,7 @@
         <button data-view="movers">Movers</button>
         <button data-view="positions">Positions</button>
         <button data-view="pnl">PnL</button>
+        <a id="navMachine" class="nav-dim nav-ext" href="/machine" hidden>Machine</a>
         <div class="nav-sep">More</div>
         <button data-view="memory" class="nav-dim" id="navLearning">Learning <span id="navLearnBadge" class="nav-badge" hidden>0</span></button>
         <button data-view="intel" class="nav-dim">Intel</button>
@@ -90,6 +91,10 @@
         <div class="panel clean">
           <header class="panel-h pos-page-h">
             <h3>Positions</h3>
+            <div class="pos-views" role="group" aria-label="Positions view">
+              <button type="button" class="btn soft sm pos-view on" data-pos-view="open">Open</button>
+              <button type="button" class="btn soft sm pos-view" data-pos-view="closed">Closed</button>
+            </div>
             <span class="badge quiet" id="posListHead">$ bought / sold · free coins</span>
           </header>
           <p class="pos-bankroll mute" id="posBankroll">—</p>
@@ -110,15 +115,21 @@
       <!-- PnL -->
       <section class="view" id="view-pnl">
         <div class="panel clean">
-          <header class="panel-h">
-            <h3>PnL</h3>
-            <div class="pnl-windows">
-              <button type="button" class="btn soft sm pnl-win on" data-pnl-win="7d">7d</button>
-              <button type="button" class="btn soft sm pnl-win" data-pnl-win="30d">30d</button>
-              <button type="button" class="btn soft sm pnl-win" data-pnl-win="all">All</button>
+          <header class="panel-h pnl-page-h">
+            <h3>PnL <span id="pnlWinLabel" class="pnl-win-label mute">All</span></h3>
+            <div class="pnl-toolbar">
+              <div class="pnl-windows" role="group" aria-label="PnL window">
+                <button type="button" class="btn soft sm pnl-win" data-pnl-win="7d">7d</button>
+                <button type="button" class="btn soft sm pnl-win" data-pnl-win="30d">30d</button>
+                <button type="button" class="btn soft sm pnl-win on" data-pnl-win="all">All</button>
+              </div>
+              <div class="pnl-dates">
+                <label class="pnl-date-lab">From <input type="text" id="pnlFrom" inputmode="numeric" placeholder="YYYY-MM-DD" maxlength="10" autocomplete="off" /></label>
+                <label class="pnl-date-lab">To <input type="text" id="pnlTo" inputmode="numeric" placeholder="YYYY-MM-DD" maxlength="10" autocomplete="off" /></label>
+              </div>
             </div>
           </header>
-          <p class="learn-panel-hint mute">Exchange cycles · free = principal back · bag left as inventory</p>
+          <p id="pnlWindowSum" class="pnl-window-sum mute">Real +$0 · In $0 · Out $0</p>
           <div id="pnlBody" class="pnl-body"></div>
         </div>
       </section>
@@ -446,6 +457,6 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/assets/desk.js?v=slicelab1"></script>
+  <script src="/assets/desk.js?v=openlive1"></script>
 </body>
 </html>

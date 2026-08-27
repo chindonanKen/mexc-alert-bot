@@ -454,6 +454,12 @@ def futures_position_snapshot(pos: dict) -> Optional[dict]:
         except (TypeError, ValueError):
             upnl_f = None
         ptype = int(pos.get("positionType") or 1)  # 1 long 2 short
+        try:
+            cs = float(pos.get("contractSize") or pos.get("contract_size") or 0)
+        except (TypeError, ValueError):
+            cs = 0.0
+        if cs <= 0:
+            cs = 1.0
 
         # Live entry for remaining size = residual hold avg
         entry = hold_avg
@@ -480,6 +486,7 @@ def futures_position_snapshot(pos: dict) -> Optional[dict]:
             "hold_fee": hold_fee,
             "close_vol": close_vol,
             "unrealized_pnl": upnl_f,
+            "contract_size": cs,
             "leverage": pos.get("leverage"),
             "create_time": pos.get("createTime"),
             "update_time": pos.get("updateTime") or pos.get("createTime"),
@@ -555,6 +562,10 @@ def history_position_to_closed_entity(pos: dict) -> Optional[dict]:
         if opened_at is not None and closed_at is not None:
             hold_s = max(0.0, closed_at - opened_at)
         pid = pos.get("positionId") or pos.get("id")
+        try:
+            cs = float(pos.get("contractSize") or pos.get("contract_size") or 0)
+        except (TypeError, ValueError):
+            cs = 0.0
         return {
             "symbol": symbol,
             "market": "futures",
@@ -571,6 +582,14 @@ def history_position_to_closed_entity(pos: dict) -> Optional[dict]:
             "size_remaining": 0.0,
             "size_qty": close_vol,
             "size_sold": close_vol,
+            # price×vol is notional, not leftover-cost cash. Display layer
+            # multiplies by contractSize. Leave In/Out empty until then.
+            "bought_usd": None,
+            "sold_usd": None,
+            "contract_size": cs if cs > 0 else None,
+            "remaining_cost_usd": 0.0,
+            "remaining_mark_usd": 0.0,
+            "leftover_avg": 0.0,
             "buy_orders": [],
             "sell_orders": [],
             "n_buys": 0,

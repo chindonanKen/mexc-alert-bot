@@ -413,7 +413,7 @@ def list_positions(user_id: Optional[int] = None, include_closed: bool = False) 
 
     uid = _uid(user_id)
     return list_position_entities(
-        uid, include_closed=bool(include_closed), closed_limit=40
+        uid, include_closed=bool(include_closed), closed_limit=0
     )
 
 

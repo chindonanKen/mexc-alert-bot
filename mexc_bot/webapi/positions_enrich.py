@@ -7,16 +7,27 @@ import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from . import db
+from .position_math import (
+    apply_open_mark_math,
+    apply_open_remaining_cost_avg,
+    collapse_entity_layers,
+    collapse_fills_to_orders,
+    ensure_position_display_fields,
+    tag_book,
+)
 from .prices import ticker_24h
 
 logger = logging.getLogger(__name__)
+
+# P5: no day/count cutoff on the desk book. 0 = unlimited.
+_FILLS_LIMIT = 100_000
 
 
 def list_position_entities(
     user_id: int,
     *,
     include_closed: bool = True,
-    closed_limit: int = 40,
+    closed_limit: int = 0,
 ) -> List[dict]:
     """Discrete positions (open + closed cycles).
 
@@ -29,7 +40,7 @@ def list_position_entities(
         from ..learning.trades import segment_positions_from_fills
 
         store = EventStore(db.db_path())
-        fills_all = store.recent_fills(user_id, limit=1500)
+        fills_all = store.recent_fills(user_id, limit=_FILLS_LIMIT)
     except Exception as e:
         logger.debug("list_position_entities fills: %s", e)
         return _fallback_journal(user_id, include_closed=include_closed)
@@ -141,6 +152,10 @@ def list_position_entities(
                     if j.get("notes") and not e.get("notes"):
                         e["notes"] = j.get("notes")
             continue
+        notes = str(j.get("notes") or "")
+        if "auto from MEXC fill" in notes or "auto close from MEXC fill" in notes:
+            # A fill is not a position. Do not paint auto-journal as Open.
+            continue
         d = _fallback_from_rows([j])[0]
         d["journal_id"] = j.get("id")
         d["id"] = j.get("id")
@@ -158,10 +173,11 @@ def list_position_entities(
             if e.get("recon_from_fills") or e.get("exchange_history")
         }
         try:
+            jc_limit = closed_limit if closed_limit and closed_limit > 0 else 100_000
             jc = db.fetch_all(
                 "SELECT * FROM journal_trades WHERE user_id=? AND status='closed' "
                 "ORDER BY closed_at DESC LIMIT ?",
-                (user_id, closed_limit),
+                (user_id, jc_limit),
             )
         except Exception:
             jc = []
@@ -182,52 +198,25 @@ def list_position_entities(
     now = time.time()
     for d in entities:
         if d.get("status") == "open":
+            apply_open_remaining_cost_avg(d)
             if d.get("opened_at"):
                 d["hold_seconds"] = max(0.0, now - float(d["opened_at"]))
                 d["hold_hours"] = round(d["hold_seconds"] / 3600.0, 2)
             _attach_mark(d)
-            # Futures: exchange uPnL is vs residual holdAvg (not funding-adjusted)
-            if (
-                (d.get("market") or "").lower() == "futures"
-                and d.get("unrealized_pnl") is not None
-                and d.get("size_remaining")
-            ):
+            apply_open_mark_math(d)
+            if d.get("upnl_usd_est") is not None:
                 try:
-                    inv = float(d.get("hold_avg") or d.get("entry_display") or 0)
-                    live = float(d.get("entry_display") or inv)
-                    rem = float(d["size_remaining"])
-                    upnl = float(d["unrealized_pnl"])
-                    d["upnl_usd_est"] = round(upnl, 4)
-                    if rem > 0 and inv > 0:
-                        if d.get("position_type") == 2:
-                            d["mark_price"] = inv - upnl / rem
-                        else:
-                            d["mark_price"] = inv + upnl / rem
-                        # % vs live avg (funding-adjusted) when we show that as entry
-                        if live > 0:
-                            d["upnl_pct"] = round(
-                                (float(d["mark_price"]) - live) / live * 100.0, 3
-                            )
-                        d["mark_source"] = "mexc_position"
-                except Exception:
+                    d["upnl_usd_est"] = round(float(d["upnl_usd_est"]), 4)
+                except (TypeError, ValueError):
                     pass
-            # Dollar held at mark
-            try:
-                rem = float(d.get("size_remaining") or 0)
-                mark = float(d.get("mark_price") or 0)
-                if rem > 0 and mark > 0:
-                    d["remaining_mark_usd"] = round(rem * mark, 4)
-            except Exception:
-                pass
-            # Spot residual cost / mark for free-coin math if missing
-            if d.get("bought_usd") is None and d.get("size_qty") and d.get("entry_display"):
+            if d.get("remaining_mark_usd") is not None:
                 try:
-                    # fallback rough: not preferred
-                    pass
-                except Exception:
+                    d["remaining_mark_usd"] = round(float(d["remaining_mark_usd"]), 4)
+                except (TypeError, ValueError):
                     pass
             d["outcome"] = d.get("outcome") or "open"
         else:
+            tag_book(d)
             d["mark_price"] = d.get("mark_price")
             d["upnl_pct"] = None
             if d.get("outcome") in (None, "flat") and d.get("realized_pnl_pct") is not None:
@@ -257,8 +246,10 @@ def list_position_entities(
     )
     if not include_closed:
         entities = opens
-    else:
+    elif closed_limit and closed_limit > 0:
         entities = opens + closed[:closed_limit]
+    else:
+        entities = opens + closed
 
     for i, e in enumerate(entities):
         if e.get("id") is None:
@@ -266,6 +257,8 @@ def list_position_entities(
         if "journal_id" not in e:
             e["journal_id"] = None
         e["band"] = "open" if e.get("status") == "open" else "closed"
+        collapse_entity_layers(e)
+        ensure_position_display_fields(e)
     return entities
 
 
@@ -502,6 +495,7 @@ def _reconcile_spot_with_balances(
             _attach_fills_window(
                 e, fills_all, market="spot", open_position=True
             )
+        apply_open_remaining_cost_avg(e)
         kept.append(e)
 
     # Balances with no fill-open entity yet — invent open with fill entry if possible
@@ -532,8 +526,11 @@ def _reconcile_spot_with_balances(
             "entry_display": entry,
             "exit_avg": None,
             "size_remaining": tot,
-            "size_qty": tot,
+            "size_qty": open_seg.get("size_qty") if open_seg else tot,
             "size_sold": open_seg.get("size_sold") if open_seg else 0,
+            "bought_usd": open_seg.get("bought_usd") if open_seg else None,
+            "sold_usd": open_seg.get("sold_usd") if open_seg else None,
+            "remaining_cost_usd": open_seg.get("remaining_cost_usd") if open_seg else None,
             "buy_orders": buys,
             "sell_orders": sells,
             "n_buys": len(buys),
@@ -553,6 +550,7 @@ def _reconcile_spot_with_balances(
             _attach_fills_window(
                 ent, fills_all, market="spot", open_position=True
             )
+        apply_open_remaining_cost_avg(ent)
         kept.append(ent)
 
     return kept
@@ -652,6 +650,8 @@ def _reconcile_futures_with_exchange(
             "hold_fee": hold_fee,
             "close_profit_loss": fo.get("close_profit_loss"),
             "unrealized_pnl": fo.get("unrealized_pnl"),
+            "contract_size": fo.get("contract_size") or 1.0,
+            "raw": fo.get("raw") if isinstance(fo.get("raw"), dict) else {},
             "position_type": fo.get("position_type"),
             "position_side": (
                 "long"
@@ -665,6 +665,22 @@ def _reconcile_futures_with_exchange(
         _attach_fills_window(
             ent, fills_all, market="futures", open_position=True
         )
+        # Remaining-cost leftover from this book's fills; keep exchange hold_avg.
+        try:
+            from ..learning.trades import segment_positions_from_fills
+
+            segs = segment_positions_from_fills(
+                fills_all, symbol=fsym, market="futures"
+            )
+            open_seg = next((s for s in segs if s.get("status") == "open"), None)
+            if open_seg:
+                if open_seg.get("bought_usd") is not None:
+                    ent["bought_usd"] = open_seg.get("bought_usd")
+                if open_seg.get("sold_usd") is not None:
+                    ent["sold_usd"] = open_seg.get("sold_usd")
+            apply_open_remaining_cost_avg(ent)
+        except Exception as exc:
+            logger.debug("futures remaining-cost avg: %s", exc)
         kept.append(ent)
     return kept
 
@@ -696,8 +712,7 @@ def _attach_fills_window(
         if o <= 0 or c <= 0:
             return
     mwant = (market or "futures").lower()
-    buys: List[dict] = []
-    sells: List[dict] = []
+    matched: List[dict] = []
     for f in fills_all:
         fm = (f.get("market") or "").lower() or "spot"
         # spot fills often market=spot or empty
@@ -711,11 +726,50 @@ def _attach_fills_window(
         ts = float(f.get("ts") or 0)
         if ts < o - pad_s or ts > c + pad_s:
             continue
+        matched.append(f)
+    # One layer per user order at one price — never one line per deal/fill.
+    # quote_qty stored as leftover-cost cash. Futures deal rows are price×vol
+    # (notional); cash = notional × contractSize. Unknown size → no $ on the layer.
+    cs = None
+    if mwant == "futures":
+        from .contract_size import resolve_futures_contract_size
+
+        cs = resolve_futures_contract_size(
+            ent.get("symbol"), ent, ent.get("contract_size")
+        )
+        if cs is not None and cs > 0:
+            ent["contract_size"] = cs
+    buys: List[dict] = []
+    sells: List[dict] = []
+    for f in collapse_fills_to_orders(matched):
+        ts = float(f.get("ts") or 0)
+        qty = f.get("qty")
+        px = f.get("price")
+        qq = None
+        try:
+            px_f = float(px) if px not in (None, "") else 0.0
+            qty_f = float(qty) if qty not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            px_f = qty_f = 0.0
+        notional = px_f * qty_f if px_f > 0 and qty_f > 0 else 0.0
+        if mwant == "futures":
+            qq = (notional * cs) if (cs is not None and cs > 0 and notional > 0) else None
+        else:
+            raw_qq = f.get("quote_qty")
+            if raw_qq not in (None, ""):
+                try:
+                    qq = float(raw_qq)
+                except (TypeError, ValueError):
+                    qq = notional or None
+            else:
+                qq = notional or None
         layer = {
-            "price": f.get("price"),
-            "qty": f.get("qty"),
+            "price": px,
+            "qty": qty,
+            "quote_qty": qq,
             "ts": ts,
             "side": f.get("side"),
+            "order_id": f.get("_order_id") or f.get("order_id"),
         }
         if (f.get("side") or "").lower() == "buy":
             buys.append(layer)
@@ -761,7 +815,7 @@ def _merge_futures_closed_history(
             and e.get("status") == "closed"
         )
     ]
-    closed = fetch_live_futures_closed(user_id, event_store=store, max_pages=4)
+    closed = fetch_live_futures_closed(user_id, event_store=store, max_pages=40)
     if closed is None:
         closed = read_futures_closed_authority(store, user_id, max_age_s=900.0)
     if not closed:
@@ -771,7 +825,9 @@ def _merge_futures_closed_history(
         closed,
         key=lambda x: float(x.get("closed_at") or x.get("opened_at") or 0),
         reverse=True,
-    )[:closed_limit]
+    )
+    if closed_limit and closed_limit > 0:
+        closed = closed[:closed_limit]
     for ent in closed:
         e = dict(ent)
         e.setdefault("buy_orders", [])
@@ -795,7 +851,15 @@ def enrich_positions(rows: List[dict], user_id: int) -> List[dict]:
 
 def _attach_mark(d: dict) -> None:
     sym = str(d.get("symbol") or "")
-    entry = d.get("entry_display") or d.get("entry_avg")
+    entry = None
+    for key in ("remaining_avg", "leftover_avg", "entry_display", "entry_avg"):
+        if d.get(key) is None:
+            continue
+        try:
+            entry = float(d.get(key))
+            break
+        except (TypeError, ValueError):
+            continue
     try:
         t = ticker_24h(sym)
         if t:
@@ -805,20 +869,13 @@ def _attach_mark(d: dict) -> None:
     except Exception:
         d["mark_price"] = None
     mark = d.get("mark_price")
-    if mark is not None and entry is not None and float(entry) > 0:
+    if mark is not None and entry is not None and float(entry) != 0:
         d["upnl_pct"] = round(
-            (float(mark) - float(entry)) / float(entry) * 100.0, 3
+            (float(mark) - float(entry)) / abs(float(entry)) * 100.0, 3
         )
-        rem = d.get("size_remaining")
-        if rem:
-            d["upnl_usd_est"] = round(
-                (float(mark) - float(entry)) * float(rem), 4
-            )
-        else:
-            d["upnl_usd_est"] = None
     else:
         d["upnl_pct"] = None
-        d["upnl_usd_est"] = None
+    # Dollar notional / uPnL: apply_open_mark_math (never rem×mark on futures).
 
 
 def _fallback_journal(user_id: int, include_closed: bool) -> List[dict]:

@@ -115,6 +115,9 @@ class FillSyncPoller:
         new_rows: List[dict] = []
         new_rows.extend(self._sync_spot())
         new_rows.extend(self._sync_futures())
+        # Fill list only. Do not call desk fill_lifecycle here — that
+        # POSITION OPENED path is live-bind desk (mexc-desk-s1), not this
+        # git alert-bot image. A BUY fill is not an open.
         if new_rows and self.notify_on_new and self.notifier:
             try:
                 lines = [f"MEXC fills synced: {len(new_rows)} new"]
@@ -214,7 +217,7 @@ class FillSyncPoller:
         # Closed rounds — exchange history_positions is truth (not deal walk)
         try:
             closed_ents: List[dict] = []
-            for page in range(1, 5):
+            for page in range(1, 41):
                 if self._stop.is_set():
                     break
                 hist = self.futures_client.get_history_positions(
@@ -423,6 +426,29 @@ def read_futures_closed_authority(
         return None
 
 
+def count_exchange_open_positions(
+    event_store: EventStore, user_id: int, *, max_age_s: float = 900.0
+) -> int:
+    """Open count from exchange caches only.
+
+    Futures BUY fills are not opens. Missing/stale cache → 0 (do not
+    fall back to journal_trades).
+    """
+    n = 0
+    fut = read_futures_open_authority(event_store, user_id, max_age_s=max_age_s)
+    if fut:
+        for p in fut:
+            try:
+                if float(p.get("hold_vol") or 0) > 0:
+                    n += 1
+            except (TypeError, ValueError):
+                continue
+    spot = read_spot_balances_authority(event_store, user_id, max_age_s=max_age_s)
+    if spot:
+        n += len(spot)
+    return n
+
+
 def fetch_live_futures_opens(
     user_id: int, event_store: Optional[EventStore] = None
 ) -> Optional[List[dict]]:
@@ -457,7 +483,7 @@ def fetch_live_futures_closed(
     user_id: int,
     event_store: Optional[EventStore] = None,
     *,
-    max_pages: int = 4,
+    max_pages: int = 40,
 ) -> Optional[List[dict]]:
     """Live history_positions → closed entities (exchange PnL truth)."""
     import os

@@ -23,5 +23,11 @@ ENV ALERTS_FILE=/app/data/alerts.json
 ENV DESK_HOST=0.0.0.0
 ENV DESK_PORT=8080
 
+# Optional build identity for GET /api/health (do not bake tokens)
+ARG GIT_SHA=
+ARG IMAGE_TAG=
+ENV GIT_SHA=${GIT_SHA}
+ENV IMAGE_TAG=${IMAGE_TAG}
+
 EXPOSE 8080
 CMD ["python", "-m", "mexc_bot.webapi"]
