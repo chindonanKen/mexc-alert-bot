@@ -493,5 +493,136 @@ class TestReconcileRemainingCost(unittest.TestCase):
         self.assertLess(fut["entry_avg"], 0.1399)
 
 
+class TestDeskPathIntegration(unittest.TestCase):
+    """journal_fills → entities → PnL. Does not touch learning_* rows."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Path(self.tmp.name) / "alerts.db"
+        self._old = os.environ.get("ALERTS_FILE")
+        os.environ["ALERTS_FILE"] = str(self.db)
+
+    def tearDown(self):
+        if self._old is None:
+            os.environ.pop("ALERTS_FILE", None)
+        else:
+            os.environ["ALERTS_FILE"] = self._old
+        self.tmp.cleanup()
+
+    def test_grouped_fills_one_open_row_and_old_close_on_pnl(self):
+        from mexc_bot.learning.store import EventStore
+        from mexc_bot.webapi.positions_enrich import list_position_entities
+
+        store = EventStore(self.db)
+        uid = 8630949601
+        now = time.time()
+        old = now - 80 * 86400
+        store.insert_fill(
+            user_id=uid,
+            exchange_trade_id="f1",
+            symbol="NESUSDT",
+            market="spot",
+            side="buy",
+            price=2.0,
+            qty=50,
+            quote_qty=100.0,
+            ts=now - 100,
+            raw={"orderId": "ord-nes", "origQty": 100, "status": "FILLED"},
+        )
+        store.insert_fill(
+            user_id=uid,
+            exchange_trade_id="f2",
+            symbol="NESUSDT",
+            market="spot",
+            side="buy",
+            price=2.0,
+            qty=50,
+            quote_qty=100.0,
+            ts=now - 90,
+            raw={"orderId": "ord-nes", "origQty": 100, "status": "FILLED"},
+        )
+        store.insert_fill(
+            user_id=uid,
+            exchange_trade_id="f3",
+            symbol="NESUSDT",
+            market="spot",
+            side="sell",
+            price=3.0,
+            qty=50,
+            quote_qty=150.0,
+            ts=now - 80,
+            raw={"orderId": "ord-sell", "origQty": 50, "status": "FILLED"},
+        )
+        store.insert_fill(
+            user_id=uid,
+            exchange_trade_id="oldb",
+            symbol="OLDUSDT",
+            market="spot",
+            side="buy",
+            price=1.0,
+            qty=10,
+            quote_qty=10.0,
+            ts=old - 10,
+            raw={"orderId": "old-b", "status": "FILLED"},
+        )
+        store.insert_fill(
+            user_id=uid,
+            exchange_trade_id="olds",
+            symbol="OLDUSDT",
+            market="spot",
+            side="sell",
+            price=2.0,
+            qty=10,
+            quote_qty=20.0,
+            ts=old,
+            raw={"orderId": "old-s", "status": "FILLED"},
+        )
+
+        with patch(
+            "mexc_bot.webapi.positions_enrich._reconcile_spot_with_balances",
+            side_effect=lambda entities, store, user_id, fills_all=None: entities,
+        ), patch(
+            "mexc_bot.webapi.positions_enrich._reconcile_futures_with_exchange",
+            side_effect=lambda entities, store, user_id, fills_all=None: [
+                e
+                for e in entities
+                if not (
+                    (e.get("market") or "").lower() == "futures"
+                    and (e.get("status") == "open" or e.get("is_open"))
+                )
+            ],
+        ), patch(
+            "mexc_bot.webapi.positions_enrich._merge_futures_closed_history",
+            side_effect=lambda entities, store, user_id, fills_all, closed_limit=0: [
+                e
+                for e in entities
+                if not (
+                    (e.get("market") or "").lower() == "futures"
+                    and e.get("status") == "closed"
+                )
+            ]
+            + [],
+        ), patch(
+            "mexc_bot.webapi.positions_enrich.ticker_24h",
+            return_value={"price": 2.5, "changePercent": 0, "source": "test"},
+        ):
+            ents = list_position_entities(uid, include_closed=True, closed_limit=0)
+            summary = build_pnl_summary(uid, window="all")
+
+        opens = [e for e in ents if e.get("status") == "open"]
+        nes = next(e for e in opens if e.get("symbol") == "NESUSDT")
+        self.assertEqual(nes["n_buys"], 1)
+        leftover = (nes["bought_usd"] - nes["sold_usd"]) / nes["size_remaining"]
+        self.assertAlmostEqual(nes["entry_avg"], leftover, places=8)
+        self.assertAlmostEqual(leftover, 1.0, places=8)  # (200-150)/50
+        for key in ("bought_usd", "sold_usd", "remaining_cost_usd", "size_remaining"):
+            self.assertIsNotNone(nes[key])
+
+        hist_syms = {h["symbol"] for h in summary["closed_history"]}
+        self.assertIn("OLDUSDT", hist_syms)
+        old_row = next(h for h in summary["closed_history"] if h["symbol"] == "OLDUSDT")
+        self.assertGreater(now - float(old_row["closed_at"]), 30 * 86400)
+
+
 if __name__ == "__main__":
     unittest.main()
