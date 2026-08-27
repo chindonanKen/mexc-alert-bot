@@ -4,7 +4,8 @@ Guide for humans and coding agents. **Read this before changing production behav
 
 **New machine or new Grok chat?** Start with **[START_HERE.md](START_HERE.md)** (clone, tests, bootstrap prompt), then this file, then **[docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)**.  
 **Prod sensors:** **[docs/PROD_RELIABILITY.md](docs/PROD_RELIABILITY.md)** — staging first for bot-start/init; `make smoke` after every prod rebuild.  
-**How the owner trades (AD, panic, layers, psychology):** **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** — required before building coach / learning / recommendation agents.
+**How the owner trades (AD, panic, layers, psychology):** **[docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md)** — required before building coach / learning / recommendation agents.  
+**Process book (ticker-free):** **[docs/AD_PROCESS.md](docs/AD_PROCESS.md)** — chart / path / size / fail / exit. Not the autonomy roadmap.
 
 **Repo (GitHub):** `https://github.com/chindonanKen/mexc-alert-bot` · branch `main`  
 **Local folder:** `~/mexc-bot` (Mac mini or MacBook — same clone) · **droplet:** often `~/mexc-alert-bot`  
@@ -463,7 +464,7 @@ Observe → Freeze case → Decide + log → Grade → AD policy → Paper → A
 
 **Flags:** `FEATURE_LEARNING`; `LEARNING_AUTO_FROM_POSITIONS`; `FEATURE_MEXC_PRIVATE_READ`; `LEARNING_TEACH_SINCE`. Owner `DESK_USER_ID=8630949601`.
 
-Related: [docs/AD_AGENT_PLAN.md](docs/AD_AGENT_PLAN.md) · [docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md) · [docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md) · [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)
+Related: [docs/AD_PROCESS.md](docs/AD_PROCESS.md) (process) · [docs/AD_AGENT_PLAN.md](docs/AD_AGENT_PLAN.md) (roadmap) · [docs/AD_DESK_VISION.md](docs/AD_DESK_VISION.md) · [docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md) · [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md)
 
 ---
 

@@ -115,7 +115,14 @@ class FillSyncPoller:
         new_rows: List[dict] = []
         new_rows.extend(self._sync_spot())
         new_rows.extend(self._sync_futures())
-        # Fill list only — never “position opened”. A BUY is not an open.
+        # Fill list only. POSITION OPENED from a BUY is off (fill_lifecycle).
+        if new_rows:
+            from .fill_lifecycle import maybe_notify_position_opened
+
+            for r in new_rows:
+                maybe_notify_position_opened(
+                    r, notifier=self.notifier, user_id=self.user_id
+                )
         if new_rows and self.notify_on_new and self.notifier:
             try:
                 lines = [f"MEXC fills synced: {len(new_rows)} new"]

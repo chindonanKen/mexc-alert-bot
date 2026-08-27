@@ -12,6 +12,12 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from mexc_bot.learning.fill_lifecycle import (
+    NOTIFY_POSITION_OPENED,
+    fill_starts_position,
+    maybe_notify_position_opened,
+    position_opened_message,
+)
 from mexc_bot.learning.fills import (
     _write_futures_open_cache,
     _write_spot_balances_cache,
@@ -36,6 +42,25 @@ class TestFillIsNotAPosition(unittest.TestCase):
         else:
             os.environ["ALERTS_FILE"] = self._old
         self.tmp.cleanup()
+
+    def test_fill_lifecycle_never_starts_or_pings(self):
+        fill = {
+            "symbol": "GUA_USDT",
+            "market": "futures",
+            "side": "buy",
+            "price": 0.01,
+            "qty": 100,
+        }
+        self.assertFalse(NOTIFY_POSITION_OPENED)
+        self.assertFalse(fill_starts_position(fill))
+        self.assertIsNone(position_opened_message(fill))
+        sent = []
+        self.assertFalse(
+            maybe_notify_position_opened(
+                fill, notifier=lambda *a, **k: sent.append((a, k)), user_id=1
+            )
+        )
+        self.assertEqual(sent, [])
 
     def test_futures_buy_fill_does_not_journal_open(self):
         row = {
@@ -101,14 +126,23 @@ class TestFillIsNotAPosition(unittest.TestCase):
         self.assertIn("_exchange_open_count", bot)
 
     def test_no_position_opened_ping_copy(self):
+        life = (ROOT / "mexc_bot" / "learning" / "fill_lifecycle.py").read_text(
+            encoding="utf-8"
+        )
         src = (ROOT / "mexc_bot" / "learning" / "fills.py").read_text(encoding="utf-8")
         bot = (ROOT / "mexc_bot" / "bot.py").read_text(encoding="utf-8")
         main = (ROOT / "mexc_bot" / "main.py").read_text(encoding="utf-8")
-        for blob in (src, bot):
-            self.assertNotIn("started a position", blob.lower())
-            self.assertNotIn("position opened:", blob.lower())
+        process = (ROOT / "docs" / "AD_PROCESS.md").read_text(encoding="utf-8")
+        for blob in (src, bot, life):
+            self.assertNotIn('f"POSITION OPENED', blob)
+            self.assertNotIn("POSITION OPENED:", blob)
+            self.assertNotIn("send_telegram_notification(...POSITION", blob)
+        self.assertIn("NOTIFY_POSITION_OPENED = False", life)
         self.assertIn("write_auto_journal=False", main)
         self.assertIn("MEXC fills synced", src)
+        self.assertNotIn("PRL", process)
+        self.assertNotIn("GUA", process)
+        self.assertNotIn("$", process)
 
 
 class TestBuildIdentity(unittest.TestCase):
