@@ -4,6 +4,8 @@ Ticker-free. Chart / path / size / fail / exit only.
 
 This is the **process book** for AD Desk. It is **not** the autonomy roadmap. It is **not** a mixed workspace rules file with names, dollars, or live plays. Those stay out.
 
+Owner-machine source for a later verbatim pass: `agent-data/workflows/ad-desk-rules` skill body (strip frontmatter). That path is not in this clone. Do not replace this book with a workspace dump that names coins or dollars.
+
 ---
 
 ## Chart

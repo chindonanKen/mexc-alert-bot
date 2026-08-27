@@ -58,7 +58,12 @@ class TestFoldLock(unittest.TestCase):
         self.assertIn("size", text.lower())
         self.assertIn("fail", text.lower())
         self.assertIn("exit", text.lower())
+        self.assertIn("locked rules book", text.lower())
         self.assertNotIn("AD_AGENT_PLAN", text)
+        self.assertFalse(text.lstrip().startswith("---"))
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("docs/AD_PROCESS.md", agents)
+        self.assertIn("Process book (ticker-free)", agents)
         for tok in _BANNED_IN_PROCESS:
             self.assertNotIn(tok, text)
         self.assertNotIn("$", text)
