@@ -299,22 +299,66 @@
   function renderStages(plans) {
     const host = $("#liveStages");
     const live = (plans || []).filter((p) => p.live).slice(0, 2);
+    const ids = live.map((p) => String(p.id)).join(",");
+    if (host.dataset.ids === ids && host.querySelector(".stage.live, .stage.open")) {
+      live.forEach((p) => {
+        const el = host.querySelector(`.stage.live[data-id="${p.id}"]`);
+        if (!el) return;
+        const last = el.querySelector(".body .field:nth-child(2) .fig");
+        if (last) last.textContent = lastText(p);
+        const rest = el.querySelector(".body .field:last-child .fig");
+        if (rest) rest.textContent = restClock(p) || "—";
+      });
+      return;
+    }
+    host.dataset.ids = ids;
     const parts = live.map(liveStage);
     while (parts.length < 2) parts.push(ghost(parts.length + 1, live.length));
     host.innerHTML = parts.join("");
   }
 
   function emptyRanks() {
-    return [1, 2, 3]
-      .map(
-        (i) => `<div class="rank skeleton">
-          <span class="idx">${String(i).padStart(2, "0")}</span>
-          <span class="bone"></span>
-          <span class="bone short"></span>
-          <span class="bone"></span>
-        </div>`
-      )
-      .join("");
+    return `<p class="rank-empty">No ranked names</p>`;
+  }
+
+  function rankAd(p) {
+    return p.ad_status === "known" ? `${adTop(p)}<br>${adBot(p)}` : "unknown";
+  }
+
+  function patchRank(el, p, i) {
+    if (!el) return;
+    el.classList.toggle("killed", p.status === "killed");
+    const set = (sel, html) => {
+      const n = el.querySelector(sel);
+      if (n && n.innerHTML !== html) n.innerHTML = html;
+    };
+    set(".idx", String(i + 1).padStart(2, "0"));
+    set(".who .nm", `${esc(instrument(p))}${esc(fut(p))}`);
+    set(".who .tf", tfText(p));
+    set(".ad", rankAd(p));
+    set(".last", lastText(p));
+    set(".next", money(p.next_layer_usd));
+    set(".reds", `${redsText(p)}<span class="pips">${pips(p.reds)}</span>`);
+    set(".vol", volText(p) || "—");
+    const news = el.querySelector(".news");
+    if (news) {
+      news.classList.toggle("news-hot", !!p.news);
+      const t = newsText(p);
+      if (news.textContent !== t) news.textContent = t;
+    }
+    set(".rest", restClock(p) || "—");
+    const why = whyText(p);
+    let w = el.querySelector(".why");
+    if (why) {
+      if (!w) {
+        w = document.createElement("span");
+        w.className = "why";
+        el.appendChild(w);
+      }
+      if (w.textContent !== why) w.textContent = why;
+    } else if (w) {
+      w.remove();
+    }
   }
 
   function renderRanks(plans) {
@@ -322,10 +366,19 @@
     const rows = (plans || []).filter((p) => !p.live);
     if (!rows.length) {
       host.className = "empty-ranks";
-      host.innerHTML = emptyRanks();
+      if (host.dataset.ids !== "") {
+        host.dataset.ids = "";
+        host.innerHTML = emptyRanks();
+      }
+      return;
+    }
+    const ids = rows.map((p) => String(p.id)).join(",");
+    if (host.dataset.ids === ids && host.querySelector(".rank[data-id]")) {
+      rows.forEach((p, i) => patchRank(host.querySelector(`[data-id="${p.id}"]`), p, i));
       return;
     }
     host.className = "";
+    host.dataset.ids = ids;
     const head = `<div class="rank-head">
       <span></span>
       <span></span>
@@ -342,11 +395,10 @@
       rows
         .map((p, i) => {
           const killed = p.status === "killed" ? " killed" : "";
-          const ad = p.ad_status === "known" ? `${adTop(p)}<br>${adBot(p)}` : "unknown";
-          return `<button type="button" class="rank${killed}" data-id="${p.id}" style="animation-delay:${i * 30}ms">
+          return `<button type="button" class="rank is-enter${killed}" data-id="${p.id}">
           <span class="idx">${String(i + 1).padStart(2, "0")}</span>
           <span class="who"><span class="nm">${esc(instrument(p))}${esc(fut(p))}</span><span class="tf">${tfText(p)}</span></span>
-          <span class="ad">${ad}</span>
+          <span class="ad">${rankAd(p)}</span>
           <span class="last">${lastText(p)}</span>
           <span class="next">${money(p.next_layer_usd)}</span>
           <span class="reds">${redsText(p)}<span class="pips">${pips(p.reds)}</span></span>
@@ -357,6 +409,9 @@
         </button>`;
         })
         .join("");
+    setTimeout(() => {
+      host.querySelectorAll(".rank.is-enter").forEach((el) => el.classList.remove("is-enter"));
+    }, 220);
   }
 
   function renderSheet(p) {
@@ -419,6 +474,13 @@
       </form>`;
   }
 
+  function recutDirty() {
+    const f = $("#recutForm");
+    if (!f) return false;
+    const a = document.activeElement;
+    return !!(a && f.contains(a) && (a.tagName === "INPUT" || a.tagName === "TEXTAREA"));
+  }
+
   function paint() {
     const room = state.room || {};
     const liveN = room.live_count || 0;
@@ -434,7 +496,7 @@
     renderNeeds(state.needs);
     renderStages(state.plans);
     renderRanks(state.plans);
-    if (state.selected) {
+    if (state.selected && !recutDirty()) {
       const p = state.plans.find((x) => x.id === state.selected);
       if (p) renderSheet(p);
     }
@@ -457,10 +519,23 @@
   }
 
   async function killPlan(id) {
-    await api(`/api/machine/plans/${id}/kill`, { method: "POST", body: "{}" });
-    toast("Killed");
-    closeSheet();
-    await load();
+    if (killPlan._busy) return;
+    killPlan._busy = true;
+    const btns = document.querySelectorAll("[data-kill], #btnKill");
+    btns.forEach((b) => {
+      b.disabled = true;
+    });
+    try {
+      await api(`/api/machine/plans/${id}/kill`, { method: "POST", body: "{}" });
+      toast("Killed");
+      closeSheet();
+      await load();
+    } finally {
+      killPlan._busy = false;
+      btns.forEach((b) => {
+        b.disabled = false;
+      });
+    }
   }
 
   $("#liveStages").addEventListener("click", async (e) => {
@@ -508,6 +583,8 @@
     if (e.target.id !== "recutForm") return;
     e.preventDefault();
     const fd = new FormData(e.target);
+    const sub = e.target.querySelector("[type=submit]");
+    if (sub) sub.disabled = true;
     try {
       await api(`/api/machine/plans/${state.selected}/recut`, {
         method: "POST",
@@ -523,6 +600,8 @@
       await load();
     } catch (err) {
       toast(err.message);
+    } finally {
+      if (sub) sub.disabled = false;
     }
   });
 

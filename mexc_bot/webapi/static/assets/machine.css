@@ -301,8 +301,10 @@ body[data-tone="needs_you"] .ranks { opacity: 0.4; }
   height: auto;
   min-height: 52px;
   cursor: pointer;
-  animation: rank-slide 180ms ease both;
   padding: 0.35rem 0;
+}
+.rank.is-enter {
+  animation: rank-slide 180ms ease both;
 }
 .rank.killed { opacity: 0.5; }
 .rank .idx {
