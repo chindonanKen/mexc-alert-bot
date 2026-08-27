@@ -48,6 +48,7 @@ class LineBody(BaseModel):
 
 class EvaluateBody(BaseModel):
     snapshot: Optional[Dict[str, Any]] = None
+    now: Optional[float] = None
 
 
 def _uid() -> int:
@@ -196,4 +197,4 @@ def list_ranks(_: bool = Depends(require_auth)):
 def post_evaluate(body: EvaluateBody, _: bool = Depends(require_auth)):
     store = _store()
     uid = _uid()
-    return evaluate(store, uid, body.snapshot)
+    return evaluate(store, uid, body.snapshot, now=body.now)

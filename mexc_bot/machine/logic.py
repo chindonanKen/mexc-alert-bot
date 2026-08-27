@@ -7,13 +7,11 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .settings import (
     DEFAULT_LAYER_COUNT,
-    DEFAULT_REDS_REQUIRED,
     EQUITY_USD,
     MAX_LIVE_PLAYS,
     MAX_PER_PLAY_USD,
     NEWS_KILL_CLASSES,
     PANIC_BREADTH_MIN,
-    bounce_seconds,
     tf_slow_rank,
 )
 
@@ -81,15 +79,25 @@ def news_kill(hits: Optional[Iterable[Dict[str, Any]]]) -> Optional[Dict[str, An
     return None
 
 
-def reds_required(habit_reds: Optional[int]) -> int:
-    """3+ default until a per-symbol per-TF habit exists."""
+def reds_required(habit_reds: Optional[int]) -> Optional[int]:
+    """Chart habit is weigh / log only. No default 3. Do not hang 15m ≥ 3."""
     if habit_reds is None:
-        return DEFAULT_REDS_REQUIRED
+        return None
     try:
         n = int(habit_reds)
     except (TypeError, ValueError):
-        return DEFAULT_REDS_REQUIRED
-    return n if n > 0 else DEFAULT_REDS_REQUIRED
+        return None
+    return n if n > 0 else None
+
+
+def is_faster_tf(tf: Optional[str], play_tf: Optional[str]) -> bool:
+    """True when this TF is faster than the chosen play TF."""
+    if not tf or not play_tf:
+        return False
+    a, b = tf_slow_rank(str(tf)), tf_slow_rank(str(play_tf))
+    if a <= 0 or b <= 0:
+        return False
+    return a < b
 
 
 def tf_meets_rules(
@@ -101,29 +109,36 @@ def tf_meets_rules(
     heat_breadth: Optional[int] = None,
     panic_board: bool = False,
     news_hits: Optional[Iterable[Dict[str, Any]]] = None,
+    play_tf: bool = False,
+    faster_tf: bool = False,
 ) -> Dict[str, Any]:
-    """Does this one TF meet play rules (independent of other TFs)."""
+    """Log this TF. Do not mark complete from a hung 3-red law.
+
+    Sit-out is first/second red on the chosen play TF (or a provisional
+    single TF). Faster-TF reds are log only — never sit or take as law.
+    """
     kill = news_kill(news_hits)
-    sitout = first_candle_sitout(
-        reds, heat_breadth=heat_breadth, panic_board=panic_board
-    )
+    if faster_tf:
+        sitout = False
+    else:
+        sitout = first_candle_sitout(
+            reds, heat_breadth=heat_breadth, panic_board=panic_board
+        )
     need = reds_required(habit_reds)
     try:
         n = int(reds) if reds is not None else None
     except (TypeError, ValueError):
         n = None
-    reds_ok = n is not None and n >= need
-    complete = bool(
-        ad_known and reds_ok and not sitout and kill is None
-    )
     return {
         "tf": tf,
-        "complete": complete,
+        "complete": False,
         "ad_known": bool(ad_known),
         "reds": n,
         "reds_required": need,
-        "reds_ok": reds_ok,
+        "reds_ok": False,
         "first_candle_sitout": sitout,
+        "faster_tf_log_only": bool(faster_tf),
+        "play_tf": bool(play_tf),
         "news_kill": kill is not None,
         "news": kill,
     }
@@ -135,39 +150,26 @@ def pick_working_tf(
     respected: Optional[Dict[str, float]] = None,
     locked_tf: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """One complete TF can play even if a higher TF is still sitting out.
+    """Kenneth names the play TF. Faster-TF 3+ reds is log only — never a pick.
 
-    If two (or more) TFs complete: pick the one this range respected.
-    Slower if tied. Never average two ADs.
+    ``respected`` is kept for callers; it does not complete a TF.
     """
-    complete = [dict(s) for s in tf_states if s and s.get("complete")]
-    if not complete:
+    del respected
+    if not locked_tf:
         return None
-    if len(complete) == 1:
-        chosen = complete[0]
-        chosen["pick_reason"] = "one_tf_complete"
-        return chosen
-
-    scores: Dict[str, float] = {}
-    respected = respected or {}
-    for s in complete:
-        tf = str(s.get("tf") or "")
-        score = float(respected.get(tf) or 0.0)
-        if locked_tf and tf == locked_tf:
-            score += 10.0
-        scores[tf] = score
-        s["respected_score"] = score
-
-    best = max(scores.values())
-    tied = [s for s in complete if float(s.get("respected_score") or 0) == best]
-    if len(tied) == 1:
-        chosen = tied[0]
-        chosen["pick_reason"] = "range_respected"
-        return chosen
-    tied.sort(key=lambda s: tf_slow_rank(str(s.get("tf") or "")), reverse=True)
-    chosen = tied[0]
-    chosen["pick_reason"] = "tie_slower"
-    return chosen
+    want = str(locked_tf).strip()
+    for s in tf_states:
+        if s and str(s.get("tf") or "") == want:
+            chosen = dict(s)
+            chosen["pick_reason"] = "kenneth_play_tf"
+            return chosen
+    return {
+        "tf": want,
+        "complete": False,
+        "pick_reason": "kenneth_play_tf",
+        "faster_tf_log_only": False,
+        "play_tf": True,
+    }
 
 
 def exponential_layers(
@@ -259,9 +261,13 @@ def failed_ad(
     tf: Optional[str],
     bounced: bool,
 ) -> bool:
-    if bounced or armed_at is None:
-        return False
-    return (float(now) - float(armed_at)) >= bounce_seconds(tf)
+    """A timer is not a fail. Clock expiry never fails a plan.
+
+    ``armed_at`` / ``now`` / ``tf`` / ``bounced`` stay on the signature so
+    callers can pass a bounce-window clock. That clock is risk, not close.
+    """
+    del armed_at, now, tf, bounced
+    return False
 
 
 def last_under_ad(
@@ -270,7 +276,7 @@ def last_under_ad(
     *,
     ad_known: bool = False,
 ) -> bool:
-    """Fail is last at or under AD bottom. Not a wait timer."""
+    """Tape fact: last is at or under the AD. Not a fail. Not a close."""
     if not ad_known:
         return False
     try:
@@ -303,7 +309,10 @@ def decision_line(
     if kind == "news":
         return {"decision": "News flatten.", "decision_reason": "news"}
     if kind == "fail":
-        return {"decision": "Last under the AD, spent.", "decision_reason": "fail"}
+        return {
+            "decision": "Reassess. Do not flatten from a clock.",
+            "decision_reason": "fail",
+        }
     if kind == "kill":
         return {"decision": "Kill.", "decision_reason": "kill"}
     if kind == "bounce":

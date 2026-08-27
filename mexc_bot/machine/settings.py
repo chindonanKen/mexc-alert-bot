@@ -14,7 +14,8 @@ MAX_LIVE_PLAYS = 2
 LEVERAGE = 1.0  # 1x only
 
 DEFAULT_LAYER_COUNT = 5
-DEFAULT_REDS_REQUIRED = 3
+# Do not hang 15m ≥ 3 as law. Faster-TF 3+ reds is log only.
+# Kenneth calls the override. This number is not a pick / sit / complete gate.
 PANIC_BREADTH_MIN = 3  # board-wide exception to first/second-red sit-out
 
 MANILA_TZ = "Asia/Manila"
@@ -32,7 +33,8 @@ TF_SLOW_RANK: Dict[str, int] = {
     "1m": 10,
 }
 
-# Failed-AD / bounce window scales with TF (lower TF = less time).
+# Bounce-habit scale for risk / log only. A timer is not a fail.
+# Do not flatten or set failed_ad when this clock runs out.
 TF_BOUNCE_SECONDS: Dict[str, int] = {
     "1m": 5 * 60,
     "5m": 20 * 60,

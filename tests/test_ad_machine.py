@@ -40,44 +40,68 @@ class TestMachineLogic(unittest.TestCase):
         self.assertIsNotNone(hit)
         self.assertEqual(hit["class"], "SCAM")
 
-    def test_3plus_default_until_habit(self):
+    def test_reds_do_not_hang_three_as_law(self):
         from mexc_bot.machine.logic import reds_required, tf_meets_rules
+        from mexc_bot.machine import settings as machine_settings
 
-        self.assertEqual(reds_required(None), 3)
+        self.assertFalse(hasattr(machine_settings, "DEFAULT_REDS_REQUIRED"))
+        self.assertIsNone(reds_required(None))
         self.assertEqual(reds_required(5), 5)
         two = tf_meets_rules(tf="15m", reds=2, ad_known=True)
         self.assertFalse(two["complete"])
         self.assertFalse(two["reds_ok"])
         self.assertTrue(two["first_candle_sitout"])
         three = tf_meets_rules(tf="15m", reds=3, ad_known=True)
-        self.assertTrue(three["complete"])
+        self.assertFalse(three["complete"])
+        self.assertFalse(three["reds_ok"])
         self.assertFalse(three["first_candle_sitout"])
+        faster = tf_meets_rules(
+            tf="15m", reds=3, ad_known=True, faster_tf=True, play_tf=False
+        )
+        self.assertFalse(faster["complete"])
+        self.assertFalse(faster["first_candle_sitout"])
+        self.assertTrue(faster["faster_tf_log_only"])
 
-    def test_one_tf_complete_vs_higher_first_candle(self):
+    def test_faster_tf_reds_do_not_pick_or_complete(self):
         from mexc_bot.machine.logic import pick_working_tf, tf_meets_rules
 
         states = [
-            tf_meets_rules(tf="1h", reds=2, ad_known=True, heat_breadth=1),
-            tf_meets_rules(tf="15m", reds=4, ad_known=True, heat_breadth=1),
+            tf_meets_rules(
+                tf="4h", reds=2, ad_known=True, heat_breadth=1, play_tf=True
+            ),
+            tf_meets_rules(
+                tf="15m",
+                reds=4,
+                ad_known=True,
+                heat_breadth=1,
+                faster_tf=True,
+            ),
         ]
         self.assertTrue(states[0]["first_candle_sitout"])
         self.assertFalse(states[0]["complete"])
-        self.assertTrue(states[1]["complete"])
-        pick = pick_working_tf(states)
-        self.assertEqual(pick["tf"], "15m")
-        self.assertEqual(pick["pick_reason"], "one_tf_complete")
+        self.assertFalse(states[1]["complete"])
+        self.assertFalse(states[1]["first_candle_sitout"])
+        self.assertIsNone(pick_working_tf(states))
+        pick = pick_working_tf(states, locked_tf="4h")
+        self.assertEqual(pick["tf"], "4h")
+        self.assertEqual(pick["pick_reason"], "kenneth_play_tf")
+        self.assertFalse(pick["complete"])
 
-    def test_two_tf_tie_picks_slower_never_average(self):
+    def test_two_tf_does_not_pick_faster_from_reds(self):
         from mexc_bot.machine.logic import pick_working_tf, tf_meets_rules
 
         states = [
-            tf_meets_rules(tf="15m", reds=4, ad_known=True),
-            tf_meets_rules(tf="4h", reds=4, ad_known=True),
+            tf_meets_rules(tf="15m", reds=4, ad_known=True, faster_tf=True),
+            tf_meets_rules(tf="4h", reds=4, ad_known=True, play_tf=True),
         ]
-        pick = pick_working_tf(states, respected={"15m": 1.0, "4h": 1.0})
+        pick = pick_working_tf(
+            states, respected={"15m": 1.0, "4h": 1.0}, locked_tf="4h"
+        )
         self.assertEqual(pick["tf"], "4h")
-        self.assertEqual(pick["pick_reason"], "tie_slower")
+        self.assertEqual(pick["pick_reason"], "kenneth_play_tf")
         self.assertNotIn("average", str(pick).lower())
+        self.assertFalse(states[0]["complete"])
+        self.assertFalse(states[1]["complete"])
 
     def test_room_state_tones(self):
         from mexc_bot.machine.engine import room_state
@@ -411,11 +435,13 @@ class TestMachineIsolationAndApi(unittest.TestCase):
                 "reds": {"15m": 4},
                 "heat_breadth": 4,
                 "volume": "climax",
+                "kenneth_override": True,
             },
             "AXTISTOCK_USDT|futures": {
                 "reds": {"4h": 4},
                 "heat_breadth": 4,
                 "volume": "climax",
+                "kenneth_override": True,
             },
             "BPUSDT|spot": {
                 "reds": {"15m": 4},
@@ -449,6 +475,7 @@ class TestMachineIsolationAndApi(unittest.TestCase):
                         "reds": {"15m": 5},
                         "heat_breadth": 4,
                         "volume": "climax",
+                        "kenneth_override": True,
                     }
                 }
             },
@@ -505,6 +532,7 @@ class TestMachineIsolationAndApi(unittest.TestCase):
                             "reds": {"4h": 6},
                             "heat_breadth": 5,
                             "volume": "climax",
+                            "kenneth_override": True,
                         }
                     }
                 },
@@ -605,6 +633,7 @@ class TestMachineIsolationAndApi(unittest.TestCase):
                         "last_price": 0.182,
                         "reds": {"15m": 4},
                         "heat_breadth": 4,
+                        "kenneth_override": True,
                     }
                 }
             },
@@ -627,6 +656,7 @@ class TestMachineIsolationAndApi(unittest.TestCase):
                         "last_price": float(first["price"]),
                         "reds": {"15m": 4},
                         "heat_breadth": 4,
+                        "kenneth_override": True,
                     }
                 }
             },
@@ -748,7 +778,7 @@ class TestMachineDecisionLine(unittest.TestCase):
         self.assertEqual(decision_line(kind="news")["decision"], "News flatten.")
         self.assertEqual(
             decision_line(kind="fail")["decision"],
-            "Last under the AD, spent.",
+            "Reassess. Do not flatten from a clock.",
         )
         self.assertEqual(
             decision_line(kind="watch")["decision"],
@@ -762,6 +792,19 @@ class TestMachineDecisionLine(unittest.TestCase):
         self.assertTrue(last_under_ad(0.14, 0.145, ad_known=True))
         self.assertFalse(last_under_ad(0.20, 0.145, ad_known=True))
         self.assertFalse(last_under_ad(0.14, 0.145, ad_known=False))
+
+    def test_failed_ad_clock_is_never_a_fail(self):
+        from mexc_bot.machine.logic import failed_ad
+        from mexc_bot.machine.settings import bounce_seconds
+
+        clock = bounce_seconds("15m")
+        self.assertEqual(clock, 45 * 60)
+        self.assertFalse(
+            failed_ad(armed_at=1_000.0, now=1_000.0 + clock + 1, tf="15m", bounced=False)
+        )
+        self.assertFalse(
+            failed_ad(armed_at=1_000.0, now=1_000.0 + clock + 1, tf="15m", bounced=True)
+        )
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -833,6 +876,25 @@ class TestMachineDecisionLine(unittest.TestCase):
         self.assertEqual(ansem_w["decision"], "Grind, no volume, wait.")
         self.assertEqual(ansem_w["decision_reason"], "wait")
 
+        no_law = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "reds": {"15m": 3},
+                        "volume": "climax",
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        ansem_n = next(p for p in no_law.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertFalse(ansem_n["live"])
+        self.assertNotEqual(ansem_n["decision_reason"], "arm")
+        self.assertFalse(
+            any(a.get("action") == "arm" for a in no_law.json()["actions"])
+        )
+
         arm = c.post(
             "/api/machine/evaluate",
             json={
@@ -841,6 +903,7 @@ class TestMachineDecisionLine(unittest.TestCase):
                         "reds": {"15m": 3},
                         "volume": "climax",
                         "heat_breadth": 1,
+                        "kenneth_override": True,
                     }
                 }
             },
@@ -867,6 +930,7 @@ class TestMachineDecisionLine(unittest.TestCase):
                     "AXTISTOCK_USDT|futures": {
                         "reds": {"4h": 4},
                         "volume": "climax",
+                        "kenneth_override": True,
                     }
                 }
             },
@@ -888,6 +952,7 @@ class TestMachineDecisionLine(unittest.TestCase):
                         "reds": {"15m": 4},
                         "volume": "climax",
                         "heat_breadth": 4,
+                        "kenneth_override": True,
                     }
                 }
             },
@@ -910,10 +975,10 @@ class TestMachineDecisionLine(unittest.TestCase):
             },
         )
         ansem_f = next(p for p in spent.json()["plans"] if p["symbol"] == "ANSEMUSDT")
-        self.assertFalse(ansem_f["live"])
-        self.assertEqual(ansem_f["decision"], "Last under the AD, spent.")
-        self.assertEqual(ansem_f["decision_reason"], "fail")
-        self.assertTrue(
+        self.assertTrue(ansem_f["live"])
+        self.assertNotEqual(ansem_f["decision"], "Last under the AD, spent.")
+        self.assertNotEqual(ansem_f["decision_reason"], "fail")
+        self.assertFalse(
             any(a.get("action") == "failed_ad" for a in spent.json()["actions"])
         )
 
@@ -945,6 +1010,162 @@ class TestMachineDecisionLine(unittest.TestCase):
         self.assertEqual(killed.json()["plan"]["decision_reason"], "kill")
         again = c.get(f"/api/machine/plans/{plans['BPUSDT']['id']}").json()["plan"]
         self.assertEqual(again["decision"], "Kill.")
+
+
+class TestMachineLockedPathAndFail(unittest.TestCase):
+    """2026-08-27 recut: no 15m≥3 law, no bounce-clock flatten."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Path(self.tmp.name) / "alerts.db"
+        self._env = {
+            "ALERTS_FILE": os.environ.get("ALERTS_FILE"),
+            "DESK_USER_ID": os.environ.get("DESK_USER_ID"),
+            "DESK_API_TOKEN": os.environ.get("DESK_API_TOKEN"),
+            "WEB_UI_TOKEN": os.environ.get("WEB_UI_TOKEN"),
+            "FEATURE_AD_MACHINE": os.environ.get("FEATURE_AD_MACHINE"),
+            "MACHINE_TAPE_LOOP": os.environ.get("MACHINE_TAPE_LOOP"),
+        }
+        os.environ["ALERTS_FILE"] = str(self.db)
+        os.environ["DESK_USER_ID"] = "8630949601"
+        os.environ["FEATURE_AD_MACHINE"] = "true"
+        os.environ["MACHINE_TAPE_LOOP"] = "false"
+        os.environ.pop("DESK_API_TOKEN", None)
+        os.environ.pop("WEB_UI_TOKEN", None)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        for k, v in self._env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def _client(self):
+        from fastapi.testclient import TestClient
+        from mexc_bot.webapi.app import create_app
+
+        return TestClient(create_app())
+
+    def test_faster_tf_three_reds_does_not_auto_take_or_sit_as_law(self):
+        c = self._client()
+        plans = {p["symbol"]: p for p in c.get("/api/machine/plans").json()["plans"]}
+        axti_id = plans["AXTISTOCK_USDT"]["id"]
+        self.assertEqual(plans["AXTISTOCK_USDT"]["tf"], "4h")
+
+        faster = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "AXTISTOCK_USDT|futures": {
+                        "reds": {"15m": 3, "4h": 4},
+                        "volume": "climax",
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        self.assertEqual(faster.status_code, 200, faster.text)
+        axti = next(
+            p for p in faster.json()["plans"] if p["symbol"] == "AXTISTOCK_USDT"
+        )
+        self.assertFalse(axti["live"])
+        self.assertNotEqual(axti["decision_reason"], "arm")
+        self.assertNotEqual(axti["decision_reason"], "sit_out")
+        self.assertFalse(
+            any(a.get("action") in {"arm", "sit_out"} for a in faster.json()["actions"])
+        )
+        gate = axti.get("gate") or {}
+        faster_states = [
+            s
+            for s in (gate.get("tf_states") or [])
+            if s.get("tf") == "15m"
+        ]
+        self.assertTrue(faster_states)
+        self.assertTrue(faster_states[0].get("faster_tf_log_only"))
+        self.assertFalse(faster_states[0].get("complete"))
+        self.assertFalse(faster_states[0].get("first_candle_sitout"))
+        self.assertEqual(gate.get("faster_tf_reds"), [{"tf": "15m", "reds": 3}])
+        self.assertFalse(gate.get("kenneth_override"))
+
+        sit_play = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "AXTISTOCK_USDT|futures": {
+                        "reds": {"15m": 3, "4h": 2},
+                        "volume": "climax",
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        axti2 = next(
+            p for p in sit_play.json()["plans"] if p["symbol"] == "AXTISTOCK_USDT"
+        )
+        self.assertFalse(axti2["live"])
+        self.assertEqual(axti2["decision_reason"], "sit_out")
+        play_state = next(
+            s
+            for s in (axti2.get("gate") or {}).get("tf_states") or []
+            if s.get("tf") == "4h"
+        )
+        self.assertTrue(play_state.get("first_candle_sitout"))
+        faster_state = next(
+            s
+            for s in (axti2.get("gate") or {}).get("tf_states") or []
+            if s.get("tf") == "15m"
+        )
+        self.assertFalse(faster_state.get("first_candle_sitout"))
+        self.assertFalse(faster_state.get("complete"))
+        self.assertEqual(axti2["id"], axti_id)
+
+    def test_bounce_clock_expiry_does_not_close_a_plan(self):
+        from mexc_bot.machine.settings import bounce_seconds
+
+        c = self._client()
+        plans = {p["symbol"]: p for p in c.get("/api/machine/plans").json()["plans"]}
+        armed_at = 1_700_000_000.0
+        arm = c.post(
+            "/api/machine/evaluate",
+            json={
+                "now": armed_at,
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "reds": {"15m": 3},
+                        "volume": "climax",
+                        "kenneth_override": True,
+                    }
+                },
+            },
+        )
+        self.assertEqual(arm.status_code, 200, arm.text)
+        ansem = next(p for p in arm.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertTrue(ansem["live"])
+        clock = bounce_seconds(ansem.get("tf") or "15m")
+        later = c.post(
+            "/api/machine/evaluate",
+            json={
+                "now": armed_at + clock + 1,
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"15m": 3},
+                        "volume": "climax",
+                        "bounced": False,
+                    }
+                },
+            },
+        )
+        self.assertEqual(later.status_code, 200, later.text)
+        still = next(p for p in later.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertTrue(still["live"])
+        self.assertEqual(still["status"], "live")
+        self.assertFalse(
+            any(a.get("action") == "failed_ad" for a in later.json()["actions"])
+        )
+        self.assertNotEqual(still["decision_reason"], "fail")
+        self.assertNotEqual(still["decision"], "Last under the AD, spent.")
 
 
 if __name__ == "__main__":

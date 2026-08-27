@@ -15,11 +15,9 @@ from .logic import (
     can_open_play,
     decision_line,
     exponential_layers,
-    failed_ad,
-    last_under_ad,
+    is_faster_tf,
     news_kill,
     pick_working_tf,
-    reds_required,
     tf_meets_rules,
 )
 from .settings import (
@@ -352,8 +350,9 @@ def _evaluate_plan(
     news_hits = list(snap.get("news") or [])
     kill = news_kill(news_hits)
     reds_map = snap.get("reds") if isinstance(snap.get("reds"), dict) else {}
+    play_tf = str(plan.get("tf") or "").strip() or None
     if not reds_map and snap.get("reds") is not None:
-        tf = plan.get("tf") or "15m"
+        tf = play_tf or "15m"
         reds_map = {tf: snap.get("reds")}
     volume = snap.get("volume") or plan.get("volume") or "unknown"
     volume_n = plan.get("volume_n")
@@ -368,19 +367,19 @@ def _evaluate_plan(
         volume_n = official_volume_n(snap.get("bars"))
         tape_reds = official_reds(snap.get("bars"))
         if tape_reds is not None:
-            tf_key = str(plan.get("tf") or "15m")
+            tf_key = str(play_tf or "15m")
             reds_map = dict(reds_map)
             reds_map[tf_key] = tape_reds
     heat = snap.get("heat_breadth")
     panic = bool(snap.get("panic_board"))
     ad_known = (plan.get("ad_status") == "known") and plan.get("ad_top") is not None
+    override = bool(snap.get("kenneth_override") or snap.get("override"))
 
     tf_states = []
-    tfs = list(reds_map.keys()) if reds_map else ([plan.get("tf")] if plan.get("tf") else [])
-    if not tfs:
-        tfs = ["15m"]
+    tfs = list(reds_map.keys()) if reds_map else ([play_tf] if play_tf else [])
     for tf in tfs:
         habit = store.habit_reds(user_id, plan["symbol"], plan["market"], str(tf))
+        faster = is_faster_tf(str(tf), play_tf)
         tf_states.append(
             tf_meets_rules(
                 tf=str(tf),
@@ -390,43 +389,57 @@ def _evaluate_plan(
                 heat_breadth=heat,
                 panic_board=panic,
                 news_hits=news_hits,
+                play_tf=bool(play_tf) and str(tf) == play_tf,
+                faster_tf=faster,
             )
         )
     chosen = pick_working_tf(
         tf_states,
         respected=store.respected_scores(user_id, plan["symbol"], plan["market"]),
-        locked_tf=plan.get("tf"),
+        locked_tf=play_tf,
     )
+    if play_tf:
+        sit_state = next(
+            (s for s in tf_states if str(s.get("tf") or "") == play_tf), None
+        )
+    else:
+        sit_state = next(
+            (s for s in tf_states if not s.get("faster_tf_log_only")), None
+        )
+    sit = bool(sit_state and sit_state.get("first_candle_sitout")) and not override
+    faster_log = [
+        {"tf": s.get("tf"), "reds": s.get("reds")}
+        for s in tf_states
+        if s.get("faster_tf_log_only")
+    ]
     gate = {
         "tf_states": tf_states,
         "chosen": chosen,
         "news_kill": kill,
         "volume": volume,
+        "kenneth_override": override,
+        "play_tf": play_tf,
+        "faster_tf_reds": faster_log,
     }
-    sit = next((s for s in tf_states if s.get("first_candle_sitout")), None)
     tape_reds = (
-        (chosen or {}).get("reds")
+        (sit_state or {}).get("reds")
+        if sit_state is not None
+        else (chosen or {}).get("reds")
         if chosen
-        else (sit or {}).get("reds")
-        if sit
         else (tf_states[0].get("reds") if tf_states else None)
     )
-    tape_tf = (chosen or {}).get("tf") or plan.get("tf")
-    store.patch_plan(
-        user_id,
-        int(plan["id"]),
-        reds=tape_reds,
-        last_price=last_price,
-        volume=volume,
-        volume_n=volume_n,
-        news=(kill or {}).get("class") if kill else None,
-        gate=gate,
-        tf=tape_tf,
-    )
+    _tape_patch = {
+        "reds": tape_reds,
+        "last_price": last_price,
+        "volume": volume,
+        "volume_n": volume_n,
+        "news": (kill or {}).get("class") if kill else None,
+        "gate": gate,
+    }
+    if play_tf:
+        _tape_patch["tf"] = play_tf
+    store.patch_plan(user_id, int(plan["id"]), **_tape_patch)
     plan = store.get_plan(user_id, int(plan["id"]))
-    spent = last_under_ad(
-        last_price, plan.get("ad_bottom"), ad_known=ad_known
-    )
     why_kw = {
         "reds": plan.get("reds"),
         "tf": plan.get("tf"),
@@ -472,32 +485,6 @@ def _evaluate_plan(
             **why,
         }
 
-    if plan.get("live") and spent:
-        why = _set_decision(
-            store, user_id, int(plan["id"]), "fail", plan=plan, **why_kw
-        )
-        store.cancel_working(user_id, int(plan["id"]))
-        _close_and_kb(
-            store,
-            user_id,
-            plan,
-            reason="failed_ad",
-            bounce_or_fail="fail",
-            process_ok=True,
-            money_pnl=0.0,
-        )
-        store.patch_plan(
-            user_id,
-            int(plan["id"]),
-            status="closed",
-            live=False,
-            resting=False,
-            allocated_usd=0,
-            armed_at=None,
-            **why,
-        )
-        return {"ok": True, "action": "failed_ad", "plan_id": plan["id"], **why}
-
     if plan.get("live"):
         filled = _paper_fill(store, user_id, plan, last_price)
         why = _set_decision(
@@ -512,37 +499,6 @@ def _evaluate_plan(
                 "live_orders_sent": False,
                 **why,
             }
-
-    if plan.get("live") and failed_ad(
-        armed_at=plan.get("armed_at"),
-        now=now,
-        tf=plan.get("tf"),
-        bounced=bool(snap.get("bounced")),
-    ):
-        why = _set_decision(
-            store, user_id, int(plan["id"]), "fail", plan=plan, **why_kw
-        )
-        store.cancel_working(user_id, int(plan["id"]))
-        _close_and_kb(
-            store,
-            user_id,
-            plan,
-            reason="failed_ad",
-            bounce_or_fail="fail",
-            process_ok=True,
-            money_pnl=0.0,
-        )
-        store.patch_plan(
-            user_id,
-            int(plan["id"]),
-            status="closed",
-            live=False,
-            resting=False,
-            allocated_usd=0,
-            armed_at=None,
-            **why,
-        )
-        return {"ok": True, "action": "failed_ad", "plan_id": plan["id"], **why}
 
     if snap.get("bounced") and plan.get("live"):
         why = _set_decision(
@@ -573,13 +529,7 @@ def _evaluate_plan(
     if plan.get("live") or plan.get("status") in ("killed", "blocked"):
         return None
 
-    if spent and ad_known:
-        why = _set_decision(
-            store, user_id, int(plan["id"]), "fail", plan=plan, **why_kw
-        )
-        return {"ok": True, "action": "fail", "plan_id": plan["id"], **why}
-
-    if not chosen:
+    if not override:
         if not ad_known:
             kind = "watch"
         elif sit:
@@ -619,33 +569,35 @@ def _evaluate_plan(
             budget_usd=budget,
             zone_prices=parse_json(plan.get("zones_json"), []),
         )
+    arm_reds = (sit_state or chosen or {}).get("reds")
+    arm_tf = play_tf or (sit_state or {}).get("tf")
     why = decision_line(
         kind="arm",
-        reds=chosen.get("reds"),
-        tf=chosen.get("tf"),
+        reds=arm_reds,
+        tf=arm_tf,
         volume=volume,
         volume_n=volume_n,
     )
     store.replace_working_orders(user_id, int(plan["id"]), layers)
-    store.patch_plan(
-        user_id,
-        int(plan["id"]),
-        status="live",
-        live=True,
-        resting=True,
-        allocated_usd=round(sum(x["usd"] for x in layers), 4),
-        remaining_layers=len(layers),
-        next_layer_usd=layers[0]["usd"] if layers else None,
-        layers=layers,
-        armed_at=now,
-        tf=chosen.get("tf"),
+    arm_patch = {
+        "status": "live",
+        "live": True,
+        "resting": True,
+        "allocated_usd": round(sum(x["usd"] for x in layers), 4),
+        "remaining_layers": len(layers),
+        "next_layer_usd": layers[0]["usd"] if layers else None,
+        "layers": layers,
+        "armed_at": now,
         **why,
-    )
+    }
+    if play_tf:
+        arm_patch["tf"] = play_tf
+    store.patch_plan(user_id, int(plan["id"]), **arm_patch)
     return {
         "ok": True,
         "action": "arm",
         "plan_id": plan["id"],
-        "tf": chosen.get("tf"),
+        "tf": play_tf or arm_tf,
         **why,
     }
 
@@ -717,7 +669,10 @@ def _close_and_kb(
     )
     habit = plan.get("reds") if bounce_or_fail == "bounce" else None
     if habit is not None:
-        habit = max(int(habit), reds_required(None))
+        try:
+            habit = int(habit)
+        except (TypeError, ValueError):
+            habit = None
     kb = store.insert_kb(
         user_id,
         {
