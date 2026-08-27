@@ -223,6 +223,40 @@ class TestSlateOpenBookSort(unittest.TestCase):
         self.assertEqual(p["name"], "PRL")
         self.assertAlmostEqual(p["remaining_avg"], 0.203105, places=6)
         self.assertAlmostEqual(p["remaining_cost_usd"], 2740.7733, places=4)
+        self.assertAlmostEqual(p["remaining_mark_usd"], 2750.7733, places=4)
+
+    def test_g2_left_dollar_is_mark_avg_stays_leftover_cost(self):
+        """LEFT $ = remaining_mark_usd. AVG = remaining_avg leftover-cost."""
+        rows = [
+            _open(
+                "SMALLCOSTUSDT",
+                leftover=10.0,
+                rem_avg=0.10,
+                qty=100.0,
+            ),
+            _open(
+                "BIGCOSTUSDT",
+                leftover=900.0,
+                rem_avg=0.90,
+                qty=1000.0,
+            ),
+        ]
+        # Invert mark vs cost so leftover rank follows mark, not cost.
+        rows[0]["remaining_mark_usd"] = 500.0
+        rows[1]["remaining_mark_usd"] = 50.0
+        with patch("mexc_bot.webapi.pnl.list_position_entities", side_effect=_Book(rows)):
+            d = build_pnl_summary(1, window="all")
+        names = [p["name"] for p in d["open_book"]]
+        self.assertEqual(names, ["SMALLCOST", "BIGCOST"])
+        small, big = d["open_book"]
+        self.assertAlmostEqual(small["remaining_mark_usd"], 500.0, places=2)
+        self.assertAlmostEqual(small["remaining_cost_usd"], 10.0, places=2)
+        self.assertAlmostEqual(small["remaining_avg"], 0.10, places=6)
+        self.assertAlmostEqual(big["remaining_mark_usd"], 50.0, places=2)
+        self.assertAlmostEqual(big["remaining_cost_usd"], 900.0, places=2)
+        self.assertAlmostEqual(big["remaining_avg"], 0.90, places=6)
+        leftover = (small["bought_usd"] - small["sold_usd"]) / small["size_remaining"]
+        self.assertAlmostEqual(leftover, small["remaining_avg"], places=6)
 
 
 class TestSlateClosedGroups(unittest.TestCase):
@@ -353,6 +387,11 @@ class TestSlateApiAndDesk(unittest.TestCase):
         self.assertIn("Asia/Manila", js)
         self.assertIn("No closes in this window", js)
         self.assertIn("LEFT $", js)
+        self.assertIn("_pnlUsd(p.remaining_mark_usd", js)
+        open_row = js[js.index("function _pnlOpenRowHtml") : js.index("function _pnlGroupHead")]
+        self.assertIn("remaining_mark_usd", open_row)
+        self.assertNotIn("remaining_cost_usd", open_row)
+        self.assertIn("remaining_avg", open_row)
         self.assertIn("Open Book", js)
         self.assertIn("pnl-close-cols", js)
         self.assertIn("CLOSED", js)

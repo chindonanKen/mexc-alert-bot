@@ -1587,7 +1587,7 @@
       <td class="pnl-o-avg">${fmtPx(leftoverAvg)}</td>
       <td>${_pnlUsd(p.bought_usd, false)}</td>
       <td>${_pnlUsd(p.sold_usd, false)}</td>
-      <td>${_pnlUsd(p.remaining_cost_usd, false)}</td>
+      <td>${_pnlUsd(p.remaining_mark_usd, false)}</td>
       <td>${_pnlQty(p.size_remaining)}</td>
     </tr>`;
   }

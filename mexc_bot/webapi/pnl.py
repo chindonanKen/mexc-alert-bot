@@ -257,14 +257,14 @@ def _open_row(e: dict) -> Dict[str, Any]:
 
 
 def _open_sort_key(e: dict) -> Tuple[int, float, str]:
-    """AD leftover first, then free, then hold. Bigger leftover $ first."""
+    """AD leftover first, then free, then hold. Bigger mark leftover $ first."""
     if e.get("is_hold") or e.get("position_book") == "hold":
         bucket = 2
     elif e.get("free_coins"):
         bucket = 1
     else:
         bucket = 0
-    return (bucket, -_n(e.get("remaining_cost_usd")), str(e.get("symbol") or ""))
+    return (bucket, -_n(e.get("remaining_mark_usd")), str(e.get("symbol") or ""))
 
 
 def group_closed_rows(rows: List[dict], group_by: str) -> List[Dict[str, Any]]:
