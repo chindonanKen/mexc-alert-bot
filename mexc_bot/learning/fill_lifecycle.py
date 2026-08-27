@@ -1,11 +1,12 @@
-"""Fill lifecycle. A BUY fill is not an open.
+"""Desk fill lifecycle. A BUY fill is not an open.
 
-Live bind historically sent a Telegram ``POSITION OPENED`` ping from this
-path when a futures BUY fill arrived. That is wrong: open = exchange
-``open_positions`` / spot balances only.
+Fact: ``POSITION OPENED`` lives on the **live desk bind**
+(``mexc-desk-s1`` ``fill_lifecycle.py``), not the git Telegram/alert-bot
+image. Code bind and data bind are separate — this module is code only.
 
-This git trunk keeps the module so the path is findable, and **disables**
-the ping. Do not enable ``NOTIFY_POSITION_OPENED``. A fill is never an open.
+Git trunk: that Telegram ping is **removed**. ``NOTIFY_POSITION_OPENED``
+stays false. Open = exchange ``open_positions`` / spot balances only.
+Do not enable the ping. Do not import this from the alert-bot fill sync.
 """
 
 from __future__ import annotations

@@ -115,14 +115,9 @@ class FillSyncPoller:
         new_rows: List[dict] = []
         new_rows.extend(self._sync_spot())
         new_rows.extend(self._sync_futures())
-        # Fill list only. POSITION OPENED from a BUY is off (fill_lifecycle).
-        if new_rows:
-            from .fill_lifecycle import maybe_notify_position_opened
-
-            for r in new_rows:
-                maybe_notify_position_opened(
-                    r, notifier=self.notifier, user_id=self.user_id
-                )
+        # Fill list only. Do not call desk fill_lifecycle here — that
+        # POSITION OPENED path is live-bind desk (mexc-desk-s1), not this
+        # git alert-bot image. A BUY fill is not an open.
         if new_rows and self.notify_on_new and self.notifier:
             try:
                 lines = [f"MEXC fills synced: {len(new_rows)} new"]

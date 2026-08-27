@@ -140,6 +140,8 @@ class TestFillIsNotAPosition(unittest.TestCase):
         self.assertIn("NOTIFY_POSITION_OPENED = False", life)
         self.assertIn("write_auto_journal=False", main)
         self.assertIn("MEXC fills synced", src)
+        self.assertNotIn("maybe_notify_position_opened", src)
+        self.assertIn("mexc-desk-s1", life)
         self.assertNotIn("PRL", process)
         self.assertNotIn("GUA", process)
         self.assertNotIn("$", process)

@@ -79,8 +79,14 @@ class TestFoldLock(unittest.TestCase):
         self.assertIsNone(position_opened_message({"side": "buy"}))
         self.assertFalse(maybe_notify_position_opened({"side": "buy"}))
         main = (ROOT / "mexc_bot" / "main.py").read_text(encoding="utf-8")
+        fills = (ROOT / "mexc_bot" / "learning" / "fills.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("write_auto_journal=False", main)
         self.assertIn("DESK_ALLOW_LIVE_ORDERS=false", (ROOT / ".env.example").read_text())
+        # Live-bind desk path, not the git alert-bot fill sync.
+        self.assertNotIn("maybe_notify_position_opened", fills)
+        self.assertNotIn("from .fill_lifecycle import", fills)
 
     def test_no_data_or_env_in_tree_root(self):
         forbidden = [
