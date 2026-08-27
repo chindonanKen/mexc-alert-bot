@@ -917,17 +917,19 @@ def create_app() -> FastAPI:
 
     @app.get("/api/pnl")
     def get_pnl(
-        window: str = Query("30d"),
+        window: str = Query("all"),
+        range_name: Optional[str] = Query(None, alias="range"),
         _: bool = Depends(require_auth),
     ):
-        """Smart PnL — dollar bankroll, realized, free bags, open book."""
+        """Smart PnL — full closed history by default (window/range=all)."""
         from .pnl import build_pnl_summary
 
         try:
             uid = db.default_user_id()
             if not uid:
                 return {"error": "no user", "bankroll": {}, "realized": {}}
-            return build_pnl_summary(int(uid), window=window)
+            w = (range_name or window or "all").strip() or "all"
+            return build_pnl_summary(int(uid), window=w)
         except Exception as e:
             raise HTTPException(400, str(e))
 
