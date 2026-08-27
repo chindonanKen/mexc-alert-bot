@@ -847,7 +847,15 @@ def enrich_positions(rows: List[dict], user_id: int) -> List[dict]:
 
 def _attach_mark(d: dict) -> None:
     sym = str(d.get("symbol") or "")
-    entry = d.get("entry_display") or d.get("entry_avg")
+    entry = None
+    for key in ("remaining_avg", "leftover_avg", "entry_display", "entry_avg"):
+        if d.get(key) is None:
+            continue
+        try:
+            entry = float(d.get(key))
+            break
+        except (TypeError, ValueError):
+            continue
     try:
         t = ticker_24h(sym)
         if t:
@@ -857,9 +865,9 @@ def _attach_mark(d: dict) -> None:
     except Exception:
         d["mark_price"] = None
     mark = d.get("mark_price")
-    if mark is not None and entry is not None and float(entry) > 0:
+    if mark is not None and entry is not None and float(entry) != 0:
         d["upnl_pct"] = round(
-            (float(mark) - float(entry)) / float(entry) * 100.0, 3
+            (float(mark) - float(entry)) / abs(float(entry)) * 100.0, 3
         )
     else:
         d["upnl_pct"] = None

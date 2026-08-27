@@ -496,6 +496,8 @@ body::before {
   margin-bottom: 0.35rem;
 }
 .pos-page-h { margin-bottom: 0.5rem; }
+.pos-views { display: flex; gap: 0.35rem; }
+.pos-views .on { border-color: var(--sky); color: var(--sky); }
 .pos-list { margin-top: 0.25rem; }
 .pos-manual {
   margin-top: 1rem;

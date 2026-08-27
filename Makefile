@@ -34,6 +34,7 @@ test:
 	$$PY tests/test_desk_slice1_search.py && \
 	$$PY tests/test_positions_pnl_book.py && \
 	$$PY tests/test_pnl_slate.py && \
+	$$PY tests/test_positions_open_live.py && \
 	$$PY tests/test_heartbeat.py
 
 verify:
