@@ -1384,171 +1384,286 @@
   }
 
   state.pnlWindow = "all";
+  state.pnlFrom = "";
+  state.pnlTo = "";
+
+  const PNL_TZ = "Asia/Manila";
 
   function _pnlNum(x) {
     const n = Number(x);
     return Number.isFinite(n) ? n : 0;
   }
 
+  function _pnlUsd(n, signed) {
+    const v = _pnlNum(n);
+    if (signed) return (v >= 0 ? "+$" : "−$") + Math.abs(v).toFixed(0);
+    return "$" + Math.abs(v).toFixed(0);
+  }
+
+  function _pnlManilaYmd(d) {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: PNL_TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(d);
+  }
+
+  function _pnlAddDays(ymd, delta) {
+    const parts = String(ymd || "").split("-").map(Number);
+    if (parts.length < 3 || !parts[0]) return "";
+    const utc = Date.UTC(parts[0], parts[1] - 1, parts[2], 4, 0, 0);
+    return _pnlManilaYmd(new Date(utc + delta * 86400000));
+  }
+
+  function _pnlChipDates(win) {
+    const to = _pnlManilaYmd(new Date());
+    if (win === "7d") return { from: _pnlAddDays(to, -6), to };
+    if (win === "30d") return { from: _pnlAddDays(to, -29), to };
+    return { from: "", to: "" };
+  }
+
+  function _pnlFmtClosedDate(ts) {
+    if (ts == null || ts === "") return "—";
+    const n = Number(ts);
+    if (!Number.isFinite(n) || n <= 0) return "—";
+    return new Date(n * 1000).toLocaleDateString("en-GB", {
+      timeZone: PNL_TZ,
+      day: "numeric",
+      month: "short",
+    });
+  }
+
+  function _pnlName(p) {
+    if (p && p.name) return String(p.name);
+    const s = String((p && p.symbol) || "").toUpperCase();
+    return s.replace("STOCK", "").replace(/_?USDT$/, "").replace(/_/g, "") || s;
+  }
+
+  function _pnlBookChip(p, { flag } = { flag: false }) {
+    const book = String((p && (p.book_label || p.book || p.market)) || "spot");
+    const lab = book.toLowerCase() === "futures" || book.toUpperCase() === "FUT" ? "FUT" : "SPOT";
+    const cls = lab === "FUT" ? "fut" : "spot";
+    let extra = "";
+    if (flag) {
+      if (p && (p.is_hold || p.position_book === "hold")) {
+        extra = `<span class="pnl-flag hold">HOLD</span>`;
+      } else if (p && p.free_coins) {
+        extra = `<span class="pnl-flag free">FREE</span>`;
+      }
+    }
+    return `<span class="pos-mkt ${cls}">${lab}</span>${extra}`;
+  }
+
+  function _pnlQty(n) {
+    const v = _pnlNum(n);
+    if (!v) return "0";
+    if (Math.abs(v) >= 1000) return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    if (Math.abs(v) >= 1) return v.toFixed(2);
+    return String(v);
+  }
+
+  function _pnlDays(n) {
+    const v = _pnlNum(n);
+    if (!v) return "0";
+    return Number.isInteger(v) ? String(v) : v.toFixed(1);
+  }
+
+  function _pnlSyncChips() {
+    $$(".pnl-win").forEach((x) => {
+      x.classList.toggle("on", (state.pnlWindow || "all") === x.dataset.pnlWin);
+    });
+  }
+
+  function _pnlSyncDates() {
+    const fromEl = $("#pnlFrom");
+    const toEl = $("#pnlTo");
+    if (fromEl && fromEl.value !== (state.pnlFrom || "")) fromEl.value = state.pnlFrom || "";
+    if (toEl && toEl.value !== (state.pnlTo || "")) toEl.value = state.pnlTo || "";
+    const lab = $("#pnlWinLabel");
+    if (lab) {
+      if (state.pnlWindow === "custom" && (state.pnlFrom || state.pnlTo)) {
+        lab.textContent = [state.pnlFrom, state.pnlTo].filter(Boolean).join(" → ");
+      } else if (state.pnlWindow === "7d") lab.textContent = "7d";
+      else if (state.pnlWindow === "30d") lab.textContent = "30d";
+      else lab.textContent = "All";
+    }
+  }
+
+  function applyPnlChip(win) {
+    state.pnlWindow = win || "all";
+    const span = _pnlChipDates(state.pnlWindow);
+    state.pnlFrom = span.from;
+    state.pnlTo = span.to;
+    _pnlSyncChips();
+    _pnlSyncDates();
+    loadPnl();
+  }
+
+  function applyPnlCustomDates() {
+    const fromEl = $("#pnlFrom");
+    const toEl = $("#pnlTo");
+    state.pnlFrom = fromEl ? fromEl.value : "";
+    state.pnlTo = toEl ? toEl.value : "";
+    state.pnlWindow = "custom";
+    _pnlSyncChips();
+    _pnlSyncDates();
+    loadPnl();
+  }
+
+  function _pnlFillsHtml(p) {
+    const buyLayers = collapseLayersByPrice(p.buy_orders || []);
+    const sellLayers = collapseLayersByPrice(p.sell_orders || []);
+    const buys = buyLayers
+      .map(
+        (o) =>
+          `<div class="pos-layer buy"><span>BUY</span><span class="pos-layer-usd">${_fillUsd(
+            o,
+            p
+          )}</span><span>@ ${
+            o.price != null ? fmtPx(o.price) : fmtPx(0)
+          }</span><span class="mute">${fmtTime(o.ts)}</span></div>`
+      )
+      .join("");
+    const sells = sellLayers
+      .map(
+        (o) =>
+          `<div class="pos-layer sell"><span>SELL</span><span class="pos-layer-usd">${_fillUsd(
+            o,
+            p
+          )}</span><span>@ ${
+            o.price != null ? fmtPx(o.price) : fmtPx(0)
+          }</span><span class="mute">${fmtTime(o.ts)}</span></div>`
+      )
+      .join("");
+    if (!buyLayers.length && !sellLayers.length) {
+      return `<div class="pnl-fills mute">No fills</div>`;
+    }
+    return `<div class="pnl-fills">
+      <div class="pos-fills-h">Buys (${buyLayers.length})</div>
+      ${buys || `<div class="mute">No buys</div>`}
+      <div class="pos-fills-h">Sells (${sellLayers.length})</div>
+      ${sells || `<div class="mute">No sells</div>`}
+    </div>`;
+  }
+
+  function _pnlClosedRowHtml(p) {
+    const real = _pnlNum(p.realized_pnl_usd);
+    const realCls = real >= 0 ? "up" : "dn";
+    return `<details class="pnl-close">
+      <summary class="pnl-close-sum">
+        <span class="pnl-c-date">${escHtml(_pnlFmtClosedDate(p.closed_at || p.opened_at))}</span>
+        <span class="pnl-c-name">${escHtml(_pnlName(p))}</span>
+        <span class="pnl-c-book">${_pnlBookChip(p)}</span>
+        <span class="pnl-c-in">${_pnlUsd(p.bought_usd, false)}</span>
+        <span class="pnl-c-out">${_pnlUsd(p.sold_usd, false)}</span>
+        <span class="pnl-c-real ${realCls}">${_pnlUsd(real, true)}</span>
+        <span class="pnl-c-days">${_pnlDays(p.hold_days)}</span>
+      </summary>
+      ${_pnlFillsHtml(p)}
+    </details>`;
+  }
+
+  function _pnlOpenRowHtml(p) {
+    const leftoverAvg = _pnlNum(
+      p.remaining_avg != null
+        ? p.remaining_avg
+        : p.leftover_avg != null
+          ? p.leftover_avg
+          : p.entry_avg
+    );
+    const hold = !!(p.is_hold || p.position_book === "hold");
+    const rowCls = hold ? "pnl-row-hold" : p.free_coins ? "pnl-row-free" : "pnl-row-ad";
+    return `<tr class="${rowCls}">
+      <td class="pnl-o-name">${escHtml(_pnlName(p))}</td>
+      <td class="pnl-o-book">${_pnlBookChip(p, { flag: true })}</td>
+      <td class="pnl-o-avg">${fmtPx(leftoverAvg)}</td>
+      <td>${_pnlUsd(p.bought_usd, false)}</td>
+      <td>${_pnlUsd(p.sold_usd, false)}</td>
+      <td>${_pnlUsd(p.remaining_cost_usd, false)}</td>
+      <td>${_pnlQty(p.size_remaining)}</td>
+    </tr>`;
+  }
+
+  function _pnlGroupHead(g) {
+    const n = _pnlNum(g.closed_n);
+    return `<div class="pnl-group-h">
+      <span class="pnl-group-lab">${escHtml(g.label || "")}</span>
+      <span class="pnl-group-n">${n} close${n === 1 ? "" : "s"}</span>
+      <span class="pnl-group-money">Real ${_pnlUsd(g.realized_usd, true)} · In ${_pnlUsd(
+        g.in_usd,
+        false
+      )} · Out ${_pnlUsd(g.out_usd, false)}</span>
+    </div>`;
+  }
+
   async function loadPnl() {
     const host = $("#pnlBody");
     if (!host) return;
+    _pnlSyncDates();
     try {
-      const d = await api(
-        `/api/pnl?window=${encodeURIComponent(
-          state.pnlWindow || "all"
-        )}&range=${encodeURIComponent(state.pnlWindow || "all")}`
-      );
-      const b = d.bankroll || {};
+      const params = new URLSearchParams();
+      params.set("window", state.pnlWindow || "all");
+      params.set("range", state.pnlWindow || "all");
+      if (state.pnlFrom) params.set("from", state.pnlFrom);
+      if (state.pnlTo) params.set("to", state.pnlTo);
+      const d = await api(`/api/pnl?${params.toString()}`);
       const r = d.realized || {};
-      const free = d.free_bags || [];
       const book = d.open_book || [];
       const history = d.closed_history || [];
-      const atRisk = _pnlNum(b.at_risk_mark_usd);
-      const freeMark = _pnlNum(b.free_mark_usd);
-      const openMark = _pnlNum(b.open_mark_usd);
+      const groups = d.closed_groups || [];
       const score = _pnlNum(r.pnl_usd);
+      const inUsd = _pnlNum(r.in_usd);
+      const outUsd = _pnlNum(r.out_usd);
+      const sumEl = $("#pnlWindowSum");
+      if (sumEl) {
+        sumEl.textContent = `Real ${_pnlUsd(score, true)} · In ${_pnlUsd(
+          inUsd,
+          false
+        )} · Out ${_pnlUsd(outUsd, false)}`;
+      }
+      const openTable = book.length
+        ? `<div class="pnl-open-wrap">${table(
+            ["NAME", "BOOK", "AVG", "IN", "OUT", "LEFT $", "QTY"],
+            book.map(_pnlOpenRowHtml).join("")
+          )}</div>`
+        : rankEmpty("No leftover open");
+      let closedHtml = "";
+      if (!history.length) {
+        closedHtml = `<div class="pnl-empty mute">No closes in this window</div>`;
+      } else if (groups.length) {
+        closedHtml = `<div class="scroll pnl-closed-wrap">
+          <div class="pnl-close-cols" aria-hidden="true">
+            <span>CLOSED</span><span>NAME</span><span>BOOK</span>
+            <span>IN</span><span>OUT</span><span>REAL</span><span>DAYS</span>
+          </div>
+          ${groups
+            .map((g) => {
+              const rows = (g.rows || []).map(_pnlClosedRowHtml).join("");
+              return `<section class="pnl-group">${_pnlGroupHead(g)}${rows}</section>`;
+            })
+            .join("")}
+        </div>`;
+      } else {
+        closedHtml = `<div class="scroll pnl-closed-wrap">
+          <div class="pnl-close-cols" aria-hidden="true">
+            <span>CLOSED</span><span>NAME</span><span>BOOK</span>
+            <span>IN</span><span>OUT</span><span>REAL</span><span>DAYS</span>
+          </div>
+          ${history.map(_pnlClosedRowHtml).join("")}
+        </div>`;
+      }
       host.innerHTML = `
-        <div class="pnl-hero">
-          <div class="pnl-hero-card primary">
-            <div class="pnl-k">Score · ${escHtml(d.window || "")}</div>
-            <div class="pnl-v ${score >= 0 ? "up" : "dn"}">${
-              score >= 0 ? "+" : ""
-            }$${score.toFixed(0)}</div>
-            <div class="pnl-sub">W ${r.win_n || 0} ($${Number(
-        r.win_usd || 0
-      ).toFixed(0)}) · L ${r.miss_n || 0} ($${Number(r.miss_usd || 0).toFixed(
-        0
-      )}) · flat ${r.flat_n || 0}</div>
-          </div>
-          <div class="pnl-hero-card">
-            <div class="pnl-k">Bankroll</div>
-            <div class="pnl-v">$${openMark.toFixed(0)}</div>
-            <div class="pnl-sub">At risk $${atRisk.toFixed(
-              0
-            )} · free $${freeMark.toFixed(0)} · open ${b.open_n || 0}</div>
-          </div>
-          <div class="pnl-hero-card free">
-            <div class="pnl-k">Free capital</div>
-            <div class="pnl-v">${b.free_bags_n || 0} · $${freeMark.toFixed(0)}</div>
-            <div class="pnl-sub">Principal back · bag left as inventory</div>
-          </div>
-        </div>
-        <h4 class="pnl-sec">Open book</h4>
-        ${
-          book.length
-            ? `<div class="scroll pnl-book-wrap">${table(
-                ["Sym", "In", "Out", "Real", "Held", "Leftover", "Avg", "Free"],
-                book
-                  .map((p) => {
-                    const fr = p.free_coins
-                      ? `<span class="pnl-free-cell">FREE</span>`
-                      : "0";
-                    const leftoverAvg = _pnlNum(
-                      p.remaining_avg != null
-                        ? p.remaining_avg
-                        : p.leftover_avg != null
-                          ? p.leftover_avg
-                          : p.entry_avg
-                    );
-                    return `<tr class="${
-                      p.free_coins ? "pnl-row-free" : ""
-                    }"><td>${escHtml(p.symbol)}</td><td>${_pnlNum(
-                      p.bought_usd
-                    ).toFixed(0)}</td><td>${_pnlNum(p.sold_usd).toFixed(
-                      0
-                    )}</td><td>${_pnlNum(p.realized_pnl_usd).toFixed(
-                      0
-                    )}</td><td>${_pnlNum(p.remaining_mark_usd).toFixed(
-                      0
-                    )}</td><td>${_pnlNum(p.remaining_cost_usd).toFixed(
-                      0
-                    )}</td><td>${leftoverAvg}</td><td>${fr}</td></tr>`;
-                  })
-                  .join("")
-              )}</div>`
-            : rankEmpty("No open positions")
-        }
-        <h4 class="pnl-sec">Free bags</h4>
-        ${
-          free.length
-            ? `<div class="pnl-bags">${free
-                .map((f) => {
-                  const cash = _pnlNum(f.sold_usd) - _pnlNum(f.bought_usd);
-                  return `<div class="pnl-bag">
-                    <div class="pnl-bag-h"><span>${escHtml(
-                      f.symbol
-                    )}</span><span class="pos-free">FREE</span></div>
-                    <div class="pnl-bag-row"><span>Bag</span><b>$${_pnlNum(
-                      f.remaining_mark_usd
-                    ).toFixed(0)}</b></div>
-                    <div class="pnl-bag-row"><span>Out / In</span><b>$${_pnlNum(
-                      f.sold_usd
-                    ).toFixed(0)} / $${_pnlNum(f.bought_usd).toFixed(0)}</b></div>
-                    <div class="pnl-bag-row"><span>Leftover</span><b>$${_pnlNum(
-                      f.remaining_cost_usd
-                    ).toFixed(0)}</b></div>
-                    <div class="pnl-bag-row"><span>Cash path</span><b>${
-                      (cash >= 0 ? "+$" : "−$") + Math.abs(cash).toFixed(0)
-                    }</b></div>
-                  </div>`;
-                })
-                .join("")}</div>`
-            : `<div class="mute">No free bags</div>`
-        }
-        <h4 class="pnl-sec">By book · extremes</h4>
-        <div class="pnl-grid">
-          <div class="pnl-card">
-            <div class="pnl-k">Spot / Futures</div>
-            <div class="pnl-sub">Spot $${Number(
-              (d.by_book && d.by_book.spot_realized_usd) || 0
-            ).toFixed(0)}</div>
-            <div class="pnl-sub">Futures $${Number(
-              (d.by_book && d.by_book.futures_realized_usd) || 0
-            ).toFixed(0)}</div>
-          </div>
-          <div class="pnl-card">
-            <div class="pnl-k">Best</div>
-            <div class="pnl-sub">${
-              r.best
-                ? escHtml(r.best.symbol) +
-                  " +$" +
-                  _pnlNum(r.best.realized_pnl_usd).toFixed(0)
-                : "$0"
-            }</div>
-            <div class="pnl-k mt">Worst</div>
-            <div class="pnl-sub">${
-              r.worst
-                ? escHtml(r.worst.symbol) +
-                  " $" +
-                  _pnlNum(r.worst.realized_pnl_usd).toFixed(0)
-                : "$0"
-            }</div>
-          </div>
-        </div>
-        <h4 class="pnl-sec">Closed history · ${history.length} (no day cutoff)</h4>
-        ${
-          history.length
-            ? `<div class="scroll pnl-book-wrap">${table(
-                ["Sym", "Book", "In", "Out", "Real", "Leftover", "Qty", "Avg"],
-                history
-                  .map((p) => {
-                    return `<tr><td>${escHtml(p.symbol)}</td><td>${escHtml(
-                      p.book || p.market || ""
-                    )}</td><td>${_pnlNum(p.bought_usd).toFixed(0)}</td><td>${_pnlNum(
-                      p.sold_usd
-                    ).toFixed(0)}</td><td>${_pnlNum(p.realized_pnl_usd).toFixed(
-                      0
-                    )}</td><td>${_pnlNum(p.remaining_cost_usd).toFixed(
-                      0
-                    )}</td><td>${_pnlNum(p.size_qty).toFixed(4)}</td><td>${_pnlNum(
-                      p.entry_avg
-                    )}</td></tr>`;
-                  })
-                  .join("")
-              )}</div>`
-            : `<div class="mute">No closed trades</div>`
-        }
+        <h4 class="pnl-sec">Open Book</h4>
+        ${openTable}
+        <h4 class="pnl-sec">Closed history${
+          r.closed_all_n
+            ? ` · ${history.length}${
+                r.closed_all_n !== history.length ? " / " + r.closed_all_n : ""
+              }`
+            : ""
+        }</h4>
+        ${closedHtml}
       `;
     } catch (e) {
       host.innerHTML = rankEmpty(e.message || "PnL failed");
@@ -4793,12 +4908,13 @@
   );
   $$(".pnl-win").forEach((b) =>
     b.addEventListener("click", () => {
-      $$(".pnl-win").forEach((x) => x.classList.remove("on"));
-      b.classList.add("on");
-      state.pnlWindow = b.dataset.pnlWin || "all";
-      loadPnl();
+      applyPnlChip(b.dataset.pnlWin || "all");
     })
   );
+  const pnlFromEl = $("#pnlFrom");
+  const pnlToEl = $("#pnlTo");
+  if (pnlFromEl) pnlFromEl.addEventListener("change", applyPnlCustomDates);
+  if (pnlToEl) pnlToEl.addEventListener("change", applyPnlCustomDates);
   $("#btnRefresh").addEventListener("click", refreshAll);
 
   // Overview jump buttons (Targets / Movers / Learning / …)

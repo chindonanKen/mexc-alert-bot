@@ -919,9 +919,15 @@ def create_app() -> FastAPI:
     def get_pnl(
         window: str = Query("all"),
         range_name: Optional[str] = Query(None, alias="range"),
+        from_date: Optional[str] = Query(None, alias="from"),
+        to_date: Optional[str] = Query(None, alias="to"),
         _: bool = Depends(require_auth),
     ):
-        """Smart PnL — full closed history by default (window/range=all)."""
+        """Smart PnL — full closed history by default (window/range=all).
+
+        ``from`` / ``to`` are Manila calendar dates (YYYY-MM-DD). They filter
+        the displayed closed list only — history is never deleted.
+        """
         from .pnl import build_pnl_summary
 
         try:
@@ -929,7 +935,9 @@ def create_app() -> FastAPI:
             if not uid:
                 return {"error": "no user", "bankroll": {}, "realized": {}}
             w = (range_name or window or "all").strip() or "all"
-            return build_pnl_summary(int(uid), window=w)
+            return build_pnl_summary(
+                int(uid), window=w, from_date=from_date, to_date=to_date
+            )
         except Exception as e:
             raise HTTPException(400, str(e))
 

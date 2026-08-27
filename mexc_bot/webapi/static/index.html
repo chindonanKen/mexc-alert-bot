@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
   <noscript><link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" /></noscript>
-  <link rel="stylesheet" href="/assets/desk.css?v=slicelab1" />
+  <link rel="stylesheet" href="/assets/desk.css?v=pnlslate1" />
 </head>
 <body>
   <div class="bg-orb orb-a"></div>
@@ -110,15 +110,21 @@
       <!-- PnL -->
       <section class="view" id="view-pnl">
         <div class="panel clean">
-          <header class="panel-h">
-            <h3>PnL</h3>
-            <div class="pnl-windows">
-              <button type="button" class="btn soft sm pnl-win" data-pnl-win="7d">7d</button>
-              <button type="button" class="btn soft sm pnl-win" data-pnl-win="30d">30d</button>
-              <button type="button" class="btn soft sm pnl-win on" data-pnl-win="all">All</button>
+          <header class="panel-h pnl-page-h">
+            <h3>PnL <span id="pnlWinLabel" class="pnl-win-label mute">All</span></h3>
+            <div class="pnl-toolbar">
+              <div class="pnl-windows" role="group" aria-label="PnL window">
+                <button type="button" class="btn soft sm pnl-win" data-pnl-win="7d">7d</button>
+                <button type="button" class="btn soft sm pnl-win" data-pnl-win="30d">30d</button>
+                <button type="button" class="btn soft sm pnl-win on" data-pnl-win="all">All</button>
+              </div>
+              <div class="pnl-dates">
+                <label class="pnl-date-lab">From <input type="date" id="pnlFrom" /></label>
+                <label class="pnl-date-lab">To <input type="date" id="pnlTo" /></label>
+              </div>
             </div>
           </header>
-          <p class="learn-panel-hint mute">Exchange cycles · free = principal back · bag left as inventory</p>
+          <p id="pnlWindowSum" class="pnl-window-sum mute">Real +$0 · In $0 · Out $0</p>
           <div id="pnlBody" class="pnl-body"></div>
         </div>
       </section>
@@ -446,6 +452,6 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/assets/desk.js?v=slicelab1"></script>
+  <script src="/assets/desk.js?v=pnlslate1"></script>
 </body>
 </html>
