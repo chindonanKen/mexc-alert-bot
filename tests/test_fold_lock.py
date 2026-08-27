@@ -53,12 +53,13 @@ class TestFoldLock(unittest.TestCase):
     def test_process_book_is_ticker_free(self):
         self.assertTrue(PROCESS.is_file(), "docs/AD_PROCESS.md is the process book")
         text = PROCESS.read_text(encoding="utf-8")
-        self.assertIn("chart", text.lower())
-        self.assertIn("path", text.lower())
-        self.assertIn("size", text.lower())
-        self.assertIn("fail", text.lower())
-        self.assertIn("exit", text.lower())
-        self.assertIn("locked rules book", text.lower())
+        self.assertTrue(text.startswith("# AD trading rules\n"))
+        self.assertIn("This book is process only", text)
+        self.assertIn("## Chart", text)
+        self.assertIn("## Path", text)
+        self.assertIn("## Size", text)
+        self.assertIn("## Fail", text)
+        self.assertIn("## Exit", text)
         self.assertNotIn("AD_AGENT_PLAN", text)
         self.assertFalse(text.lstrip().startswith("---"))
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
@@ -68,6 +69,21 @@ class TestFoldLock(unittest.TestCase):
             self.assertNotIn(tok, text)
         self.assertNotIn("$", text)
         self.assertIsNone(_DOLLAR_AMT.search(text))
+        # Kenneth locked these old lines dead. Do not merge them back.
+        dead = (
+            "Last at or under AD bottom is spent",
+            "lean / one layer",
+            "Default 5–10 layers",
+            "Sit-out path: grind, isolated dump, dry volume",
+            "No volume big moves",
+            "exit to preserve capital",
+        )
+        for line in dead:
+            self.assertNotIn(line, text)
+        self.assertIn("A timer is not a fail", text)
+        self.assertIn("No volume = size down, not skip", text)
+        self.assertIn("Breaking the AD is usually add, not flatten", text)
+        self.assertIn("Sideways too long is not a clock", text)
 
     def test_telegram_position_ping_off(self):
         from mexc_bot.learning.fill_lifecycle import (
