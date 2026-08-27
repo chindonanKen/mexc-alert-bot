@@ -26,6 +26,49 @@ from .store import EventStore
 
 logger = logging.getLogger(__name__)
 
+# Skip dust / fees. One Telegram line per symbol+side per poll (not per match).
+_FILL_NOTIFY_MIN_USD = 1.0
+
+
+def format_fill_notify_lines(
+    rows: List[dict], *, min_usd: float = _FILL_NOTIFY_MIN_USD
+) -> List[str]:
+    """Coalesce new fills → ``SYMBOL - Buy/Sell - price - $amount``."""
+    buckets: dict = {}
+    for r in rows or []:
+        sym = str(r.get("symbol") or "").upper().strip()
+        side = str(r.get("side") or "").lower().strip()
+        if not sym or side not in ("buy", "sell"):
+            continue
+        try:
+            price = float(r.get("price") or 0)
+            qty = float(r.get("qty") or 0)
+            quote = r.get("quote_qty")
+            usd = float(quote) if quote not in (None, "") else price * qty
+        except (TypeError, ValueError):
+            continue
+        if usd <= 0 or qty <= 0:
+            continue
+        key = (sym, side)
+        b = buckets.setdefault(key, {"usd": 0.0, "qty": 0.0, "px": 0.0})
+        b["usd"] += usd
+        b["qty"] += qty
+        b["px"] += price * qty
+    lines = []
+    for (sym, side), b in sorted(buckets.items()):
+        if b["usd"] < min_usd:
+            continue
+        avg = b["px"] / b["qty"] if b["qty"] else 0.0
+        label = "Buy" if side == "buy" else "Sell"
+        if avg >= 1:
+            px_s = f"{avg:.4f}".rstrip("0").rstrip(".")
+        elif avg >= 0.01:
+            px_s = f"{avg:.6f}".rstrip("0").rstrip(".")
+        else:
+            px_s = f"{avg:.8f}".rstrip("0").rstrip(".")
+        lines.append(f"{sym} - {label} - {px_s} - ${b['usd']:.2f}")
+    return lines
+
 
 class FillSyncPoller:
     def __init__(
@@ -60,6 +103,7 @@ class FillSyncPoller:
         self._last_cycle_ms = 0
         self._last_open_futures: List[dict] = []
         self._last_spot_balances: List[dict] = []
+        self._notify_primed = False
 
     def get_health(self) -> dict:
         return {
@@ -115,20 +159,20 @@ class FillSyncPoller:
         new_rows: List[dict] = []
         new_rows.extend(self._sync_spot())
         new_rows.extend(self._sync_futures())
-        # Fill list only. Do not call desk fill_lifecycle here — that
-        # POSITION OPENED path is live-bind desk (mexc-desk-s1), not this
-        # git alert-bot image. A BUY fill is not an open.
-        if new_rows and self.notify_on_new and self.notifier:
-            try:
-                lines = [f"MEXC fills synced: {len(new_rows)} new"]
-                for r in new_rows[:5]:
-                    lines.append(
-                        f"  {r.get('market','?')} {r['side'].upper()} "
-                        f"{r['symbol']} qty={r['qty']} @ {r['price']}"
-                    )
-                self.notifier(self.user_id, "\n".join(lines), parse_mode=None)
-            except Exception as e:
-                logger.warning("fill notify failed: %s", e)
+        # Buy/Sell fills only — never POSITION OPENED. First cycle is silent
+        # so a restart does not dump history.
+        if self.notify_on_new and self.notifier:
+            if not self._notify_primed:
+                self._notify_primed = True
+            elif new_rows:
+                try:
+                    lines = format_fill_notify_lines(new_rows)
+                    if lines:
+                        self.notifier(
+                            self.user_id, "\n".join(lines), parse_mode=None
+                        )
+                except Exception as e:
+                    logger.warning("fill notify failed: %s", e)
         self._last_cycle_ms = int((time.perf_counter() - t0) * 1000)
 
     def _insert_row(self, row: dict) -> bool:
