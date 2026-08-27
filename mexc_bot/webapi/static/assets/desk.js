@@ -1858,7 +1858,10 @@
 
     const scrollY = host.scrollTop;
 
-    if (!positions.length) {
+    const viewRows = (positions || []).filter((p) =>
+      _posView === "closed" ? !isOpenPos(p) : isOpenPos(p)
+    );
+    if (!viewRows.length) {
       host.innerHTML = rankEmpty(
         _posView === "closed"
           ? "No closed cycles"
@@ -1868,6 +1871,7 @@
       if (head0) {
         head0.textContent = _posView === "closed" ? "0 closed" : "0 open";
       }
+      paintPosBankroll([]);
       _posCache = positions;
       _posFingerprint = fp;
       return;
