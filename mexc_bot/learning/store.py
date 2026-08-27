@@ -1957,28 +1957,10 @@ class EventStore:
             return int(cur.rowcount or 0)
 
     def upsert_journal_from_fill(self, fill: dict) -> None:
-        """Open journal on buy; close on sell if open exists (heuristic)."""
-        user_id = int(fill["user_id"])
-        symbol = fill["symbol"]
-        market = fill.get("market") or "spot"
-        side = (fill.get("side") or "").lower()
-        price = float(fill["price"])
-        if side == "buy":
-            opens = self.journal_list(user_id, open_only=True)
-            for t in opens:
-                if str(t["symbol"]).upper().replace("_", "") == symbol.replace("_", ""):
-                    return  # already open
-            self.journal_open(
-                user_id,
-                symbol,
-                market,
-                entry_avg=price,
-                notes="auto from MEXC fill",
-            )
-        elif side == "sell":
-            self.journal_close(
-                user_id,
-                symbol=symbol,
-                exit_avg=price,
-                notes="auto close from MEXC fill",
-            )
+        """No-op. A fill is not a position.
+
+        Futures BUY ≠ started a position. Open = exchange open_positions /
+        spot balances only. Kept so old callers do not crash. Do not send
+        Telegram position-opened pings from here.
+        """
+        return

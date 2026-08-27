@@ -95,8 +95,12 @@ class TestWebApi(unittest.TestCase):
     def test_health(self):
         r = self.client.get("/api/health")
         self.assertEqual(r.status_code, 200)
-        self.assertTrue(r.json()["ok"])
-        self.assertIn("2.", r.json()["version"])
+        body = r.json()
+        self.assertTrue(body["ok"])
+        self.assertIn("2.", body["version"])
+        self.assertIn("git_sha", body)
+        self.assertIn("image_tag", body)
+        self.assertIn("feature_ad_machine", body)
 
     def test_overview(self):
         r = self.client.get("/api/overview")

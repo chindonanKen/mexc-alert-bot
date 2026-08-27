@@ -223,10 +223,15 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health")
     def health():
+        from .build_info import build_identity
+
         path = db.db_path()
+        ident = build_identity()
         return {
             "ok": True,
             "version": "2.1.0-beta",
+            "git_sha": ident.get("git_sha"),
+            "image_tag": ident.get("image_tag"),
             "db": str(path),
             "db_exists": path.exists(),
             "auth_required": bool(_desk_token()),

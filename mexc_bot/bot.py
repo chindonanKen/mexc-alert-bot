@@ -26,6 +26,18 @@ from .storage import AlertStore
 
 logger = logging.getLogger(__name__)
 
+
+def _exchange_open_count(event_store, user_id: int) -> int:
+    """Telegram desk count: exchange opens only. A BUY fill is not an open."""
+    if event_store is None:
+        return 0
+    try:
+        from .learning.fills import count_exchange_open_positions
+
+        return count_exchange_open_positions(event_store, int(user_id))
+    except Exception:
+        return 0
+
 # Price suffix parsing: 65000, 65k, 2.45k, 1.2m, 0.00045 etc.
 PRICE_RE = re.compile(r"^([0-9]*\.?[0-9]+)\s*([kKmM])?$")
 
@@ -635,7 +647,7 @@ def create_bot(
         if _learning_enabled():
             try:
                 recent_n = len(event_store.recent_events(message.from_user.id, limit=12))
-                open_n = len(event_store.journal_list(message.from_user.id, open_only=True))
+                open_n = _exchange_open_count(event_store, message.from_user.id)
             except Exception:
                 pass
         _reply(
@@ -1576,7 +1588,7 @@ def create_bot(
             from .assistant.ux import desk_text
 
             recent_n = len(event_store.recent_events(user_id, limit=12))
-            open_n = len(event_store.journal_list(user_id, open_only=True))
+            open_n = _exchange_open_count(event_store, user_id)
             _reply(
                 message,
                 desk_text(

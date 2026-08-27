@@ -101,7 +101,7 @@ def desk_text(
     ]
     if learning_on:
         lines.append(f"Memory: last events logged ≈ {recent_n} shown on /events")
-        lines.append(f"Journal open trades: {open_trades_n}")
+        lines.append(f"Open positions (exchange): {open_trades_n}")
         lines.append("")
         lines.append("Chat: say what you did — I label the latest fire.")
     else:

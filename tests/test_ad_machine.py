@@ -228,6 +228,8 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         h = c.get("/api/health").json()
         self.assertFalse(h.get("feature_ad_machine"))
         self.assertFalse(h.get("live_orders_allowed"))
+        self.assertIn("git_sha", h)
+        self.assertIn("image_tag", h)
         self.assertEqual(c.get("/api/machine/plans").status_code, 404)
         self.assertEqual(c.get("/api/machine/closes").status_code, 404)
         self.assertEqual(c.get("/api/machine/ranks").status_code, 404)

@@ -152,6 +152,10 @@ def list_position_entities(
                     if j.get("notes") and not e.get("notes"):
                         e["notes"] = j.get("notes")
             continue
+        notes = str(j.get("notes") or "")
+        if "auto from MEXC fill" in notes or "auto close from MEXC fill" in notes:
+            # A fill is not a position. Do not paint auto-journal as Open.
+            continue
         d = _fallback_from_rows([j])[0]
         d["journal_id"] = j.get("id")
         d["id"] = j.get("id")

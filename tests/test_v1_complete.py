@@ -83,7 +83,8 @@ class TestFills(unittest.TestCase):
         self.assertEqual(len(fills), 1)
         self.store.upsert_journal_from_fill(row)
         opens = self.store.journal_list(42, open_only=True)
-        self.assertEqual(len(opens), 1)
+        # A BUY fill is not a position. Open = exchange only.
+        self.assertEqual(len(opens), 0)
 
     def test_normalize(self):
         self.assertEqual(normalize_spot_symbol_from_mexc("btc_usdt"), "BTCUSDT")
