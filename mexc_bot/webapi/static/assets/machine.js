@@ -366,7 +366,7 @@
     const rows = (plans || []).filter((p) => !p.live);
     if (!rows.length) {
       host.className = "empty-ranks";
-      if (host.dataset.ids !== "") {
+      if (!host.querySelector(".rank-empty")) {
         host.dataset.ids = "";
         host.innerHTML = emptyRanks();
       }
@@ -478,10 +478,56 @@
     const f = $("#recutForm");
     if (!f) return false;
     const a = document.activeElement;
-    return !!(a && f.contains(a) && (a.tagName === "INPUT" || a.tagName === "TEXTAREA"));
+    if (a && f.contains(a) && (a.tagName === "INPUT" || a.tagName === "TEXTAREA")) {
+      return true;
+    }
+    const top = f.querySelector("[name=ad_top]");
+    const bot = f.querySelector("[name=ad_bottom]");
+    const left = f.querySelector("[name=remaining_layers]");
+    const p = state.plans.find((x) => x.id === state.selected);
+    if (!p) return false;
+    const curTop = String(p.ad_top ?? "");
+    const curBot = String(p.ad_bottom ?? "");
+    const curLeft = String(p.remaining_layers || 5);
+    return (
+      (top && top.value !== curTop) ||
+      (bot && bot.value !== curBot) ||
+      (left && left.value !== curLeft)
+    );
   }
 
-  function paint() {
+  function patchSheet(p) {
+    const host = $("#planSheet");
+    if (!p || host.hidden || recutDirty()) return;
+    const setDd = (dt, html) => {
+      const row = [...host.querySelectorAll(".sheet-row")].find(
+        (r) => r.querySelector("dt") && r.querySelector("dt").textContent === dt
+      );
+      const dd = row && row.querySelector("dd");
+      if (!dd) return;
+      const gloss = dd.querySelector(".gloss");
+      const g = gloss ? gloss.outerHTML : "";
+      const pipsEl = dd.querySelector(".pips");
+      if (dt === "LAST") dd.innerHTML = lastText(p) + g;
+      else if (dt === "REST") dd.innerHTML = (restClock(p) || "—") + g;
+      else if (dt === "REDS")
+        dd.innerHTML = `${redsText(p)} <span class="pips">${pips(p.reds)}</span>${g}`;
+      else if (dt === "VOL") dd.innerHTML = (volText(p) || "—") + g;
+      else if (dt === "NEWS") dd.innerHTML = newsText(p) + g;
+      else if (dt === "NEXT") dd.innerHTML = money(p.next_layer_usd) + g;
+      else if (dt === "LINE") dd.innerHTML = linePrice(p) + g;
+      void pipsEl;
+    };
+    setDd("LAST");
+    setDd("REST");
+    setDd("REDS");
+    setDd("VOL");
+    setDd("NEWS");
+    setDd("NEXT");
+    setDd("LINE");
+  }
+
+  function paint(opts) {
     const room = state.room || {};
     const liveN = room.live_count || 0;
     document.body.dataset.tone = room.tone || "empty";
@@ -496,19 +542,22 @@
     renderNeeds(state.needs);
     renderStages(state.plans);
     renderRanks(state.plans);
-    if (state.selected && !recutDirty()) {
+    if (state.selected) {
       const p = state.plans.find((x) => x.id === state.selected);
-      if (p) renderSheet(p);
+      if (p) {
+        if (opts && opts.refreshSheet) renderSheet(p);
+        else patchSheet(p);
+      }
     }
   }
 
-  async function load() {
+  async function load(opts) {
     const data = await api("/api/machine/plans");
     state.plans = data.plans || [];
     state.needs = data.needs_you || [];
     state.room = data.room || {};
     state.account = data.account || {};
-    paint();
+    paint(opts);
   }
 
   function onPick(e) {
@@ -582,6 +631,8 @@
   $("#planSheet").addEventListener("submit", async (e) => {
     if (e.target.id !== "recutForm") return;
     e.preventDefault();
+    if (e.target._busy) return;
+    e.target._busy = true;
     const fd = new FormData(e.target);
     const sub = e.target.querySelector("[type=submit]");
     if (sub) sub.disabled = true;
@@ -597,10 +648,11 @@
         }),
       });
       toast("Recut");
-      await load();
+      await load({ refreshSheet: true });
     } catch (err) {
       toast(err.message);
     } finally {
+      e.target._busy = false;
       if (sub) sub.disabled = false;
     }
   });
