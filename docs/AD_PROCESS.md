@@ -2,7 +2,7 @@
 
 Ticker-free. Chart / path / size / fail / exit only.
 
-This is the **process book** for AD Desk. It is **not** `docs/AD_AGENT_PLAN.md` (autonomy roadmap). It is **not** a mixed workspace rules file with names, dollars, or live plays. Those stay out.
+This is the **process book** for AD Desk. It is **not** the autonomy roadmap. It is **not** a mixed workspace rules file with names, dollars, or live plays. Those stay out.
 
 ---
 

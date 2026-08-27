@@ -37,6 +37,7 @@ test:
 	$$PY tests/test_positions_open_live.py && \
 	$$PY tests/test_ad_machine.py && \
 	$$PY tests/test_phantom_opens.py && \
+	$$PY tests/test_fold_lock.py && \
 	$$PY tests/test_heartbeat.py
 
 verify:
