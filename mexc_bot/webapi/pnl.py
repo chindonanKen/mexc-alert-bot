@@ -352,7 +352,9 @@ def build_pnl_summary(
     hold_mark = sum(_n(e.get("remaining_mark_usd")) for e in hold_bags)
     at_risk_mark = max(0.0, open_mark - free_mark - hold_mark)
 
-    realized, in_usd, out_usd = _sum_closed(closed_w)
+    closed_rows = [_closed_row(e) for e in closed_w]
+    # Header Real/In/Out = painted visible closed rows (same numbers as the list).
+    realized, in_usd, out_usd = _sum_closed(closed_rows)
     win_n = miss_n = flat_n = 0
     win_usd = miss_usd = 0.0
     best = worst = None
@@ -390,7 +392,6 @@ def build_pnl_summary(
         if (e.get("market") or "").lower() == "futures"
     )
 
-    closed_rows = [_closed_row(e) for e in closed_w]
     group_by = resolve_group_by(window, from_d, to_d)
     groups = group_closed_rows(closed_rows, group_by)
 

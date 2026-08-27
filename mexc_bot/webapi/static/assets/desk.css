@@ -1870,7 +1870,7 @@ form.learn-visual-ad-write,
   text-transform: uppercase;
   color: var(--mute);
 }
-.pnl-date-lab input[type="date"] {
+.pnl-date-lab input {
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -1878,7 +1878,7 @@ form.learn-visual-ad-write,
   font-family: var(--mono);
   font-size: 0.78rem;
   padding: 0.35rem 0.5rem;
-  color-scheme: dark;
+  width: 8.2rem;
 }
 .pnl-window-sum {
   font-family: var(--mono);

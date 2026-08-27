@@ -52,9 +52,6 @@ def _closed(
         "sold_usd": sold,
         "realized_pnl_usd": real,
         "remaining_cost_usd": 0.0,
-        "entry_avg": 1.0,
-        "exit_avg": 1.1,
-        "size_qty": 10.0,
         "buy_orders": extra.pop("buy_orders", []),
         "sell_orders": extra.pop("sell_orders", []),
     }
@@ -115,6 +112,16 @@ class TestSlateWindowMath(unittest.TestCase):
         self.assertAlmostEqual(all_sum["realized"]["pnl_usd"], 50.0, places=2)
         self.assertAlmostEqual(all_sum["realized"]["in_usd"], 250.0, places=2)
         self.assertAlmostEqual(all_sum["realized"]["out_usd"], 300.0, places=2)
+        self.assertAlmostEqual(
+            all_sum["realized"]["in_usd"],
+            sum(h["bought_usd"] for h in all_sum["closed_history"]),
+            places=2,
+        )
+        self.assertAlmostEqual(
+            all_sum["realized"]["pnl_usd"],
+            sum(h["realized_pnl_usd"] for h in all_sum["closed_history"]),
+            places=2,
+        )
         # Open leftover $ must not enter Real
         self.assertNotAlmostEqual(all_sum["realized"]["pnl_usd"], 50.0 + 2740.7733, places=1)
 
@@ -335,6 +342,8 @@ class TestSlateApiAndDesk(unittest.TestCase):
         css = (ROOT / "mexc_bot/webapi/static/assets/desk.css").read_text()
         self.assertIn('id="pnlFrom"', html)
         self.assertIn('id="pnlTo"', html)
+        self.assertIn('placeholder="YYYY-MM-DD"', html)
+        self.assertIn("_pnlValidYmd", js)
         self.assertIn('id="pnlWindowSum"', html)
         self.assertIn('data-pnl-win="7d"', html)
         self.assertIn('data-pnl-win="30d"', html)
@@ -349,14 +358,15 @@ class TestSlateApiAndDesk(unittest.TestCase):
         self.assertIn("CLOSED", js)
         self.assertNotIn("By book · extremes", js)
         # Positions page may still say Free bags; PnL renderer must not.
-        load = js[js.index("async function loadPnl") : js.index("async function loadPositions")]
-        self.assertNotIn("Free bags", load)
-        self.assertNotIn("pnl-hero", load)
-        self.assertNotIn("By book", load)
-        self.assertNotIn("WIN", load)
-        self.assertNotIn("MISS", load)
-        self.assertNotIn("EXCH", load)
-        self.assertIn("pnl-fills", load)
+        slate = js[js.index("function _pnlFillsHtml") : js.index("async function loadPositions")]
+        self.assertNotIn("Free bags", slate)
+        self.assertNotIn("pnl-hero", slate)
+        self.assertNotIn("By book", slate)
+        self.assertNotIn("WIN", slate)
+        self.assertNotIn("MISS", slate)
+        self.assertNotIn("EXCH", slate)
+        self.assertIn("pnl-fills", slate)
+        self.assertIn("_pnlFillsHtml", js)
         self.assertIn("pnl-window-sum", css)
         self.assertIn("pnl-group-h", css)
         self.assertIn("position: sticky", css)

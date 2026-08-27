@@ -1500,11 +1500,18 @@
     loadPnl();
   }
 
+  function _pnlValidYmd(s) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
+  }
+
   function applyPnlCustomDates() {
     const fromEl = $("#pnlFrom");
     const toEl = $("#pnlTo");
-    state.pnlFrom = fromEl ? fromEl.value : "";
-    state.pnlTo = toEl ? toEl.value : "";
+    const from = fromEl ? String(fromEl.value || "").trim() : "";
+    const to = toEl ? String(toEl.value || "").trim() : "";
+    if ((from && !_pnlValidYmd(from)) || (to && !_pnlValidYmd(to))) return;
+    state.pnlFrom = from;
+    state.pnlTo = to;
     state.pnlWindow = "custom";
     _pnlSyncChips();
     _pnlSyncDates();
@@ -4915,6 +4922,15 @@
   const pnlToEl = $("#pnlTo");
   if (pnlFromEl) pnlFromEl.addEventListener("change", applyPnlCustomDates);
   if (pnlToEl) pnlToEl.addEventListener("change", applyPnlCustomDates);
+  [pnlFromEl, pnlToEl].forEach((el) => {
+    if (!el) return;
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        applyPnlCustomDates();
+      }
+    });
+  });
   $("#btnRefresh").addEventListener("click", refreshAll);
 
   // Overview jump buttons (Targets / Movers / Learning / …)
