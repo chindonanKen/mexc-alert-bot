@@ -1862,7 +1862,7 @@ class EventStore:
                 WHERE user_id = ?
                 ORDER BY ts DESC LIMIT ?
                 """,
-                (user_id, max(1, min(limit, 2000))),
+                (user_id, max(1, min(int(limit), 100000))),
             ).fetchall()
             return [dict(r) for r in rows]
 

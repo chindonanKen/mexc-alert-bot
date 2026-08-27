@@ -214,7 +214,7 @@ class FillSyncPoller:
         # Closed rounds — exchange history_positions is truth (not deal walk)
         try:
             closed_ents: List[dict] = []
-            for page in range(1, 5):
+            for page in range(1, 41):
                 if self._stop.is_set():
                     break
                 hist = self.futures_client.get_history_positions(
@@ -457,7 +457,7 @@ def fetch_live_futures_closed(
     user_id: int,
     event_store: Optional[EventStore] = None,
     *,
-    max_pages: int = 4,
+    max_pages: int = 40,
 ) -> Optional[List[dict]]:
     """Live history_positions → closed entities (exchange PnL truth)."""
     import os

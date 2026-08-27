@@ -87,6 +87,9 @@ def fills_for_trade(
             "exchange_trade_id": f.get("exchange_trade_id"),
             "quote_qty": _f(f.get("quote_qty")),
             "market": fm or mwant or "spot",
+            "order_id": f.get("order_id") or f.get("orderId") or f.get("_order_id"),
+            "raw": f.get("raw") if isinstance(f.get("raw"), dict) else None,
+            "raw_json": f.get("raw_json"),
         }
         if side in ("buy", "long", "bid"):
             buys.append(layer)
@@ -118,6 +121,24 @@ def _all_fills_chronological(
     return all_fills
 
 
+def remaining_cost_average(
+    bought_usd: Any,
+    sold_usd: Any,
+    remaining_qty: Any,
+) -> Optional[float]:
+    """Open leftover avg: (bought USD − sold USD) / remaining qty."""
+    from ..webapi.position_math import remaining_cost_average as _rca
+
+    return _rca(bought_usd, sold_usd, remaining_qty)
+
+
+def apply_open_remaining_cost_avg(entity: dict) -> dict:
+    """Set open leftover avg from bought − sold. Closed / flat: no-op."""
+    from ..webapi.position_math import apply_open_remaining_cost_avg as _apply
+
+    return _apply(entity)
+
+
 def _inventory_is_flat(qty: float, bought_qty_cycle: float = 0.0) -> bool:
     """True when remaining qty is economically zero (float dust after sells).
 
@@ -147,7 +168,11 @@ def segment_positions_from_fills(
     (success/miss on realized PnL). Next buy starts a new position.
     Returns newest-first.
     """
-    all_fills = _all_fills_chronological(fills, symbol=symbol, market=market)
+    from ..webapi.position_math import collapse_fills_to_orders
+
+    # One walk row per user order (never one row per exchange fill/sub-order).
+    walk = collapse_fills_to_orders(list(fills or []))
+    all_fills = _all_fills_chronological(walk, symbol=symbol, market=market)
     positions: List[Dict[str, Any]] = []
     qty = 0.0
     cost = 0.0
@@ -208,6 +233,7 @@ def segment_positions_from_fills(
                 "sold_usd": sold_usd,
                 "remaining_cost_usd": 0.0,
                 "remaining_mark_usd": 0.0,
+                "leftover_avg": 0.0,
                 "principal_recovered": bool(
                     bought_usd > 0 and sold_usd + 1e-6 >= bought_usd
                 ),
@@ -274,13 +300,16 @@ def segment_positions_from_fills(
 
     # open remainder (ignore dust)
     if not _inventory_is_flat(qty, bought_qty_cycle) and cycle_buys:
-        entry_avg = cost / qty if qty > 0 else None  # residual inventory avg
+        # Remaining-cost leftover: (bought USD − sold USD) / remaining qty.
+        # Frozen inventory avg (sell-at-then-avg) is NOT the user-visible entry.
+        remaining_cost_raw = bought_cost_cycle - realized_quote
+        entry_avg = remaining_cost_average(bought_cost_cycle, realized_quote, qty)
         entry_avg_full = (
             (bought_cost_cycle / bought_qty_cycle) if bought_qty_cycle > 1e-12 else None
         )
         bought_usd = round(bought_cost_cycle, 4) if bought_cost_cycle else 0.0
         sold_usd = round(realized_quote, 4) if realized_quote else 0.0
-        remaining_cost = round(cost, 4) if cost > 0 else 0.0
+        remaining_cost = round(remaining_cost_raw, 4)
         # Partial realized on sells so far (avg-cost of sold vs sell proceeds)
         pnl_usd = None
         pnl_pct = None
@@ -307,6 +336,7 @@ def segment_positions_from_fills(
                 "entry_avg": entry_avg,
                 "exit_avg": None,
                 "entry_display": entry_avg,
+                "leftover_avg": entry_avg,
                 "size_remaining": qty,
                 "size_qty": bought_qty_cycle,
                 "size_sold": sold_qty_cycle,

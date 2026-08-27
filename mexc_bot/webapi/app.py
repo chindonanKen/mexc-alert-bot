@@ -917,7 +917,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/pnl")
     def get_pnl(
-        window: str = Query("30d"),
+        window: str = Query("all"),
         _: bool = Depends(require_auth),
     ):
         """Smart PnL — dollar bankroll, realized, free bags, open book."""

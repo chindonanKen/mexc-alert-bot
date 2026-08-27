@@ -523,6 +523,16 @@ body::before {
 }
 .pos-band-h.closed { color: var(--mute); margin-top: 1.15rem; }
 .pos-band-h.mute { color: var(--mute); font-weight: 500; }
+.pos-book-h {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin: 0.6rem 0 0.2rem;
+  color: var(--text);
+}
+.pos-book-fut .pos-book-h { color: #fbbf24; }
+.pos-book-spot .pos-book-h { color: #67e8f9; }
 .pos-band-n {
   font-family: var(--mono);
   font-weight: 600;

@@ -454,6 +454,12 @@ def futures_position_snapshot(pos: dict) -> Optional[dict]:
         except (TypeError, ValueError):
             upnl_f = None
         ptype = int(pos.get("positionType") or 1)  # 1 long 2 short
+        try:
+            cs = float(pos.get("contractSize") or pos.get("contract_size") or 0)
+        except (TypeError, ValueError):
+            cs = 0.0
+        if cs <= 0:
+            cs = 1.0
 
         # Live entry for remaining size = residual hold avg
         entry = hold_avg
@@ -480,6 +486,7 @@ def futures_position_snapshot(pos: dict) -> Optional[dict]:
             "hold_fee": hold_fee,
             "close_vol": close_vol,
             "unrealized_pnl": upnl_f,
+            "contract_size": cs,
             "leverage": pos.get("leverage"),
             "create_time": pos.get("createTime"),
             "update_time": pos.get("updateTime") or pos.get("createTime"),
@@ -571,6 +578,13 @@ def history_position_to_closed_entity(pos: dict) -> Optional[dict]:
             "size_remaining": 0.0,
             "size_qty": close_vol,
             "size_sold": close_vol,
+            "bought_usd": round((entry_f or 0.0) * close_vol, 4)
+            if entry_f
+            else 0.0,
+            "sold_usd": round((exit_f or 0.0) * close_vol, 4) if exit_f else 0.0,
+            "remaining_cost_usd": 0.0,
+            "remaining_mark_usd": 0.0,
+            "leftover_avg": 0.0,
             "buy_orders": [],
             "sell_orders": [],
             "n_buys": 0,
