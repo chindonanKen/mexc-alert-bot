@@ -50,7 +50,7 @@ def list_position_entities(
             for d in ents:
                 if d.get("status") != "open":
                     continue
-                _attach_mark(d)
+                _attach_mark(d, force_ticker=True)
                 apply_open_mark_math(d)
                 if d.get("opened_at"):
                     d["hold_seconds"] = max(0.0, now - float(d["opened_at"]))
@@ -872,7 +872,7 @@ def enrich_positions(rows: List[dict], user_id: int) -> List[dict]:
     return _fallback_from_rows(rows)
 
 
-def _attach_mark(d: dict) -> None:
+def _attach_mark(d: dict, *, force_ticker: bool = False) -> None:
     sym = str(d.get("symbol") or "")
     entry = None
     for key in ("remaining_avg", "leftover_avg", "entry_display", "entry_avg"):
@@ -884,13 +884,14 @@ def _attach_mark(d: dict) -> None:
         except (TypeError, ValueError):
             continue
     have = d.get("mark_price") if d.get("mark_price") not in (None, "", 0, 0.0) else d.get("mark")
-    if have not in (None, "", 0, 0.0):
+    if have not in (None, "", 0, 0.0) and not force_ticker:
         try:
             d["mark_price"] = float(have)
             d.setdefault("mark_source", d.get("mark_source") or "exchange")
         except (TypeError, ValueError):
             have = None
-    if have in (None, "", 0, 0.0):
+            force_ticker = True
+    if force_ticker or have in (None, "", 0, 0.0):
         try:
             t = ticker_24h(sym)
             if t:
@@ -898,7 +899,8 @@ def _attach_mark(d: dict) -> None:
                 d["change_24h_pct"] = t.get("changePercent")
                 d["mark_source"] = t.get("source")
         except Exception:
-            d["mark_price"] = None
+            if d.get("mark_price") in (None, ""):
+                d["mark_price"] = None
     mark = d.get("mark_price")
     if mark is not None and entry is not None and float(entry) != 0:
         d["upnl_pct"] = round(

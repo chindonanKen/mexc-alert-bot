@@ -112,6 +112,38 @@ class TestPositionSim(unittest.TestCase):
         # leftover PRICE still from notional / rem
         self.assertAlmostEqual(float(ent.get("leftover_avg") or 0), 1.0, places=6)
 
+    def test_marks_only_reticks_existing_mark(self):
+        from mexc_bot.webapi import positions_enrich as pe
+
+        pe._open_book_cache["ts"] = __import__("time").time()
+        pe._open_book_cache["entities"] = [
+            {
+                "symbol": "AAAUSDT",
+                "market": "spot",
+                "book": "spot",
+                "status": "open",
+                "is_open": True,
+                "size_remaining": 10.0,
+                "leftover_avg": 1.0,
+                "entry_avg": 1.0,
+                "mark_price": 1.0,
+                "opened_at": 1.0,
+            }
+        ]
+
+        def fake_ticker(sym):
+            return {"symbol": "AAAUSDT", "price": 2.0, "changePercent": 1.0, "source": "test"}
+
+        old = pe.ticker_24h
+        pe.ticker_24h = fake_ticker
+        try:
+            out = pe.list_position_entities(1, include_closed=False, marks_only=True)
+        finally:
+            pe.ticker_24h = old
+        self.assertEqual(len(out), 1)
+        self.assertAlmostEqual(float(out[0]["mark_price"]), 2.0, places=6)
+        self.assertAlmostEqual(float(out[0]["upnl_usd_est"]), 10.0, places=4)
+
     def test_remaining_cost_formula(self):
         self.assertAlmostEqual(rca(60, 50, 10), 1.0, places=9)
         self.assertIsNone(remaining_cost_average(10, 10, 0))
