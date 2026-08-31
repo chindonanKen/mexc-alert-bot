@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 # P5: no day/count cutoff on the desk book. 0 = unlimited.
 _FILLS_LIMIT = 100_000
+_CLOSED_TAB_LIMIT = 50
+_open_book_cache: Dict[str, Any] = {"ts": 0.0, "entities": []}
+_OPEN_BOOK_TTL = 90.0
 
 
 def list_position_entities(
@@ -28,6 +31,7 @@ def list_position_entities(
     *,
     include_closed: bool = True,
     closed_limit: int = 0,
+    marks_only: bool = False,
 ) -> List[dict]:
     """Discrete positions (open + closed cycles).
 
@@ -35,6 +39,23 @@ def list_position_entities(
     (newest closed). Each full flat is its own entity with success/miss.
     Journal-only opens (no fills yet) are merged in.
     """
+    if marks_only and not include_closed:
+        cached = _open_book_cache.get("entities") or []
+        ts = float(_open_book_cache.get("ts") or 0)
+        if cached and (time.time() - ts) < _OPEN_BOOK_TTL:
+            import copy
+
+            ents = copy.deepcopy(cached)
+            now = time.time()
+            for d in ents:
+                if d.get("status") != "open":
+                    continue
+                _attach_mark(d)
+                apply_open_mark_math(d)
+                if d.get("opened_at"):
+                    d["hold_seconds"] = max(0.0, now - float(d["opened_at"]))
+                    d["hold_hours"] = round(d["hold_seconds"] / 3600.0, 2)
+            return ents
     try:
         from ..learning.store import EventStore
         from ..learning.trades import segment_positions_from_fills
@@ -246,6 +267,8 @@ def list_position_entities(
     )
     if not include_closed:
         entities = opens
+        _open_book_cache["ts"] = time.time()
+        _open_book_cache["entities"] = list(opens)
     elif closed_limit and closed_limit > 0:
         entities = opens + closed[:closed_limit]
     else:
@@ -860,14 +883,22 @@ def _attach_mark(d: dict) -> None:
             break
         except (TypeError, ValueError):
             continue
-    try:
-        t = ticker_24h(sym)
-        if t:
-            d["mark_price"] = t.get("price")
-            d["change_24h_pct"] = t.get("changePercent")
-            d["mark_source"] = t.get("source")
-    except Exception:
-        d["mark_price"] = None
+    have = d.get("mark_price") if d.get("mark_price") not in (None, "", 0, 0.0) else d.get("mark")
+    if have not in (None, "", 0, 0.0):
+        try:
+            d["mark_price"] = float(have)
+            d.setdefault("mark_source", d.get("mark_source") or "exchange")
+        except (TypeError, ValueError):
+            have = None
+    if have in (None, "", 0, 0.0):
+        try:
+            t = ticker_24h(sym)
+            if t:
+                d["mark_price"] = t.get("price")
+                d["change_24h_pct"] = t.get("changePercent")
+                d["mark_source"] = t.get("source")
+        except Exception:
+            d["mark_price"] = None
     mark = d.get("mark_price")
     if mark is not None and entry is not None and float(entry) != 0:
         d["upnl_pct"] = round(

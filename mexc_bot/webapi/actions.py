@@ -400,7 +400,13 @@ def get_movers_settings(user_id: Optional[int] = None) -> dict:
 
 # ---- Journal / positions ----
 
-def list_positions(user_id: Optional[int] = None, include_closed: bool = False) -> List[dict]:
+def list_positions(
+    user_id: Optional[int] = None,
+    include_closed: bool = False,
+    *,
+    marks_only: bool = False,
+    closed_limit: Optional[int] = None,
+) -> List[dict]:
     """Discrete position entities from segmented fills (newest first).
 
     Open and closed cycles are separate entities: a full flat ends a cycle;
@@ -412,8 +418,14 @@ def list_positions(user_id: Optional[int] = None, include_closed: bool = False) 
     from .positions_enrich import list_position_entities
 
     uid = _uid(user_id)
+    lim = closed_limit
+    if include_closed and lim is None:
+        lim = 50
     return list_position_entities(
-        uid, include_closed=bool(include_closed), closed_limit=0
+        uid,
+        include_closed=bool(include_closed),
+        closed_limit=int(lim or 0),
+        marks_only=bool(marks_only),
     )
 
 

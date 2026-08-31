@@ -142,20 +142,16 @@ class TestO2CollapseUnchanged(unittest.TestCase):
 
 class TestO3OpenFetchVsClosed(unittest.TestCase):
     def test_soft_open_path_is_open_only(self):
-        self.assertIn('function positionsApiPath()', JS)
-        self.assertIn('?closed=true"', JS)
-        self.assertIn('"/api/positions"', JS)
-        self.assertIn("await api(positionsApiPath())", JS)
-        self.assertNotIn('await api("/api/positions?closed=true")', JS)
+        self.assertIn("function positionsApiPath", JS)
+        self.assertIn("?closed=true", JS)
+        self.assertIn("/api/positions?marks=1", JS)
+        self.assertIn("await api(positionsApiPath({ marks:", JS)
         self.assertIn('data-pos-view="open"', HTML)
         self.assertIn('data-pos-view="closed"', HTML)
         self.assertIn('_posView === "closed"', JS)
 
     def test_closed_view_still_requests_closed_book(self):
-        self.assertIn(
-            'return _posView === "closed"\n      ? "/api/positions?closed=true"\n      : "/api/positions"',
-            JS,
-        )
+        self.assertIn('if (_posView === "closed") return "/api/positions?closed=true"', JS)
 
 
 class TestO4HoverExpandDoesNotFreeze(unittest.TestCase):
@@ -164,7 +160,7 @@ class TestO4HoverExpandDoesNotFreeze(unittest.TestCase):
         self.assertNotIn("if (soft && Date.now() - _posLastInteract < 8000) return", load)
         self.assertNotIn('if (soft && host.querySelector("details[open]")) return', load)
         self.assertNotIn('if (soft && host.matches(":hover")) return', load)
-        self.assertIn("await api(positionsApiPath())", load)
+        self.assertIn("await api(positionsApiPath({ marks:", load)
         self.assertIn("applyPosLiveTicks", load)
         self.assertIn("function applyPosLiveTicks", JS)
         self.assertIn("paintPosCardLive", JS)

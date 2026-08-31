@@ -864,11 +864,15 @@ def create_app() -> FastAPI:
 
     @app.get("/api/positions")
     def get_positions(
-        closed: bool = False, _: bool = Depends(require_auth)
+        closed: bool = False,
+        marks: bool = False,
+        _: bool = Depends(require_auth),
     ):
         try:
             return {
-                "positions": actions.list_positions(include_closed=closed),
+                "positions": actions.list_positions(
+                    include_closed=closed, marks_only=bool(marks) and not closed
+                ),
                 "live_orders_allowed": actions.live_orders_allowed(),
                 "mode": "journal_paper"
                 if not actions.live_orders_allowed()

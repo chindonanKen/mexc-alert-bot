@@ -772,7 +772,7 @@
     if (o.price != null && o.qty != null) {
       const cs =
         book === "futures" ? Number((p && p.contract_size) || 0) : 1;
-      if (book === "futures" && !(cs > 0)) return "$0";
+      if (book === "futures" && !(cs > 0)) return "—";
       const q = Number(o.price) * Number(o.qty) * (cs || 1);
       return !Number.isNaN(q) ? "$" + q.toFixed(0) : "$0";
     }
@@ -1078,6 +1078,8 @@
   let _posWired = false;
   /** Open (default) fetches open-only. Closed fetches the full closed book. */
   let _posView = "open";
+  /** Closed tab: all | spot | futures */
+  let _posClosedBook = "all";
   /** Last positions payload (for optimistic flag updates without waiting on MEXC). */
   let _posCache = [];
 
@@ -1124,10 +1126,10 @@
       .join("|");
   }
 
-  function positionsApiPath() {
-    return _posView === "closed"
-      ? "/api/positions?closed=true"
-      : "/api/positions";
+  function positionsApiPath(opts) {
+    const marks = !!(opts && opts.marks);
+    if (_posView === "closed") return "/api/positions?closed=true";
+    return marks ? "/api/positions?marks=1" : "/api/positions";
   }
 
   async function postPositionFlag(payload) {
@@ -1350,6 +1352,27 @@
         inner = `<div class="pos-band-h mute">None</div>`;
       }
       return inner;
+    }
+
+    const filt = document.getElementById("posBookFilter");
+    if (filt) filt.hidden = _posView !== "closed";
+
+    if (_posView === "closed") {
+      let closedRows = viewRows.filter((p) => !isOpenPos(p));
+      if (_posClosedBook === "spot" || _posClosedBook === "futures") {
+        closedRows = closedRows.filter((p) => posBookOf(p) === _posClosedBook);
+      }
+      closedRows.sort(
+        (a, b) =>
+          Number(b.closed_at || b.opened_at || 0) -
+          Number(a.closed_at || a.opened_at || 0)
+      );
+      host.innerHTML = `<div class="pos-book pos-book-mixed"><div class="pos-book-h">Recent closed</div>${
+        closedRows.length
+          ? closedRows.map(posCardHtml).join("")
+          : `<div class="pos-band-h mute">None</div>`
+      }</div>`;
+      return;
     }
 
     const fut = viewRows.filter((p) => posBookOf(p) === "futures");
@@ -1826,7 +1849,7 @@
     }
     let d;
     try {
-      d = await api(positionsApiPath());
+      d = await api(positionsApiPath({ marks: !!(opts && opts.marks) }));
     } catch (e) {
       if (!soft) {
         host.innerHTML = rankEmpty(
@@ -5041,7 +5064,11 @@
     }
     const map = {
       overview: loadOverview,
-      positions: () => loadPositions({ force: true }),
+      positions: () =>
+        loadPositions({
+          force: true,
+          marks: _posView === "open",
+        }),
       pnl: loadPnl,
       movers: loadMovers,
       targets: loadTargets,
@@ -5086,6 +5113,16 @@
       );
       _posFingerprint = "";
       loadPositions({ force: true });
+    })
+  );
+  $$(".pos-book-f").forEach((b) =>
+    b.addEventListener("click", () => {
+      const book = b.dataset.posBook || "all";
+      _posClosedBook = book;
+      $$(".pos-book-f").forEach((x) =>
+        x.classList.toggle("on", x.dataset.posBook === book)
+      );
+      if (_posCache.length) renderPositionsList(_posCache);
     })
   );
   const pnlFromEl = $("#pnlFrom");
@@ -5262,7 +5299,10 @@
   async function softRefreshView() {
     if (document.hidden || state.inCall || state.busy) return;
     if (state.view === "positions") {
-      await loadPositions({ soft: true });
+      await loadPositions({
+        soft: true,
+        marks: _posView === "open",
+      });
       return;
     }
     try {

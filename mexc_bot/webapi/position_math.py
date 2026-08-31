@@ -419,12 +419,14 @@ def apply_open_remaining_cost_avg(entity: dict) -> dict:
             entity.get("symbol"), entity, entity.get("contract_size")
         )
         if cs is None or cs <= 0:
+            entity["contract_size_unknown"] = True
             if entity.get("bought_usd") is None:
                 entity["bought_usd"] = 0.0
             if entity.get("sold_usd") is None:
                 entity["sold_usd"] = 0.0
             entity["remaining_cost_usd"] = 0.0
             return entity
+        entity["contract_size_unknown"] = False
         entity["contract_size"] = cs
         cash_in = n_in * cs
         cash_out = n_out * cs

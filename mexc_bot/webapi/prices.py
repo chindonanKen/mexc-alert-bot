@@ -20,18 +20,28 @@ _session = requests.Session()
 _session.verify = _CA
 _session.headers.update({"User-Agent": "mexc-desk-v2/0.1"})
 
+_ticker_cache: Dict[str, tuple] = {}
+_TICKER_TTL = 12.0
+
 
 def ticker_24h(symbol: str) -> Optional[Dict[str, Any]]:
-    sym = symbol.upper().replace("_", "").replace("-", "")
+    import time
+
+    raw = str(symbol or "")
+    sym = raw.upper().replace("_", "").replace("-", "")
     if not sym.endswith("USDT"):
         sym = sym + "USDT"
+    hit = _ticker_cache.get(sym)
+    now = time.time()
+    if hit and now - hit[0] < _TICKER_TTL:
+        return dict(hit[1])
     # Prefer Binance for broader network reach; MEXC first when available
     for base, path in (
         ("https://api.mexc.com", f"/api/v3/ticker/24hr?symbol={sym}"),
         ("https://api.binance.com", f"/api/v3/ticker/24hr?symbol={sym}"),
     ):
         try:
-            r = _session.get(base + path, timeout=8)
+            r = _session.get(base + path, timeout=2.5)
             if r.status_code != 200:
                 continue
             d = r.json()
@@ -39,14 +49,18 @@ def ticker_24h(symbol: str) -> Optional[Dict[str, Any]]:
             chg = float(d.get("priceChangePercent") or 0)
             if last <= 0:
                 continue
-            return {
+            out = {
                 "symbol": sym,
                 "price": last,
                 "changePercent": chg,
                 "source": "mexc" if "mexc" in base else "binance",
             }
+            _ticker_cache[sym] = (now, out)
+            return dict(out)
         except Exception as e:
             logger.debug("ticker %s via %s: %s", sym, base, e)
+    if hit:
+        return dict(hit[1])
     return None
 
 

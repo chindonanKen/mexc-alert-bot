@@ -501,6 +501,9 @@ body::before {
 .pos-page-h { margin-bottom: 0.5rem; }
 .pos-views { display: flex; gap: 0.35rem; }
 .pos-views .on { border-color: var(--sky); color: var(--sky); }
+.pos-book-filter { display: flex; gap: 0.3rem; margin-left: 0.4rem; }
+.pos-book-filter[hidden] { display: none !important; }
+.pos-book-f.on { border-color: var(--sky); color: var(--sky); }
 .pos-list { margin-top: 0.25rem; }
 .pos-manual {
   margin-top: 1rem;

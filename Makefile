@@ -38,6 +38,7 @@ test:
 	$$PY tests/test_ad_machine.py && \
 	$$PY tests/test_phantom_opens.py && \
 	$$PY tests/test_fill_notify.py && \
+	$$PY tests/test_position_sim.py && \
 	$$PY tests/test_fold_lock.py && \
 	$$PY tests/test_heartbeat.py
 
