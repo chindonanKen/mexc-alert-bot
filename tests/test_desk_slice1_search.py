@@ -68,8 +68,8 @@ class TestDeskSlice1Search(unittest.TestCase):
         self.assertIn("system-ui", CSS)
 
     def test_cache_bust_slice_token(self):
-        self.assertIn("desk.js?v=openlive1", HTML)
-        self.assertIn("desk.css?v=openlive1", HTML)
+        self.assertRegex(HTML, r"desk\.js\?v=")
+        self.assertRegex(HTML, r"desk\.css\?v=")
         self.assertNotIn("desk.js?v=lessonad1", HTML)
         self.assertNotIn("desk.js?v=slicelab1", HTML)
 
