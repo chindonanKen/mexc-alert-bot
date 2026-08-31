@@ -313,7 +313,7 @@ def create_app() -> FastAPI:
                 from ..learning.store import EventStore
 
                 counts["open_positions"] = count_exchange_open_positions(
-                    EventStore(), uid
+                    EventStore(db.db_path()), uid
                 )
             except Exception:
                 pass
@@ -877,6 +877,7 @@ def create_app() -> FastAPI:
         marks: bool = False,
         book: Optional[str] = None,
         limit: Optional[int] = None,
+        mix: bool = False,
         _: bool = Depends(require_auth),
     ):
         try:
@@ -886,6 +887,7 @@ def create_app() -> FastAPI:
                     marks_only=bool(marks) and not closed,
                     closed_limit=limit,
                     closed_book=book,
+                    mix_books=bool(mix),
                 ),
                 "live_orders_allowed": actions.live_orders_allowed(),
                 "mode": "journal_paper"

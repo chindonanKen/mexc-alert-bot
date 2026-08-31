@@ -407,6 +407,7 @@ def list_positions(
     marks_only: bool = False,
     closed_limit: Optional[int] = None,
     closed_book: Optional[str] = None,
+    mix_books: bool = False,
 ) -> List[dict]:
     """Discrete position entities from segmented fills (newest first).
 
@@ -428,6 +429,7 @@ def list_positions(
         closed_limit=int(lim or 0),
         marks_only=bool(marks_only),
         closed_book=closed_book,
+        mix_books=bool(mix_books),
     )
 
 

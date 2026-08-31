@@ -655,9 +655,10 @@ def ensure_position_display_fields(d: dict) -> dict:
     else:
         if _sf(d.get("exit_avg")) is None:
             d["exit_avg"] = 0.0
-        d["leftover_avg"] = 0.0
         d["remaining_avg"] = 0.0
         d["remaining_cost_usd"] = 0.0
+        if _sf(d.get("leftover_avg")) is None:
+            d["leftover_avg"] = _sf(d.get("entry_avg")) or 0.0
         if _sf(d.get("entry_avg")) is None:
             d["entry_avg"] = _sf(d.get("entry_display")) or 0.0
         if _sf(d.get("entry_display")) is None:

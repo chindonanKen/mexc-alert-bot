@@ -797,16 +797,18 @@
 
   function posCardNums(p) {
     const isOpen = isOpenPos(p);
-    const entry =
-      p.remaining_avg != null
-        ? p.remaining_avg
-        : p.leftover_avg != null
-          ? p.leftover_avg
-          : p.entry_display != null
-            ? p.entry_display
-            : p.entry_avg != null
-              ? p.entry_avg
-              : 0;
+    const _nz = (...vals) => {
+      for (const v of vals) {
+        if (v != null && Number(v) !== 0 && !Number.isNaN(Number(v))) return Number(v);
+      }
+      for (const v of vals) {
+        if (v != null && !Number.isNaN(Number(v))) return Number(v);
+      }
+      return 0;
+    };
+    const entry = isOpen
+      ? _nz(p.remaining_avg, p.leftover_avg, p.entry_display, p.entry_avg, p.hold_avg)
+      : _nz(p.entry_display, p.entry_avg, p.hold_avg, p.open_avg);
     const exit_ =
       p.exit_avg != null && Number(p.exit_avg) !== 0
         ? p.exit_avg
@@ -830,11 +832,7 @@
     const cashBanked = sold - bought;
     const leftoverQty = Number(p.size_remaining != null ? p.size_remaining : 0);
     const leftoverAvgPx = isOpen
-      ? p.remaining_avg != null
-        ? p.remaining_avg
-        : p.leftover_avg != null
-          ? p.leftover_avg
-          : entry
+      ? _nz(p.remaining_avg, p.leftover_avg, entry)
       : entry;
     let heroMain = _usd(0, true);
     let heroSub = "";
@@ -1149,7 +1147,7 @@
       const book =
         _posClosedBook === "spot" || _posClosedBook === "futures"
           ? "&book=" + encodeURIComponent(_posClosedBook)
-          : "";
+          : "&mix=1";
       return "/api/positions?closed=true&limit=" + _closedLimit + book;
     }
     return marks ? "/api/positions?marks=1" : "/api/positions";
@@ -1391,7 +1389,7 @@
           Number(a.closed_at || a.opened_at || 0)
       );
       const more =
-        closedRows.length >= 40
+        closedRows.length >= _closedLimit && _closedLimit < 400
           ? `<button type="button" class="btn soft sm" id="posClosedMore">Load more</button>`
           : "";
       host.innerHTML = `<div class="pos-book pos-book-mixed"><div class="pos-book-h">Recent closed</div>${
@@ -1403,6 +1401,7 @@
       if (moreBtn) {
         moreBtn.addEventListener("click", (ev) => {
           ev.preventDefault();
+          moreBtn.disabled = true;
           _closedLimit = Math.min(_closedLimit + 80, 400);
           loadPositions({ force: true });
         });

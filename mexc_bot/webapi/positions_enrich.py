@@ -25,10 +25,14 @@ _CLOSED_TAB_LIMIT = 80
 
 
 def _pick_recent_closed(
-    closed: List[dict], limit: int, *, book: Optional[str] = None
+    closed: List[dict],
+    limit: int,
+    *,
+    book: Optional[str] = None,
+    mix_books: bool = False,
 ) -> List[dict]:
-    """Newest closed. Mixed All uses half/half per book so futures are not
-    crowded out by 50 recent spot cycles (Closed tab goal)."""
+    """Newest closed. Closed-tab All uses half/half per book. Other callers
+    (PnL, teach) get global newest unless they pass mix_books."""
     book = (book or "all").lower()
     if book in ("spot", "futures"):
         rows = [
@@ -39,6 +43,8 @@ def _pick_recent_closed(
         return rows[:limit] if limit and limit > 0 else rows
     if not limit or limit <= 0:
         return closed
+    if not mix_books:
+        return closed[:limit]
     half = max(limit // 2, 1)
     spot = [
         c
@@ -67,6 +73,7 @@ def list_position_entities(
     closed_limit: int = 0,
     marks_only: bool = False,
     closed_book: Optional[str] = None,
+    mix_books: bool = False,
 ) -> List[dict]:
     """Discrete positions (open + closed cycles).
 
@@ -306,11 +313,11 @@ def list_position_entities(
         _open_book_cache["entities"] = list(opens)
     elif closed_limit and closed_limit > 0:
         entities = opens + _pick_recent_closed(
-            closed, int(closed_limit), book=closed_book
+            closed, int(closed_limit), book=closed_book, mix_books=mix_books
         )
     else:
         entities = opens + _pick_recent_closed(
-            closed, 0, book=closed_book
+            closed, 0, book=closed_book, mix_books=mix_books
         )
 
     for i, e in enumerate(entities):

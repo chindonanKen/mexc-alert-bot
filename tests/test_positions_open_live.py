@@ -152,6 +152,7 @@ class TestO3OpenFetchVsClosed(unittest.TestCase):
 
     def test_closed_view_still_requests_closed_book(self):
         self.assertIn("closed=true&limit=", JS)
+        self.assertIn("&mix=1", JS)
 
 
 class TestO4HoverExpandDoesNotFreeze(unittest.TestCase):
