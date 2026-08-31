@@ -50,13 +50,21 @@ def _pick_recent_closed(
         c
         for c in closed
         if (c.get("market") or c.get("book") or "").lower() == "spot"
-    ][:half]
+    ]
     fut = [
         c
         for c in closed
         if (c.get("market") or c.get("book") or "").lower() == "futures"
-    ][:half]
-    mixed = spot + fut
+    ]
+    mixed = spot[:half] + fut[:half]
+    if len(mixed) < limit:
+        seen = {id(x) for x in mixed}
+        rest = [c for c in closed if id(c) not in seen]
+        rest.sort(
+            key=lambda x: float(x.get("closed_at") or x.get("opened_at") or 0),
+            reverse=True,
+        )
+        mixed.extend(rest[: limit - len(mixed)])
     mixed.sort(
         key=lambda x: float(x.get("closed_at") or x.get("opened_at") or 0),
         reverse=True,

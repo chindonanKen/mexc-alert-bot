@@ -169,6 +169,23 @@ class TestO4HoverExpandDoesNotFreeze(unittest.TestCase):
         self.assertIn("if (openIds.has(el.dataset.posId)) el.open = true", load)
 
 
+class TestClosedMixFill(unittest.TestCase):
+    def test_mix_fills_from_fat_book_so_load_more_can_page(self):
+        from mexc_bot.webapi.positions_enrich import _pick_recent_closed
+
+        rows = [
+            {"market": "spot", "closed_at": float(i), "symbol": f"S{i}"}
+            for i in range(200)
+        ] + [
+            {"market": "futures", "closed_at": 1000.0 + i, "symbol": f"F{i}"}
+            for i in range(2)
+        ]
+        out = _pick_recent_closed(rows, 80, mix_books=True)
+        self.assertEqual(len(out), 80)
+        self.assertEqual(sum(1 for x in out if x["market"] == "futures"), 2)
+        self.assertEqual(sum(1 for x in out if x["market"] == "spot"), 78)
+
+
 class TestO5NegativeLeftoverUpnl(unittest.TestCase):
     def test_remaining_cost_formula_unchanged_can_be_negative(self):
         leftover = remaining_cost_average(1000.0, 1200.16, 4352.0)
