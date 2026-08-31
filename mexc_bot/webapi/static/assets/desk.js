@@ -807,8 +807,19 @@
             : p.entry_avg != null
               ? p.entry_avg
               : 0;
-    const exit_ = p.exit_avg != null ? p.exit_avg : 0;
-    const mark = p.mark_price != null ? p.mark_price : 0;
+    const exit_ =
+      p.exit_avg != null && Number(p.exit_avg) !== 0
+        ? p.exit_avg
+        : p.close_avg != null
+          ? p.close_avg
+          : p.mark_price != null
+            ? p.mark_price
+            : 0;
+    const mark = isOpen
+      ? p.mark_price != null
+        ? p.mark_price
+        : 0
+      : exit_;
     const bought = Number(p.bought_usd != null ? p.bought_usd : 0);
     const sold = Number(p.sold_usd != null ? p.sold_usd : 0);
     const held = Number(p.remaining_mark_usd != null ? p.remaining_mark_usd : 0);
@@ -818,12 +829,13 @@
     const real = Number(p.realized_pnl_usd != null ? p.realized_pnl_usd : 0);
     const cashBanked = sold - bought;
     const leftoverQty = Number(p.size_remaining != null ? p.size_remaining : 0);
-    const leftoverAvgPx =
-      p.remaining_avg != null
+    const leftoverAvgPx = isOpen
+      ? p.remaining_avg != null
         ? p.remaining_avg
         : p.leftover_avg != null
           ? p.leftover_avg
-          : entry;
+          : entry
+      : entry;
     let heroMain = _usd(0, true);
     let heroSub = "";
     let heroCls = "mute";
@@ -1129,9 +1141,17 @@
       .join("|");
   }
 
+  let _closedLimit = 80;
+
   function positionsApiPath(opts) {
     const marks = !!(opts && opts.marks);
-    if (_posView === "closed") return "/api/positions?closed=true";
+    if (_posView === "closed") {
+      const book =
+        _posClosedBook === "spot" || _posClosedBook === "futures"
+          ? "&book=" + encodeURIComponent(_posClosedBook)
+          : "";
+      return "/api/positions?closed=true&limit=" + _closedLimit + book;
+    }
     return marks ? "/api/positions?marks=1" : "/api/positions";
   }
 
@@ -1370,11 +1390,23 @@
           Number(b.closed_at || b.opened_at || 0) -
           Number(a.closed_at || a.opened_at || 0)
       );
+      const more =
+        closedRows.length >= 40
+          ? `<button type="button" class="btn soft sm" id="posClosedMore">Load more</button>`
+          : "";
       host.innerHTML = `<div class="pos-book pos-book-mixed"><div class="pos-book-h">Recent closed</div>${
         closedRows.length
           ? closedRows.map(posCardHtml).join("")
           : `<div class="pos-band-h mute">None</div>`
-      }</div>`;
+      }${more}</div>`;
+      const moreBtn = document.getElementById("posClosedMore");
+      if (moreBtn) {
+        moreBtn.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          _closedLimit = Math.min(_closedLimit + 80, 400);
+          loadPositions({ force: true });
+        });
+      }
       return;
     }
 
@@ -1888,6 +1920,8 @@
       _posView === "closed" ? !isOpenPos(p) : isOpenPos(p)
     );
     if (!viewRows.length) {
+      const filt0 = document.getElementById("posBookFilter");
+      if (filt0) filt0.hidden = _posView !== "closed";
       host.innerHTML = rankEmpty(
         _posView === "closed"
           ? "No closed cycles"
@@ -5122,10 +5156,11 @@
     b.addEventListener("click", () => {
       const book = b.dataset.posBook || "all";
       _posClosedBook = book;
+      _closedLimit = 80;
       $$(".pos-book-f").forEach((x) =>
         x.classList.toggle("on", x.dataset.posBook === book)
       );
-      if (_posCache.length) renderPositionsList(_posCache);
+      loadPositions({ force: true });
     })
   );
   const pnlFromEl = $("#pnlFrom");

@@ -406,6 +406,7 @@ def list_positions(
     *,
     marks_only: bool = False,
     closed_limit: Optional[int] = None,
+    closed_book: Optional[str] = None,
 ) -> List[dict]:
     """Discrete position entities from segmented fills (newest first).
 
@@ -420,12 +421,13 @@ def list_positions(
     uid = _uid(user_id)
     lim = closed_limit
     if include_closed and lim is None:
-        lim = 50
+        lim = 80
     return list_position_entities(
         uid,
         include_closed=bool(include_closed),
         closed_limit=int(lim or 0),
         marks_only=bool(marks_only),
+        closed_book=closed_book,
     )
 
 

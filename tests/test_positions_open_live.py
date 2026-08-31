@@ -151,7 +151,7 @@ class TestO3OpenFetchVsClosed(unittest.TestCase):
         self.assertIn('_posView === "closed"', JS)
 
     def test_closed_view_still_requests_closed_book(self):
-        self.assertIn('if (_posView === "closed") return "/api/positions?closed=true"', JS)
+        self.assertIn("closed=true&limit=", JS)
 
 
 class TestO4HoverExpandDoesNotFreeze(unittest.TestCase):

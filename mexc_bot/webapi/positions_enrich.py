@@ -21,7 +21,41 @@ logger = logging.getLogger(__name__)
 
 # P5: no day/count cutoff on the desk book. 0 = unlimited.
 _FILLS_LIMIT = 100_000
-_CLOSED_TAB_LIMIT = 50
+_CLOSED_TAB_LIMIT = 80
+
+
+def _pick_recent_closed(
+    closed: List[dict], limit: int, *, book: Optional[str] = None
+) -> List[dict]:
+    """Newest closed. Mixed All uses half/half per book so futures are not
+    crowded out by 50 recent spot cycles (Closed tab goal)."""
+    book = (book or "all").lower()
+    if book in ("spot", "futures"):
+        rows = [
+            c
+            for c in closed
+            if (c.get("market") or c.get("book") or "").lower() == book
+        ]
+        return rows[:limit] if limit and limit > 0 else rows
+    if not limit or limit <= 0:
+        return closed
+    half = max(limit // 2, 1)
+    spot = [
+        c
+        for c in closed
+        if (c.get("market") or c.get("book") or "").lower() == "spot"
+    ][:half]
+    fut = [
+        c
+        for c in closed
+        if (c.get("market") or c.get("book") or "").lower() == "futures"
+    ][:half]
+    mixed = spot + fut
+    mixed.sort(
+        key=lambda x: float(x.get("closed_at") or x.get("opened_at") or 0),
+        reverse=True,
+    )
+    return mixed[:limit]
 _open_book_cache: Dict[str, Any] = {"ts": 0.0, "entities": []}
 _OPEN_BOOK_TTL = 90.0
 
@@ -32,6 +66,7 @@ def list_position_entities(
     include_closed: bool = True,
     closed_limit: int = 0,
     marks_only: bool = False,
+    closed_book: Optional[str] = None,
 ) -> List[dict]:
     """Discrete positions (open + closed cycles).
 
@@ -270,9 +305,13 @@ def list_position_entities(
         _open_book_cache["ts"] = time.time()
         _open_book_cache["entities"] = list(opens)
     elif closed_limit and closed_limit > 0:
-        entities = opens + closed[:closed_limit]
+        entities = opens + _pick_recent_closed(
+            closed, int(closed_limit), book=closed_book
+        )
     else:
-        entities = opens + closed
+        entities = opens + _pick_recent_closed(
+            closed, 0, book=closed_book
+        )
 
     for i, e in enumerate(entities):
         if e.get("id") is None:
@@ -849,8 +888,7 @@ def _merge_futures_closed_history(
         key=lambda x: float(x.get("closed_at") or x.get("opened_at") or 0),
         reverse=True,
     )
-    if closed_limit and closed_limit > 0:
-        closed = closed[:closed_limit]
+    # Do not eat the global closed cap here — pick per-book after merge.
     for ent in closed:
         e = dict(ent)
         e.setdefault("buy_orders", [])

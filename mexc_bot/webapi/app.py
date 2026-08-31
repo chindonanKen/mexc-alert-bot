@@ -302,12 +302,21 @@ def create_app() -> FastAPI:
                     ("watchlist", "SELECT COUNT(*) AS c FROM mover_watchlist WHERE user_id=?"),
                     ("events", "SELECT COUNT(*) AS c FROM learning_events WHERE user_id=?"),
                     ("investigations", "SELECT COUNT(*) AS c FROM investigations WHERE user_id=?"),
-                    ("open_positions", "SELECT COUNT(*) AS c FROM journal_trades WHERE user_id=? AND status='open'"),
+                    ("open_positions", "SELECT COUNT(*) AS c FROM journal_trades WHERE user_id=? AND status='open'"),  # overwritten below
                 ):
                     r = db.fetch_one(sql, (uid,))
                     counts[key] = int(r["c"]) if r else 0
             r = db.fetch_one("SELECT COUNT(*) AS c FROM news_events")
             counts["news"] = int(r["c"]) if r else 0
+            try:
+                from ..learning.fills import count_exchange_open_positions
+                from ..learning.store import EventStore
+
+                counts["open_positions"] = count_exchange_open_positions(
+                    EventStore(), uid
+                )
+            except Exception:
+                pass
         except Exception as e:
             logger.debug("counts: %s", e)
 
@@ -866,12 +875,17 @@ def create_app() -> FastAPI:
     def get_positions(
         closed: bool = False,
         marks: bool = False,
+        book: Optional[str] = None,
+        limit: Optional[int] = None,
         _: bool = Depends(require_auth),
     ):
         try:
             return {
                 "positions": actions.list_positions(
-                    include_closed=closed, marks_only=bool(marks) and not closed
+                    include_closed=closed,
+                    marks_only=bool(marks) and not closed,
+                    closed_limit=limit,
+                    closed_book=book,
                 ),
                 "live_orders_allowed": actions.live_orders_allowed(),
                 "mode": "journal_paper"
