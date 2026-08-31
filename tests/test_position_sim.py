@@ -144,6 +144,43 @@ class TestPositionSim(unittest.TestCase):
         self.assertAlmostEqual(float(out[0]["mark_price"]), 2.0, places=6)
         self.assertAlmostEqual(float(out[0]["upnl_usd_est"]), 10.0, places=4)
 
+    def test_aehr_stock_perp_leftover_uses_fill_price_not_cash_over_qty(self):
+        """STOCK perp: quote_qty is cash (px×vol×cs). Leftover must stay ~$82 not $0.82."""
+        from mexc_bot.webapi.position_math import collapse_fills_to_orders
+
+        fills = [
+            {
+                "price": 84.68,
+                "qty": 400.0,
+                "quote_qty": 338.72,  # cash = 84.68*400*0.01
+                "side": "buy",
+                "ts": 1.0,
+                "symbol": "AEHRSTOCK_USDT",
+            }
+        ]
+        merged = collapse_fills_to_orders(fills)
+        self.assertEqual(len(merged), 1)
+        self.assertAlmostEqual(float(merged[0]["price"]), 84.68, places=4)
+        ent = {
+            "symbol": "AEHRSTOCK_USDT",
+            "market": "futures",
+            "book": "futures",
+            "status": "open",
+            "is_open": True,
+            "size_remaining": 400.0,
+            "contract_size": 0.01,
+            "buy_orders": merged,
+            "sell_orders": [],
+            "hold_avg": 84.68,
+        }
+        apply_open_remaining_cost_avg(ent)
+        self.assertAlmostEqual(float(ent["leftover_avg"]), 84.68, places=2)
+        self.assertGreater(float(ent["bought_usd"]), 300)
+        ent["mark_price"] = 83.0
+        apply_open_mark_math(ent)
+        # (83-84.68)*400*0.01 = -6.72
+        self.assertLess(abs(float(ent["upnl_usd_est"]) - (83.0 - 84.68) * 400 * 0.01), 0.05)
+
     def test_remaining_cost_formula(self):
         self.assertAlmostEqual(rca(60, 50, 10), 1.0, places=9)
         self.assertIsNone(remaining_cost_average(10, 10, 0))

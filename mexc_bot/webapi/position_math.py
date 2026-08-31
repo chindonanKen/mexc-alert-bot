@@ -281,11 +281,18 @@ def _merge_order_fills(oid: str, parts: List[dict]) -> dict:
     filled_hint: Optional[float] = None
     status = ""
     raw_acc: Dict[str, Any] = {}
+    px_qty = 0.0
     for p in parts:
         q = float(p.get("qty") or 0)
-        px = float(p.get("price") or 0)
+        raw = parse_raw(p)
+        px = float(
+            (raw.get("price") if isinstance(raw, dict) else None)
+            or p.get("price")
+            or 0
+        )
         qq = p.get("quote_qty")
         qty += q
+        px_qty += px * q
         quote += float(qq) if qq not in (None, "") else px * q
         raw = parse_raw(p)
         if raw:
@@ -301,7 +308,8 @@ def _merge_order_fills(oid: str, parts: List[dict]) -> dict:
             st = raw.get("status") or raw.get("order_status") or raw.get("state")
             if st not in (None, ""):
                 status = str(st)
-    vwap = (quote / qty) if qty else 0.0
+    # VWAP from fill *price*, never cash/qty (that *cs and made AEHR leftover 0.82 vs mark 83).
+    vwap = (px_qty / qty) if qty else 0.0
     first = parts[0]
     raw_acc["orderId"] = oid
     if orig is not None:
@@ -408,6 +416,15 @@ def apply_open_remaining_cost_avg(entity: dict) -> dict:
 
     # Leftover avg is a PRICE: (bought notional − sold notional) / rem qty.
     avg = remaining_cost_average(n_in, n_out, rem)
+    if book == "futures":
+        hold = _sf(entity.get("hold_avg")) or _sf(entity.get("entry_live"))
+        cs_hint = resolve_futures_contract_size(
+            entity.get("symbol"), entity, entity.get("contract_size")
+        )
+        # leftover must be a PRICE in the same units as mark (AEHR ~82, not 0.82).
+        if hold and hold > 0 and avg is not None and cs_hint and 0 < cs_hint < 1:
+            if abs(avg - hold * cs_hint) <= max(1e-6, 0.05 * abs(hold * cs_hint)):
+                avg = hold
     if avg is not None:
         entity["entry_avg"] = avg
         entity["entry_display"] = avg

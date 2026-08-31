@@ -751,13 +751,16 @@
           price: Number.isFinite(px) ? px : 0,
           qty,
           quote_qty: qq,
+          _pxQty: Number.isFinite(px) ? px * qty : 0,
           _fill_count: 1,
         });
         return;
       }
       cur.qty += qty;
       cur.quote_qty = Number(cur.quote_qty || 0) + qq;
-      if (cur.qty > 0) cur.price = cur.quote_qty / cur.qty;
+      cur._pxQty = Number(cur._pxQty || 0) + (Number.isFinite(px) ? px * qty : 0);
+      if (cur.qty > 0 && cur._pxQty)
+        cur.price = cur._pxQty / cur.qty;
       cur.ts = Math.max(Number(cur.ts || 0), Number(o.ts || 0));
       cur._fill_count = (cur._fill_count || 1) + 1;
     });
