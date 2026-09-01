@@ -361,9 +361,34 @@
     }
   }
 
+  function adGapFrac(p) {
+    if (!p || p.ad_status !== "known") return null;
+    const last = Number(p.last_price);
+    const bot = Number(p.ad_bottom);
+    if (!Number.isFinite(last) || !Number.isFinite(bot) || last <= 0) return null;
+    const gap = last - bot;
+    if (gap <= 0) return 0;
+    return gap / last;
+  }
+
+  function sortByAdBottom(rows) {
+    return rows.slice().sort((a, b) => {
+      const ga = adGapFrac(a);
+      const gb = adGapFrac(b);
+      if (ga == null && gb == null)
+        return String(a.display || a.symbol || "").localeCompare(
+          String(b.display || b.symbol || "")
+        );
+      if (ga == null) return 1;
+      if (gb == null) return -1;
+      if (ga !== gb) return ga - gb;
+      return 0;
+    });
+  }
+
   function renderRanks(plans) {
     const host = $("#rankList");
-    const rows = (plans || []).filter((p) => !p.live);
+    const rows = sortByAdBottom((plans || []).filter((p) => !p.live));
     if (!rows.length) {
       host.className = "empty-ranks";
       if (!host.querySelector(".rank-empty")) {
@@ -373,12 +398,24 @@
       return;
     }
     const ids = rows.map((p) => String(p.id)).join(",");
-    if (host.dataset.ids === ids && host.querySelector(".rank[data-id]")) {
-      rows.forEach((p, i) => patchRank(host.querySelector(`[data-id="${p.id}"]`), p, i));
+    const idset = rows
+      .map((p) => String(p.id))
+      .slice()
+      .sort()
+      .join(",");
+    if (host.dataset.idset === idset && host.querySelector(".rank[data-id]")) {
+      rows.forEach((p, i) => {
+        const el = host.querySelector(`[data-id="${p.id}"]`);
+        if (!el) return;
+        patchRank(el, p, i);
+        host.appendChild(el);
+      });
+      host.dataset.ids = ids;
       return;
     }
     host.className = "";
     host.dataset.ids = ids;
+    host.dataset.idset = idset;
     const head = `<div class="rank-head">
       <span></span>
       <span></span>
@@ -395,7 +432,7 @@
       rows
         .map((p, i) => {
           const killed = p.status === "killed" ? " killed" : "";
-          return `<button type="button" class="rank is-enter${killed}" data-id="${p.id}">
+          return `<button type="button" class="rank${killed}" data-id="${p.id}">
           <span class="idx">${String(i + 1).padStart(2, "0")}</span>
           <span class="who"><span class="nm">${esc(instrument(p))}${esc(fut(p))}</span><span class="tf">${tfText(p)}</span></span>
           <span class="ad">${rankAd(p)}</span>
@@ -409,9 +446,6 @@
         </button>`;
         })
         .join("");
-    setTimeout(() => {
-      host.querySelectorAll(".rank.is-enter").forEach((el) => el.classList.remove("is-enter"));
-    }, 220);
   }
 
   function renderSheet(p) {

@@ -693,6 +693,8 @@ def _close_and_kb(
 
 
 def rank_plans(store: MachineStore, user_id: int) -> List[Dict[str, Any]]:
+    from .logic import ad_gap_frac
+
     plans = [public_plan(store, p) for p in store.list_plans(user_id)]
     kb_rows = store.list_kb(user_id, limit=200)
     scores: Dict[int, float] = {}
@@ -711,10 +713,25 @@ def rank_plans(store: MachineStore, user_id: int) -> List[Dict[str, Any]]:
             pass
     for p in plans:
         p["rank_score"] = round(scores.get(int(p["id"]), 0.0), 4)
+        gap = None
+        if (p.get("ad_status") or "") == "known":
+            gap = ad_gap_frac(p.get("last_price"), p.get("ad_bottom"))
+        p["ad_gap_frac"] = gap
     live = [p for p in plans if p.get("live")]
     rest = [p for p in plans if not p.get("live")]
     live.sort(key=lambda p: (-p["rank_score"], p.get("display") or ""))
-    rest.sort(key=lambda p: (-p["rank_score"], p.get("display") or ""))
+
+    def _rest_key(p: Dict[str, Any]):
+        g = p.get("ad_gap_frac")
+        unknown = g is None
+        return (
+            1 if unknown else 0,
+            9e9 if unknown else float(g),
+            -float(p.get("rank_score") or 0),
+            str(p.get("display") or ""),
+        )
+
+    rest.sort(key=_rest_key)
     ranked = live + rest
     for i, p in enumerate(ranked, 1):
         p["rank"] = i

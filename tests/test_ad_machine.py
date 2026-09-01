@@ -26,6 +26,83 @@ class TestMachineLogic(unittest.TestCase):
         self.assertFalse(first_candle_sitout(1, heat_breadth=1, panic_board=True))
         self.assertFalse(first_candle_sitout(2, heat_breadth=1, panic_board=True))
 
+    def test_ad_gap_frac_closer_is_smaller(self):
+        from mexc_bot.machine.logic import ad_gap_frac
+
+        self.assertIsNone(ad_gap_frac(None, 1.0))
+        self.assertIsNone(ad_gap_frac(1.0, None))
+        far = ad_gap_frac(10.0, 5.0)
+        near = ad_gap_frac(5.2, 5.0)
+        through = ad_gap_frac(4.9, 5.0)
+        self.assertGreater(far, near)
+        self.assertEqual(through, 0.0)
+        penny = ad_gap_frac(0.010, 0.0095)
+        stock = ad_gap_frac(80.0, 72.0)
+        self.assertLess(penny, stock)
+
+    def test_rank_hung_by_ad_bottom_not_kb(self):
+        from mexc_bot.machine.engine import rank_plans
+        from mexc_bot.machine.store import MachineStore
+
+        class Fake:
+            def list_plans(self, user_id):
+                return [
+                    {
+                        "id": 1,
+                        "user_id": 1,
+                        "symbol": "FARUSDT",
+                        "display_name": "FAR",
+                        "market": "spot",
+                        "ad_status": "known",
+                        "ad_top": 12.0,
+                        "ad_bottom": 10.0,
+                        "last_price": 11.5,
+                        "live": 0,
+                        "layers_json": "[]",
+                        "zones_json": "[]",
+                    },
+                    {
+                        "id": 2,
+                        "user_id": 1,
+                        "symbol": "NEARUSDT",
+                        "display_name": "NEAR",
+                        "market": "spot",
+                        "ad_status": "known",
+                        "ad_top": 12.0,
+                        "ad_bottom": 10.0,
+                        "last_price": 10.2,
+                        "live": 0,
+                        "layers_json": "[]",
+                        "zones_json": "[]",
+                    },
+                    {
+                        "id": 3,
+                        "user_id": 1,
+                        "symbol": "UNKUSDT",
+                        "display_name": "UNK",
+                        "market": "spot",
+                        "ad_status": "unknown",
+                        "last_price": 1.0,
+                        "live": 0,
+                        "layers_json": "[]",
+                        "zones_json": "[]",
+                    },
+                ]
+
+            def list_kb(self, user_id, limit=200):
+                return [
+                    {"plan_id": 1, "bounce_or_fail": "bounce", "process_ok": 1, "money_pnl": 50},
+                ]
+
+            def list_orders(self, *args, **kwargs):
+                return []
+
+        ranked = rank_plans(Fake(), 1)
+        hung = [p for p in ranked if not p.get("live")]
+        self.assertEqual(hung[0]["symbol"], "NEARUSDT")
+        self.assertEqual(hung[1]["symbol"], "FARUSDT")
+        self.assertEqual(hung[2]["symbol"], "UNKUSDT")
+
     def test_news_kill_not_rumor(self):
         from mexc_bot.machine.logic import news_kill
 

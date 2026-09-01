@@ -15,6 +15,25 @@ from .settings import (
     tf_slow_rank,
 )
 
+def ad_gap_frac(last: Any, ad_bottom: Any) -> Optional[float]:
+    """Relative distance of last to AD bottom. Smaller = closer / through.
+
+    gap/last so a $0.01 coin and an $80 stock compare. At or below bottom → 0.
+    None = cannot rank (missing last or bottom).
+    """
+    try:
+        last_f = float(last)
+        bot = float(ad_bottom)
+    except (TypeError, ValueError):
+        return None
+    if last_f <= 0:
+        return None
+    gap = last_f - bot
+    if gap <= 0:
+        return 0.0
+    return gap / last_f
+
+
 _RUMOR = re.compile(
     r"\b(rumou?r(s)?|allegedly|hearsay|gossip|unconfirmed chatter)\b",
     re.I,
