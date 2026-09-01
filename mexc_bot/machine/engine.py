@@ -724,7 +724,9 @@ def rank_plans(store: MachineStore, user_id: int) -> List[Dict[str, Any]]:
     def _rest_key(p: Dict[str, Any]):
         g = p.get("ad_gap_frac")
         unknown = g is None
+        killed = str(p.get("status") or "") in ("killed", "blocked")
         return (
+            1 if killed else 0,
             1 if unknown else 0,
             9e9 if unknown else float(g),
             -float(p.get("rank_score") or 0),

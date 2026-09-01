@@ -372,7 +372,11 @@
   }
 
   function sortByAdBottom(rows) {
+    const dead = (p) => p && (p.status === "killed" || p.status === "blocked");
     return rows.slice().sort((a, b) => {
+      const da = dead(a) ? 1 : 0;
+      const db = dead(b) ? 1 : 0;
+      if (da !== db) return da - db;
       const ga = adGapFrac(a);
       const gb = adGapFrac(b);
       if (ga == null && gb == null)

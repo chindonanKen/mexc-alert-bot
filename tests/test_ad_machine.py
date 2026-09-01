@@ -87,6 +87,21 @@ class TestMachineLogic(unittest.TestCase):
                         "layers_json": "[]",
                         "zones_json": "[]",
                     },
+                    {
+                        "id": 4,
+                        "user_id": 1,
+                        "symbol": "AXTISTOCK_USDT",
+                        "display_name": "AXTI",
+                        "market": "futures",
+                        "ad_status": "known",
+                        "ad_top": 12.0,
+                        "ad_bottom": 10.0,
+                        "last_price": 10.05,
+                        "status": "killed",
+                        "live": 0,
+                        "layers_json": "[]",
+                        "zones_json": "[]",
+                    },
                 ]
 
             def list_kb(self, user_id, limit=200):
@@ -102,6 +117,7 @@ class TestMachineLogic(unittest.TestCase):
         self.assertEqual(hung[0]["symbol"], "NEARUSDT")
         self.assertEqual(hung[1]["symbol"], "FARUSDT")
         self.assertEqual(hung[2]["symbol"], "UNKUSDT")
+        self.assertEqual(hung[-1]["symbol"], "AXTISTOCK_USDT")
 
     def test_news_kill_not_rumor(self):
         from mexc_bot.machine.logic import news_kill
