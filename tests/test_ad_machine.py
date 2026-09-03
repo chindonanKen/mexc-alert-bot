@@ -372,6 +372,7 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         self.assertEqual(c.get("/api/machine/plans").status_code, 404)
         self.assertEqual(c.get("/api/machine/closes").status_code, 404)
         self.assertEqual(c.get("/api/machine/ranks").status_code, 404)
+        self.assertEqual(c.get("/api/machine/trades?symbol=BTCUSDT").status_code, 404)
         self.assertEqual(c.post("/api/machine/plans/1/recut", json={}).status_code, 404)
         self.assertEqual(c.post("/api/machine/names", json={"symbol": "X"}).status_code, 404)
         self.assertEqual(c.get("/machine").status_code, 404)
@@ -2287,6 +2288,9 @@ class TestMachinePaperReact(unittest.TestCase):
         )
         self.assertTrue(snap.get("trade_dump") or snap.get("fast_dump_volume"))
         self.assertAlmostEqual(float(snap["last_price"]), 0.14)
+        self.assertEqual(snap.get("faster_tf"), "trades")
+        self.assertAlmostEqual(float(snap.get("vol_usd_fast") or 0), 9080.0)
+        self.assertNotIn("1m", snap.get("reds") or {})
 
     def test_hung_last_is_print_not_15m_close(self):
         from mexc_bot.machine.tape import snapshot_for_plan
@@ -2311,6 +2315,9 @@ class TestMachinePaperReact(unittest.TestCase):
             trades=[{"ts": now, "price": 0.00002217, "quote": 12}],
         )
         self.assertAlmostEqual(float(snap["last_price"]), 0.00002217)
+        self.assertEqual(snap.get("faster_tf"), "trades")
+        self.assertAlmostEqual(float(snap.get("vol_usd_fast") or 0), 12.0)
+        self.assertNotIn("1m", snap.get("reds") or {})
         snap2 = snapshot_for_plan(
             plan, ticker=None, bars=bars_15m, bars_1m=bars_1m, trades=[]
         )
@@ -2438,6 +2445,81 @@ class TestMachinePaperReact(unittest.TestCase):
         self.assertIn("1d", called)
         ansem = next(p for p in out["plans"] if p["symbol"] == "ANSEMUSDT")
         self.assertAlmostEqual(float(ansem["last_price"]), 0.00002217)
+        gate = ansem.get("gate") or {}
+        self.assertEqual(gate.get("faster_tf"), "trades")
+        self.assertNotIn(gate.get("faster_tf"), ("15m", "5m", "1m"))
+
+    def test_machine_trades_json_not_html(self):
+        from mexc_bot.machine import tape as tp
+
+        orig = tp.fetch_recent_trades
+        tp.fetch_recent_trades = lambda *a, **k: [
+            {
+                "ts": 1_700_000_013.0,
+                "price": 0.00002217,
+                "qty": 1000.0,
+                "quote": 0.02217,
+            }
+        ]
+        try:
+            c = self._client()
+            missing = c.get("/api/machine/trades")
+            self.assertEqual(missing.status_code, 400)
+            r = c.get("/api/machine/trades?symbol=ASTEROID")
+        finally:
+            tp.fetch_recent_trades = orig
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("application/json", r.headers.get("content-type", ""))
+        self.assertNotIn("<html", r.text.lower())
+        body = r.json()
+        self.assertTrue(body.get("ok"))
+        self.assertFalse(body.get("live_orders_sent"))
+        self.assertFalse(body.get("live_orders_allowed"))
+        self.assertTrue(body.get("trades"))
+        row = body["trades"][0]
+        self.assertIn("PHT", str(row.get("manila") or ""))
+        self.assertAlmostEqual(float(row["price"]), 0.00002217)
+        self.assertAlmostEqual(float(row["qty"]), 1000.0)
+        self.assertAlmostEqual(float(row["quote"]), 0.02217)
+
+    def test_1d_print_dump_buys_layer_not_waiting_on_play_tf(self):
+        c = self._client()
+        import time as _t
+
+        now = _t.time()
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.16,
+                        "print_low": 0.14,
+                        "reds": {"1d": 1},
+                        "faster_tf": "trades",
+                        "trade_dump": True,
+                        "fast_dump_volume": True,
+                        "vol_usd_fast": 9000,
+                        "vol_spike": True,
+                    }
+                },
+                "now": now,
+            },
+        )
+        self.assertEqual(ev.status_code, 200, ev.text)
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        gate = ansem.get("gate") or {}
+        self.assertEqual(gate.get("faster_tf"), "trades")
+        self.assertNotIn(gate.get("faster_tf"), ("15m", "5m", "1m"))
+        self.assertTrue(ansem.get("live") or ansem.get("filled_entry"))
+        self.assertFalse(ev.json().get("live_orders_sent"))
+        self.assertFalse(ev.json().get("live_orders_allowed"))
+        log = c.get("/api/machine/plans").json()["log"]
+        buys = [
+            r
+            for r in log
+            if r.get("symbol") == "ANSEMUSDT" and r.get("action") == "paper-buy"
+        ]
+        self.assertTrue(buys, log)
 
     def test_same_add_why_logs_once(self):
         c = self._client()

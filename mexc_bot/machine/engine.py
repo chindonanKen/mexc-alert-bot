@@ -515,6 +515,7 @@ def evaluate(
         "actions": actions,
         "plans": rank_plans(store, user_id),
         "live_orders_sent": False,
+        "live_orders_allowed": False,
     }
 
 
@@ -667,9 +668,7 @@ def _evaluate_plan(
         "kenneth_override": False,
         "play_tf": play_tf,
         "faster_tf_reds": faster_log,
-        "faster_tf": "1m"
-        if "1m" in reds_map
-        else faster_tf_for(play_tf),
+        "faster_tf": _gate_faster_tf(plan, snap, play_tf),
         "rule_id": verdict.get("rule_id"),
         "rule_ids": verdict.get("rule_ids"),
         "action": verdict.get("action"),
@@ -804,11 +803,19 @@ def _evaluate_plan(
                     "plan_id": plan["id"],
                     **why,
                 }
+        take_px = last_price
+        pl = snap.get("print_low")
+        if pl is not None:
+            try:
+                if take_px is None or float(pl) < float(take_px):
+                    take_px = float(pl)
+            except (TypeError, ValueError):
+                pass
         filled = _paper_take(
             store,
             user_id,
             plan,
-            last_price,
+            take_px,
             verdict=verdict,
             facts=facts,
             now=now,
@@ -824,7 +831,7 @@ def _evaluate_plan(
             plan,
             verdict,
             now=now,
-            last=last_price,
+            last=take_px if filled else last_price,
             facts=facts,
             extra={"filled": filled},
         )
@@ -958,6 +965,20 @@ def _evaluate_plan(
         "decision_reason": mapped,
         "rule_ids": verdict.get("rule_ids"),
     }
+
+
+def _gate_faster_tf(
+    plan: Dict[str, Any], snap: Dict[str, Any], play_tf: Optional[str]
+) -> str:
+    """Hung/live fast tape is last trades. Never 15m/5m on a 1d/4h play."""
+    play = str(play_tf or "").strip()
+    hung = (plan.get("ad_status") == "known") or plan.get("live")
+    if snap.get("faster_tf") == "trades" or hung:
+        return "trades"
+    ft = faster_tf_for(play_tf)
+    if play in {"1d", "4h", "8h", "12h", "1w"} and ft in {"15m", "5m", "1m"}:
+        return "trades"
+    return ft
 
 
 def _tape_worthy(action: str, facts: Dict[str, Any], filled_any: bool) -> bool:

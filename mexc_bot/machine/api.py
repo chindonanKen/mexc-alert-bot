@@ -252,6 +252,47 @@ def post_layers(plan_id: int, body: LayersBody, _: bool = Depends(require_auth))
     }
 
 
+@router.get("/trades")
+def get_trades(
+    symbol: Optional[str] = None,
+    market: Optional[str] = None,
+    limit: int = 80,
+    _: bool = Depends(require_auth),
+):
+    """Last MEXC prints. JSON. Not HTML. Paper book only."""
+    if not symbol or not str(symbol).strip():
+        raise HTTPException(400, "symbol required")
+    from .tape import fetch_recent_trades, public_trade_rows, spot_trade_symbol
+
+    store = _store()
+    uid = _uid()
+    raw = str(symbol).strip().upper()
+    mkt = str(market or "spot").lower()
+    pair = raw
+    plan = store.get_plan_by_symbol(uid, pair, mkt)
+    if not plan:
+        alt = spot_trade_symbol(raw)
+        plan = store.get_plan_by_symbol(uid, alt, mkt)
+    if not plan:
+        plan = store.get_plan_by_symbol(uid, raw, "futures") or store.get_plan_by_symbol(
+            uid, spot_trade_symbol(raw), "futures"
+        )
+    if plan:
+        mkt = str(plan.get("market") or mkt)
+        pair = str(plan.get("symbol") or pair)
+    elif mkt != "futures":
+        pair = spot_trade_symbol(raw)
+    rows = fetch_recent_trades(mkt, pair, limit=min(max(int(limit), 1), 200))
+    return {
+        "ok": True,
+        "symbol": pair,
+        "market": mkt,
+        "trades": public_trade_rows(rows),
+        "live_orders_sent": False,
+        "live_orders_allowed": False,
+    }
+
+
 @router.get("/log")
 def get_log(
     plan_id: Optional[int] = None,

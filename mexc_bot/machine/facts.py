@@ -247,7 +247,7 @@ def facts_from(
             break
 
     vol_fast = _f(snap.get("vol_usd_fast"))
-    if vol_fast is None:
+    if vol_fast is None and snap.get("faster_tf") != "trades":
         vol_fast = dollar_volume(snap.get("bars_1m") or snap.get("fast_bars"))
     vol_play = _f(snap.get("vol_usd_play"))
     if vol_play is None:

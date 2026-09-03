@@ -21,16 +21,30 @@ def default_process_pack() -> Dict[str, Any]:
 
 
 def load_process_pack(store=None) -> Dict[str, Any]:
-    """Runtime pack wins when a recut version exists. Else git file."""
+    """Runtime pack wins when its version is >= the git file. Else git file."""
+    file_pack = default_process_pack()
+    file_ver = file_pack.get("version")
+    try:
+        file_ver_n = int(file_ver) if file_ver is not None else None
+    except (TypeError, ValueError):
+        file_ver_n = None
     if store is not None and hasattr(store, "latest_process_pack"):
         row = store.latest_process_pack()
+        blob = None
         if row and isinstance(row.get("json"), dict) and row["json"].get("rules"):
-            return row["json"]
-        if row and isinstance(row.get("pack_json"), str):
+            blob = row["json"]
+        elif row and isinstance(row.get("pack_json"), str):
             try:
-                blob = json.loads(row["pack_json"])
+                parsed = json.loads(row["pack_json"])
             except json.JSONDecodeError:
-                blob = None
-            if isinstance(blob, dict) and blob.get("rules"):
+                parsed = None
+            if isinstance(parsed, dict) and parsed.get("rules"):
+                blob = parsed
+        if blob:
+            try:
+                db_ver = int(blob.get("version") or row.get("version") or 0)
+            except (TypeError, ValueError):
+                db_ver = 0
+            if file_ver_n is None or db_ver >= file_ver_n:
                 return blob
-    return default_process_pack()
+    return file_pack

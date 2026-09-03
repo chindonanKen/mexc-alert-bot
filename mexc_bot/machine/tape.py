@@ -111,6 +111,26 @@ def official_reds(bars: Optional[Iterable[Dict[str, Any]]]) -> Optional[int]:
 
 _hung_last: Dict[str, float] = {}
 _trade_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+PRINT_WINDOW = 15.0
+_VOL_SPIKE = 1.2
+
+
+def spot_trade_symbol(symbol: str) -> str:
+    """MEXC /api/v3/trades wants BTCUSDT. Do not double-append USDT."""
+    s = str(symbol or "").upper().replace("-", "").replace("_", "")
+    if not s:
+        return s
+    if s.endswith("USDT"):
+        return s
+    return s + "USDT"
+
+
+def _qty(raw: Any) -> Optional[float]:
+    try:
+        x = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return x if x > 0 else None
 
 
 def fetch_recent_trades(
@@ -119,7 +139,7 @@ def fetch_recent_trades(
     *,
     limit: int = 80,
 ) -> List[Dict[str, Any]]:
-    """Public last trades. Soft-fail → []. Times in seconds."""
+    """Public last trades. Dollar size = price × qty. Soft-fail → []."""
     key = f"{market}|{symbol}"
     now = time.time()
     hit = _trade_cache.get(key)
@@ -134,57 +154,97 @@ def fetch_recent_trades(
             data = resp.json() if resp.status_code == 200 else {}
             rows = data.get("data") if isinstance(data, dict) else data
             for row in rows or []:
-                if not isinstance(row, dict):
-                    continue
-                px = _as_price(row.get("p") if row.get("p") is not None else row.get("price"))
-                ts = row.get("T") if row.get("T") is not None else row.get("t")
-                qty = row.get("v") if row.get("v") is not None else row.get("volume")
-                if px is None:
-                    continue
-                try:
-                    tsec = float(ts) / (1000.0 if float(ts) > 1e12 else 1.0)
-                    q = float(qty or 0) * px
-                except (TypeError, ValueError):
-                    continue
-                out.append({"ts": tsec, "price": px, "quote": q})
+                parsed = _parse_trade_row(row, futures=True)
+                if parsed:
+                    out.append(parsed)
         else:
-            url = f"{cli.spot_base}/aggTrades"
+            pair = spot_trade_symbol(symbol)
+            rows: Any = []
+            url = f"{cli.spot_base}/trades"
             resp = cli.session.get(
                 url,
-                params={"symbol": str(symbol).upper(), "limit": max(int(limit), 200)},
+                params={"symbol": pair, "limit": int(limit)},
                 timeout=1.0,
             )
-            rows = resp.json() if resp.status_code == 200 else []
-            if not isinstance(rows, list):
-                url = f"{cli.spot_base}/trades"
+            if resp.status_code == 200:
+                rows = resp.json()
+            if not isinstance(rows, list) or not rows:
+                url = f"{cli.spot_base}/aggTrades"
                 resp = cli.session.get(
                     url,
-                    params={"symbol": str(symbol).upper(), "limit": int(limit)},
+                    params={"symbol": pair, "limit": max(int(limit), 200)},
                     timeout=1.0,
                 )
                 rows = resp.json() if resp.status_code == 200 else []
             for row in rows or []:
-                if not isinstance(row, dict):
-                    continue
-                px = _as_price(
-                    row.get("p") if row.get("p") is not None else row.get("price")
-                )
-                if px is None:
-                    continue
-                try:
-                    raw_ts = row.get("T") if row.get("T") is not None else row.get("time")
-                    tsec = float(raw_ts or 0) / (1000.0 if float(raw_ts or 0) > 1e12 else 1.0)
-                    if row.get("quoteQty") is not None:
-                        q = float(row.get("quoteQty") or 0)
-                    else:
-                        q = float(row.get("q") if row.get("q") is not None else row.get("qty") or 0) * px
-                except (TypeError, ValueError):
-                    continue
-                out.append({"ts": tsec, "price": px, "quote": q})
+                parsed = _parse_trade_row(row, futures=False)
+                if parsed:
+                    out.append(parsed)
     except Exception as e:
         logger.debug("machine trades %s %s: %s", market, symbol, e)
         out = []
     _trade_cache[key] = (now, out)
+    return out
+
+
+def _parse_trade_row(row: Any, *, futures: bool) -> Optional[Dict[str, Any]]:
+    if not isinstance(row, dict):
+        return None
+    px = _as_price(row.get("p") if row.get("p") is not None else row.get("price"))
+    if px is None:
+        return None
+    qty = _qty(
+        row.get("qty")
+        if row.get("qty") is not None
+        else row.get("q")
+        if row.get("q") is not None
+        else row.get("v")
+        if row.get("v") is not None
+        else row.get("volume")
+    )
+    try:
+        raw_ts = (
+            row.get("T")
+            if row.get("T") is not None
+            else row.get("t")
+            if row.get("t") is not None
+            else row.get("time")
+        )
+        tsec = float(raw_ts or 0) / (1000.0 if float(raw_ts or 0) > 1e12 else 1.0)
+    except (TypeError, ValueError):
+        return None
+    quote = (qty * px) if qty is not None else None
+    if quote is None:
+        try:
+            quote = float(row.get("quoteQty") or 0) or None
+        except (TypeError, ValueError):
+            quote = None
+    if quote is None:
+        quote = 0.0
+    if qty is None and quote and px:
+        qty = quote / px
+    return {"ts": tsec, "price": px, "qty": qty, "quote": quote}
+
+
+def public_trade_rows(
+    trades: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """JSON feed: Manila time, price, qty, quote dollars."""
+    from .hang import manila_label
+
+    rows = [t for t in (trades or []) if isinstance(t, dict) and t.get("price") is not None]
+    rows.sort(key=lambda t: float(t.get("ts") or 0), reverse=True)
+    out: List[Dict[str, Any]] = []
+    for t in rows:
+        out.append(
+            {
+                "manila": manila_label(t.get("ts"), seconds=True),
+                "ts": t.get("ts"),
+                "price": t.get("price"),
+                "qty": t.get("qty"),
+                "quote": t.get("quote"),
+            }
+        )
     return out
 
 
@@ -195,7 +255,8 @@ def hung_seconds_dump(
     trades: Sequence[Dict[str, Any]],
     *,
     now: Optional[float] = None,
-    window: float = 2.0,
+    window: float = PRINT_WINDOW,
+    habit_usd: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Dump through a hung layer on recent prints. Not a 1m close."""
     ts = float(now if now is not None else time.time())
@@ -220,11 +281,19 @@ def hung_seconds_dump(
         elif window < age <= 60:
             older += q
     spike = False
-    if older > 0:
-        spike = vol >= 1.2 * (older / 52.0) * window
-    elif vol > 0 and last is not None and prev is not None and last < prev:
+    if habit_usd is not None:
+        try:
+            h = float(habit_usd)
+        except (TypeError, ValueError):
+            h = 0.0
+        if h > 0 and vol > 0:
+            scaled = h * (window / 60.0)
+            spike = vol >= _VOL_SPIKE * scaled
+    if not spike and older > 0:
+        spike = vol >= _VOL_SPIKE * (older / 52.0) * window
+    elif not spike and vol > 0 and last is not None and prev is not None and last < prev:
         spike = True
-    elif vol > 0 and recent_px and max(recent_px) > min(recent_px):
+    elif not spike and vol > 0 and recent_px and max(recent_px) > min(recent_px):
         spike = True
     through = False
     hi = max(recent_px) if recent_px else None
@@ -234,7 +303,7 @@ def hung_seconds_dump(
         hi = float(last) if hi is None else max(float(hi), float(last))
     if prev is not None:
         hi = float(prev) if hi is None else max(float(hi), float(prev))
-    if hi is not None and lo is not None:
+    if lo is not None:
         for layer in layers or []:
             if str(layer.get("band") or "ad") != "ad":
                 continue
@@ -242,7 +311,7 @@ def hung_seconds_dump(
                 lp = float(layer["price"])
             except (TypeError, ValueError, KeyError):
                 continue
-            if float(hi) > lp >= float(lo):
+            if float(lo) <= lp:
                 through = True
                 break
     return {
@@ -252,6 +321,8 @@ def hung_seconds_dump(
         "fast_dump": bool(spike and through),
         "last": last,
         "prev": prev,
+        "lo": lo,
+        "hi": hi,
     }
 
 
@@ -379,10 +450,11 @@ def snapshot_for_plan(
     trades: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build one evaluate snapshot from official tape pieces only."""
-    from .facts import dollar_volume, faster_tf_for
+    from .facts import dollar_volume, faster_tf_for, play_from_row, typical_dollar_volume
 
     tf = plan.get("tf") or "15m"
     last = None
+
     if trades:
         newest = max(
             (t for t in trades if isinstance(t, dict) and t.get("price") is not None),
@@ -408,12 +480,22 @@ def snapshot_for_plan(
                 layers = _json.loads(plan.get("layers_json") or "[]")
             except (TypeError, ValueError):
                 layers = []
+        play = play_from_row(plan)
+        habit = play.get("volume_habit_usd")
+        if habit is None:
+            habit = typical_dollar_volume(bars_1m)
         dump = hung_seconds_dump(
-            str(plan.get("symbol") or ""), last, layers or [], trades
+            str(plan.get("symbol") or ""),
+            last,
+            layers or [],
+            trades,
+            habit_usd=habit,
         )
         snap["trade_vol_usd"] = dump.get("vol_usd")
-        if dump.get("vol_usd"):
-            snap["vol_usd_fast"] = dump.get("vol_usd")
+        snap["vol_usd_fast"] = dump.get("vol_usd")
+        snap["print_low"] = dump.get("lo")
+        snap["print_high"] = dump.get("hi")
+        snap["faster_tf"] = "trades"
         if dump.get("fast_dump"):
             snap["trade_dump"] = True
             snap["fast_dump_volume"] = True
@@ -428,25 +510,24 @@ def snapshot_for_plan(
         reds_map[str(tf)] = reds
     if bars_1m:
         snap["bars_1m"] = list(bars_1m)
-        vol_fast = dollar_volume(bars_1m)
-        if vol_fast is not None and not snap.get("trade_dump"):
-            snap["vol_usd_fast"] = vol_fast
-        r1 = official_reds(bars_1m)
-        if r1 is not None:
-            reds_map["1m"] = r1
+        if snap.get("vol_usd_fast") is None:
+            vol_fast = dollar_volume(bars_1m)
+            if vol_fast is not None:
+                snap["vol_usd_fast"] = vol_fast
         if not snap.get("volume") or snap.get("volume") == "unknown":
             snap["volume"] = volume_label(bars_1m)
     vn = snap.get("vol_usd_fast") or snap.get("vol_usd_play")
     if vn is None:
-        vn = official_volume_n(bars_1m or bars)
+        vn = official_volume_n(bars)
     if vn is not None:
         snap["volume_n"] = vn
     if faster_bars:
         ftf = str(faster_tf or faster_tf_for(tf))
-        snap["faster_bars"] = list(faster_bars)
-        fr = official_reds(faster_bars)
-        if fr is not None:
-            reds_map[ftf] = fr
+        if ftf not in ("15m", "5m"):
+            snap["faster_bars"] = list(faster_bars)
+            fr = official_reds(faster_bars)
+            if fr is not None:
+                reds_map[ftf] = fr
     if reds_map:
         snap["reds"] = reds_map
     if news:
@@ -457,8 +538,6 @@ def snapshot_for_plan(
         snap["panic_board"] = True
     if board:
         snap["board"] = dict(board)
-    from .facts import play_from_row
-
     play = play_from_row(plan)
     if last is not None:
         for raw in play.get("unmet_bases") or []:

@@ -192,12 +192,13 @@ def poll_once(
         ftf = None
         news = None
         if hung:
-            # Prints as they happen + 1m forming. Never a 15m close as the hung tape.
+            # Fast tape = last trades. 1m klines are backup only.
             trades = fetch_recent_trades(plan["market"], plan["symbol"])
-            bars_1m = fetch_official_klines(
-                plan["market"], plan["symbol"], "1m", client=kline_client
-            )
-            ftf = "1m"
+            ftf = "trades"
+            if fetch_klines or not trades:
+                bars_1m = fetch_official_klines(
+                    plan["market"], plan["symbol"], "1m", client=kline_client
+                )
         if fetch_klines:
             tf = plan.get("tf")
             if tf:

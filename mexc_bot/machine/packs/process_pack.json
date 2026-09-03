@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "name": "ad-process",
   "rules": [
     {
@@ -70,7 +70,7 @@
       "id": "path.sit_reds",
       "family": "path",
       "priority": 4,
-      "when": ["written_plan", "not_at_ad", "not_live", "first_or_second_red", "not_board_panic"],
+      "when": ["written_plan", "not_at_ad", "not_live", "first_or_second_red", "not_board_panic", "not_fast_dump_volume"],
       "action": "sit-out",
       "why": "First or second red on this TF, sit out on a normal dump."
     },

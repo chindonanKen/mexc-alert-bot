@@ -18,7 +18,7 @@ from .settings import LOCKED_TEACHES, MANILA_TZ
 _MANILA = ZoneInfo(MANILA_TZ)
 
 
-def manila_label(ts: Optional[float]) -> Optional[str]:
+def manila_label(ts: Optional[float], *, seconds: bool = False) -> Optional[str]:
     if ts is None:
         return None
     try:
@@ -30,7 +30,8 @@ def manila_label(ts: Optional[float]) -> Optional[str]:
     if t <= 0:
         return None
     dt = datetime.fromtimestamp(t, tz=_MANILA)
-    return dt.strftime("%Y-%m-%d %H:%M PHT")
+    fmt = "%Y-%m-%d %H:%M:%S PHT" if seconds else "%Y-%m-%d %H:%M PHT"
+    return dt.strftime(fmt)
 
 
 def match_named_bar(
