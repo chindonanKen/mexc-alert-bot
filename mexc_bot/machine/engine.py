@@ -80,6 +80,41 @@ def purge_sit_not_at_line(store: MachineStore, user_id: int) -> int:
     return len(bad)
 
 
+def last_reached_layer(last: Any, layer: Any) -> bool:
+    try:
+        return float(last) <= float(layer) * (1.0 + 1e-9)
+    except (TypeError, ValueError):
+        return False
+
+
+def purge_unreached_buys(store: MachineStore, user_id: int) -> int:
+    """Delete paper-buys (and wait-as-buy theater) where last never traded the layer."""
+    bad: List[int] = []
+    rows = store.list_log(
+        user_id, actions=("paper-buy", "add-panic", "wait"), limit=8000
+    )
+    for r in rows:
+        last = r.get("last_price")
+        layer = r.get("filled_price")
+        if layer is None:
+            layer = r.get("intended_price")
+        a = str(r.get("action") or "")
+        if a == "wait" and r.get("intended_price") is not None:
+            try:
+                bad.append(int(r["id"]))
+            except (TypeError, ValueError, KeyError):
+                pass
+            continue
+        if a in ("paper-buy", "add-panic") and not last_reached_layer(last, layer):
+            try:
+                bad.append(int(r["id"]))
+            except (TypeError, ValueError, KeyError):
+                pass
+    if bad:
+        store.delete_log_ids(user_id, bad)
+    return len(bad)
+
+
 def purge_empty_fills(store: MachineStore, user_id: int) -> int:
     """Remove buy/sell/add rows that never got a filled price. Those were not fills."""
     rows = store.list_log(user_id, actions=_FILLISH, limit=8000)
@@ -106,6 +141,7 @@ def public_tape_rows(
     """Tape the owner asked for. Fills are fills. No wait. No off-line sit."""
     purge_sit_not_at_line(store, user_id)
     purge_empty_fills(store, user_id)
+    purge_unreached_buys(store, user_id)
     plans = {int(p["id"]): p for p in store.list_plans(user_id)}
     rows = store.list_log(
         user_id,
@@ -1208,6 +1244,7 @@ def _write_fill_rows(
 ) -> None:
     """One tape row per real fill. Intended, filled, size; PnL only on a close."""
     purge_empty_fills(store, user_id)
+    purge_unreached_buys(store, user_id)
     for row in filled:
         if not isinstance(row, dict):
             continue
@@ -1217,6 +1254,12 @@ def _write_fill_rows(
         except (TypeError, ValueError):
             continue
         if filled_px is None or intended is None:
+            continue
+        if (
+            action in ("paper-buy", "add-panic")
+            and last is not None
+            and not last_reached_layer(last, intended)
+        ):
             continue
         size_pct = row.get("size_pct")
         if size_pct is None:
@@ -1381,7 +1424,7 @@ def _paper_take(
                 pass
             take = tagged
 
-    if px is not None and rule != "atad.take":
+    if px is not None:
         take = [L for L in take if px <= float(L.get("price") or 0)]
     if rule == "atad.take" and px is not None:
         take = [L for L in take if facts.get("at_ad")]
@@ -1408,9 +1451,8 @@ def _paper_take(
         if fill_at is None:
             continue
         line = float(order.get("price"))
-        in_band = bool(facts.get("at_ad"))
-        marketable = fill_at <= line or (rule == "atad.take" and in_band)
-        if not marketable:
+        # A paper buy only counts when last actually trades at that layer.
+        if fill_at > line:
             continue
         usd = float(order.get("usd") or layer.get("usd") or 0) * scale
         store.fill_order(user_id, int(order["id"]), filled_price=fill_at)
@@ -1789,20 +1831,25 @@ def public_plan(store: MachineStore, row: Optional[Dict[str, Any]]) -> Dict[str,
         item["next"] = bool(next_idx is not None and idx == next_idx)
         public_layers.append(item)
     intended_entry = None
+    last_px = row.get("last_price")
     if working:
         w0 = working[0]
-        intended_entry = {
-            "price": w0.get("intended_price") or w0.get("price"),
-            "usd": w0.get("usd"),
-            "idx": w0.get("layer_idx"),
-        }
+        layer_px = w0.get("intended_price") or w0.get("price")
+        if last_px is None or last_reached_layer(last_px, layer_px):
+            intended_entry = {
+                "price": layer_px,
+                "usd": w0.get("usd"),
+                "idx": w0.get("layer_idx"),
+            }
     elif known and layers:
         target = at_ad_layer(layers, row.get("ad_bottom")) or layers[0]
-        intended_entry = {
-            "price": target.get("price"),
-            "usd": target.get("usd"),
-            "idx": target.get("idx"),
-        }
+        layer_px = target.get("price")
+        if last_px is None or last_reached_layer(last_px, layer_px):
+            intended_entry = {
+                "price": layer_px,
+                "usd": target.get("usd"),
+                "idx": target.get("idx"),
+            }
     filled_entry = None
     if filled_orders:
         last_fill = filled_orders[-1]

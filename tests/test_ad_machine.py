@@ -1995,12 +1995,52 @@ class TestMachinePaperReact(unittest.TestCase):
         ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
         self.assertFalse(ansem["live"])
         self.assertFalse(ansem.get("filled_entry"))
+        self.assertFalse(ansem.get("intended_entry"))
         log = c.get("/api/machine/plans").json()["log"]
         self.assertFalse(
             any(
                 str(r.get("action") or "") == "paper-buy"
                 and str(r.get("symbol") or "") == "ANSEMUSDT"
                 for r in log
+            )
+        )
+
+    def test_unreached_buy_rows_are_deleted(self):
+        from mexc_bot.machine.engine import public_tape_rows, purge_unreached_buys
+        from mexc_bot.machine.store import MachineStore
+        from mexc_bot.machine.hang import manila_label
+        import time as _t
+
+        store = MachineStore(self.db)
+        uid = 8630949601
+        c = self._client()
+        plans = c.get("/api/machine/plans").json()["plans"]
+        ansem = next(p for p in plans if p["symbol"] == "ANSEMUSDT")
+        now = _t.time()
+        for _ in range(8):
+            store.insert_log(
+                uid,
+                {
+                    "plan_id": ansem["id"],
+                    "ts": now,
+                    "manila": manila_label(now),
+                    "symbol": "ANSEMUSDT",
+                    "action": "paper-buy",
+                    "last_price": 0.00596,
+                    "intended_price": 0.004404,
+                    "filled_price": 0.004404,
+                    "size_pct": 5,
+                    "why": "ghost unreached",
+                },
+            )
+        n = purge_unreached_buys(store, uid)
+        self.assertGreaterEqual(n, 8)
+        tape = public_tape_rows(store, uid, limit=40)
+        self.assertFalse(
+            any(
+                r.get("action") == "paper-buy"
+                and r.get("intended_price") == 0.004404
+                for r in tape
             )
         )
 
