@@ -1083,6 +1083,10 @@ def _write_log(
     )
     if not _tape_worthy(action, facts, filled_any):
         return
+    if action in _FILLISH and (
+        intended is None or filled_px is None or size_pct is None
+    ):
+        return
     prev = store.list_log(
         user_id, plan_id=int(plan["id"]), actions=(action,), limit=1
     )
@@ -1428,9 +1432,10 @@ def _paper_sell(
             {
                 "id": row.get("id") if row else order.get("id"),
                 "idx": order.get("layer_idx"),
-                "price": px,
+                "price": order.get("intended_price") or order.get("price") or px,
                 "filled_price": px,
                 "usd": take_usd,
+                "size_pct": order.get("size_pct"),
                 "side": "sell",
                 "partial": take_usd < usd - 1e-9,
             }

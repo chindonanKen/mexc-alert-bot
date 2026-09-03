@@ -2112,6 +2112,31 @@ class TestMachinePaperReact(unittest.TestCase):
         self.assertIsNotNone(row.get("filled_price"))
         self.assertAlmostEqual(float(row["filled_price"]), 0.145, places=5)
         self.assertIsNotNone(row.get("size_pct"))
+        sold = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.18,
+                        "reds": {"1h": 0},
+                        "bounced": True,
+                        "bounce_strong": True,
+                    }
+                }
+            },
+        )
+        slog = c.get("/api/machine/plans").json()["log"]
+        sells = [
+            r
+            for r in slog
+            if r.get("action") == "paper-sell" and r.get("symbol") == "ANSEMUSDT"
+        ]
+        self.assertTrue(sells, sold.json())
+        srow = sells[0]
+        self.assertIsNotNone(srow.get("intended_price"))
+        self.assertIsNotNone(srow.get("filled_price"))
+        self.assertIsNotNone(srow.get("size_pct"))
+        self.assertIsNotNone(srow.get("money_pnl"))
 
     def test_hung_poll_does_not_need_1m_bars_for_dump(self):
         from mexc_bot.machine.tape import snapshot_for_plan
