@@ -1942,6 +1942,26 @@ class TestMachinePaperReact(unittest.TestCase):
         )
         self.assertFalse(facts.get("first_or_second_red"))
 
+    def test_fast_dump_far_from_ad_does_not_occupy_live_slot(self):
+        c = self._client()
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.30,
+                        "reds": {"1h": 4},
+                        "heat_breadth": 1,
+                        "fast_dump_volume": True,
+                        "vol_spike": True,
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertFalse(ansem["live"])
+        self.assertFalse(ansem.get("filled_entry"))
+
 
 if __name__ == "__main__":
     unittest.main()

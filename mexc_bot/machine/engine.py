@@ -572,6 +572,26 @@ def _evaluate_plan(
 
     action = str(verdict.get("action") or "wait")
 
+    if plan.get("live"):
+        bag = [
+            o
+            for o in store.list_orders(user_id, int(plan["id"]), status="filled")
+            if o.get("side") != "sell"
+        ]
+        far = not facts.get("at_ad") and not facts.get("past_b") and not facts.get("past_panic")
+        if not bag and far:
+            store.cancel_working(user_id, int(plan["id"]))
+            store.patch_plan(
+                user_id,
+                int(plan["id"]),
+                live=False,
+                status="watch",
+                resting=False,
+                allocated_usd=0,
+                armed_at=None,
+            )
+            plan = store.get_plan(user_id, int(plan["id"]))
+
     if action == "flatten-news" or kill:
         why = {"decision": why_text, "decision_reason": "news"}
         store.patch_plan(user_id, int(plan["id"]), **why)
@@ -1034,9 +1054,9 @@ def _paper_take(
             except (TypeError, ValueError):
                 pass
             take = tagged
-        elif ad:
-            take = [ad[0]]
 
+    if rule != "atad.take" and px is not None:
+        take = [L for L in take if px <= float(L.get("price") or 0)]
     if not take:
         return []
 
