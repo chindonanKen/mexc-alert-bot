@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .facts import facts_from, faster_tf_for
+from .facts import bars_ever_met, facts_from, faster_tf_for
 from .hang import hang_ad, manila_label, official_volume_n, volume_label
 from .interpreter import interpret, why_sentence
 from .packs import load_process_pack
@@ -32,6 +32,19 @@ from .settings import (
     is_seed,
 )
 from .store import MachineStore, parse_json
+
+TAPE_ACTIONS = (
+    "paper-buy",
+    "paper-sell",
+    "add-panic",
+    "flatten-news",
+    "sit-out",
+    "grind-on",
+    "grind-off",
+    "panic-on",
+    "panic-off",
+)
+_board_prev: Dict[str, Any] = {}
 
 
 def seed_plans(
@@ -537,7 +550,8 @@ def _evaluate_plan(
         "rule_id": verdict.get("rule_id"),
         "rule_ids": verdict.get("rule_ids"),
         "action": verdict.get("action"),
-        "met": bool(facts.get("met")),
+        "met": bool(plan.get("met"))
+        or bars_ever_met(plan, snap, last=last_price),
         "process_version": pack.get("version"),
     }
     tape_reds = (
@@ -553,7 +567,9 @@ def _evaluate_plan(
         "volume_n": volume_n,
         "news": (kill or {}).get("class") if kill else None,
         "gate": gate,
-        "met": 1 if facts.get("met") else 0,
+        "met": 1
+        if (plan.get("met") or bars_ever_met(plan, snap, last=last_price))
+        else 0,
         "process_version": pack.get("version"),
         "decision": why_text,
         "decision_reason": str(verdict.get("action") or "wait").replace("-", "_"),
@@ -604,7 +620,9 @@ def _evaluate_plan(
                 reason="news_kill",
                 bounce_or_fail="fail",
                 process_ok=True,
-                money_pnl=0.0,
+                money_pnl=paper_pnl(
+                    store, user_id, int(plan["id"]), last=last_price
+                ),
             )
             store.patch_plan(
                 user_id,
@@ -812,12 +830,97 @@ def _evaluate_plan(
     }
 
 
+def _tape_worthy(action: str, facts: Dict[str, Any], filled_any: bool) -> bool:
+    """Tape prints only the owner's decision list. Never wait. Never same pull-pack."""
+    if action in ("wait", "pull-pack"):
+        return False
+    if action == "sit-out":
+        return bool(facts.get("written_plan") and facts.get("at_ad"))
+    if action in ("paper-buy", "paper-sell", "add-panic"):
+        return bool(filled_any)
+    return action in TAPE_ACTIONS
+
+
+def _close_fill_pnl(filled: List[Dict[str, Any]], leftover_avg: Any) -> Optional[float]:
+    """Money made or lost on this close only. Not leftover bounce on a wait."""
+    try:
+        avg = float(leftover_avg) if leftover_avg is not None else None
+    except (TypeError, ValueError):
+        avg = None
+    if not avg or avg <= 0:
+        return None
+    pnl = 0.0
+    any_row = False
+    for row in filled:
+        try:
+            usd = float(row.get("usd") or 0)
+            px = float(row.get("filled_price") or row.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if usd <= 0 or px <= 0:
+            continue
+        qty = usd / avg
+        pnl += qty * (px - avg)
+        any_row = True
+    return round(pnl, 4) if any_row else None
+
+
+def log_board_flip(store: MachineStore, user_id: int, board: Dict[str, Any]) -> None:
+    """One tape line when list-wide grind or panic turns on or off."""
+    global _board_prev
+    now = time.time()
+    grind = bool(board.get("grind"))
+    panic = bool(board.get("panic"))
+    prev_g = _board_prev.get("grind")
+    prev_p = _board_prev.get("panic")
+    flips = []
+    if prev_g is not None and prev_g != grind:
+        flips.append(
+            (
+                "grind-on" if grind else "grind-off",
+                "Board-wide grind on."
+                if grind
+                else "Board-wide grind off.",
+            )
+        )
+    if prev_p is not None and prev_p != panic:
+        flips.append(
+            (
+                "panic-on" if panic else "panic-off",
+                "Board-wide panic on."
+                if panic
+                else "Board-wide panic off.",
+            )
+        )
+    _board_prev = {"grind": grind, "panic": panic, "names": board.get("names")}
+    if prev_g is None and prev_p is None:
+        return
+    for action, why in flips:
+        store.insert_log(
+            user_id,
+            {
+                "ts": now,
+                "manila": manila_label(now),
+                "symbol": "BOARD",
+                "tf": "",
+                "action": action,
+                "why": why,
+                "rule_ids": ["board." + action],
+                "payload": dict(board),
+            },
+        )
+
+
 def _map_log_action(raw: Any) -> str:
     a = str(raw or "wait")
     if a in ("arm", "paper_fill", "paper-buy", "paper_buy"):
         return "paper-buy"
     if a in ("bounce", "paper-sell", "paper_sell"):
         return "paper-sell"
+    if a in ("sit_out", "sit-out"):
+        return "sit-out"
+    if a in ("flatten-news", "news_kill", "news"):
+        return "flatten-news"
     return a
 
 
@@ -882,6 +985,20 @@ def _write_log(
 ) -> None:
     extra = extra or {}
     action = _map_log_action(verdict.get("action"))
+    if (
+        action == "wait"
+        and facts.get("written_plan")
+        and facts.get("at_ad")
+        and not facts.get("sold_bounce")
+        and not facts.get("live")
+    ):
+        action = "sit-out"
+        verdict = {
+            **verdict,
+            "action": "sit-out",
+            "rule_id": "atad.miss",
+            "why": "Written plan at this chart's AD, sat out.",
+        }
     filled = extra.get("filled") or []
     filled_px = None
     intended = extra.get("intended_price")
@@ -913,18 +1030,23 @@ def _write_log(
             intended = None
     why = why_sentence(verdict)
     filled_any = isinstance(filled, list) and bool(filled)
+    if not _tape_worthy(action, facts, filled_any):
+        return
     rid = str(verdict.get("rule_id") or "")
-    if not filled_any:
-        prev = store.list_log(user_id, plan_id=int(plan["id"]), limit=1)
-        if prev and str(prev[0].get("action") or "") == action:
-            prev_ids = str(prev[0].get("rule_ids") or "")
-            if rid and rid in prev_ids:
-                return
-            if str(prev[0].get("why") or "") == why:
-                return
-    pnl = extra.get("money_pnl")
-    if pnl is None:
-        pnl = paper_pnl(store, user_id, int(plan["id"]), last=last)
+    prev = store.list_log(user_id, plan_id=int(plan["id"]), limit=1)
+    if prev and str(prev[0].get("action") or "") == action:
+        prev_ids = str(prev[0].get("rule_ids") or "")
+        same_why = str(prev[0].get("why") or "") == why
+        same_rule = bool(rid) and rid in prev_ids
+        if (same_why or same_rule) and not filled_any:
+            return
+    pnl = None
+    if action in ("paper-sell", "flatten-news"):
+        pnl = extra.get("money_pnl")
+        if pnl is None and filled_any:
+            pnl = _close_fill_pnl(filled, plan.get("leftover_avg"))
+        if pnl is None and action == "flatten-news":
+            pnl = paper_pnl(store, user_id, int(plan["id"]), last=last)
     store.insert_log(
         user_id,
         {

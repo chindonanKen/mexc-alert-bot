@@ -83,6 +83,42 @@ def met_ceiling(ad_top: Any, ad_bottom: Any) -> Optional[float]:
     return b + MET_FRAC * length
 
 
+def bars_ever_met(
+    plan: Dict[str, Any],
+    snap: Dict[str, Any],
+    *,
+    last: Any = None,
+) -> bool:
+    """Sticky: once last or a bar low printed the met band, it stays met."""
+    if plan.get("met"):
+        return True
+    ad_known = (plan.get("ad_status") == "known") and plan.get("ad_top") is not None
+    if is_met(
+        last=last,
+        ad_top=plan.get("ad_top"),
+        ad_bottom=plan.get("ad_bottom"),
+        ad_known=ad_known,
+    ):
+        return True
+    for seq in (
+        snap.get("bars"),
+        snap.get("bars_1m"),
+        snap.get("faster_bars"),
+    ):
+        for bar in seq or []:
+            if not isinstance(bar, dict):
+                continue
+            low = bar.get("l") if bar.get("l") is not None else bar.get("low")
+            if is_met(
+                last=low,
+                ad_top=plan.get("ad_top"),
+                ad_bottom=plan.get("ad_bottom"),
+                ad_known=ad_known,
+            ):
+                return True
+    return False
+
+
 def is_met(*, last: Any, ad_top: Any, ad_bottom: Any, ad_known: bool) -> bool:
     """Met area: last in the last 5% of L above B, slightly through B. Not a buy."""
     if not ad_known:
@@ -236,6 +272,10 @@ def facts_from(
     fast_dump_volume = bool(fast_dump and spike) or bool(snap.get("fast_dump_volume"))
     if snap.get("fast_dump_volume") is False:
         fast_dump_volume = False
+    if snap.get("trade_dump"):
+        fast_dump = True
+        fast_dump_volume = True
+        quiet = False
 
     kill = news_kill(snap.get("news") or [])
     status = str(plan.get("status") or "")

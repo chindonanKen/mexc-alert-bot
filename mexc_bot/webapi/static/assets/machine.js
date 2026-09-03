@@ -279,7 +279,10 @@
         a === "add-panic" ||
         a === "flatten-news" ||
         a === "sit-out" ||
-        a === "pull-pack"
+        a === "grind-on" ||
+        a === "grind-off" ||
+        a === "panic-on" ||
+        a === "panic-off"
       );
     }).slice(0, 8);
     const fp = show.map((r) => `${r.id || ""}|${r.ts || ""}|${r.action || ""}`).join(",");

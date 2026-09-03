@@ -16,6 +16,7 @@ from .tape import (
     fatal_news_hits,
     fetch_official_klines,
     fetch_official_ticker,
+    fetch_recent_trades,
     note_board_price,
     snapshot_for_plan,
 )
@@ -146,7 +147,7 @@ def poll_once(
     kline_client=None,
 ) -> Dict[str, Any]:
     """One tape pass → evaluate. live_orders_sent stays false."""
-    from .engine import evaluate, get_store, seed_plans
+    from .engine import evaluate, get_store, log_board_flip, seed_plans
 
     store = store or get_store()
     uid = int(user_id if user_id is not None else machine_user_id())
@@ -159,7 +160,9 @@ def poll_once(
         )
         hung = (plan.get("ad_status") == "known") or plan.get("live")
         bars_1m = None
+        trades = None
         if hung:
+            trades = fetch_recent_trades(plan["market"], plan["symbol"])
             bars_1m = fetch_official_klines(
                 plan["market"],
                 plan["symbol"],
@@ -182,13 +185,13 @@ def poll_once(
                     plan["market"], plan["symbol"], ftf, client=kline_client
                 )
             news = fatal_news_hits(store.db_path, plan["symbol"])
-        return plan, ticker, bars, bars_1m, faster_bars, ftf, news
+        return plan, ticker, bars, bars_1m, faster_bars, ftf, news, trades
 
     snapshot: Dict[str, Dict[str, Any]] = {}
     workers = min(8, max(1, len(plans)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         packed = list(pool.map(_one, plans))
-    for plan, ticker, bars, bars_1m, faster_bars, ftf, news in packed:
+    for plan, ticker, bars, bars_1m, faster_bars, ftf, news, trades in packed:
         key = f"{plan['symbol']}|{plan['market']}"
         snapshot[key] = snapshot_for_plan(
             plan,
@@ -198,6 +201,7 @@ def poll_once(
             faster_bars=faster_bars,
             faster_tf=ftf,
             news=news,
+            trades=trades,
         )
         if ticker is not None:
             note_board_price(str(plan.get("symbol") or ""), ticker)
@@ -208,6 +212,7 @@ def poll_once(
         if board["panic"]:
             snap["panic_board"] = True
             snap["heat_breadth"] = int(board.get("fast") or 0)
+    log_board_flip(store, uid, board)
     return evaluate(store, uid, snapshot)
 
 

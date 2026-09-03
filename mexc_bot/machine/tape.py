@@ -109,6 +109,140 @@ def official_reds(bars: Optional[Iterable[Dict[str, Any]]]) -> Optional[int]:
     return n
 
 
+_hung_last: Dict[str, float] = {}
+_trade_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+
+
+def fetch_recent_trades(
+    market: str,
+    symbol: str,
+    *,
+    limit: int = 80,
+) -> List[Dict[str, Any]]:
+    """Public last trades. Soft-fail → []. Times in seconds."""
+    key = f"{market}|{symbol}"
+    now = time.time()
+    hit = _trade_cache.get(key)
+    if hit and now - hit[0] < 1.2:
+        return hit[1]
+    out: List[Dict[str, Any]] = []
+    try:
+        cli = _kline_cli()
+        if str(market).lower() == "futures":
+            url = f"{cli.futures_base}/contract/deals/{symbol}"
+            resp = cli.session.get(url, params={"limit": int(limit)}, timeout=2.0)
+            data = resp.json() if resp.status_code == 200 else {}
+            rows = data.get("data") if isinstance(data, dict) else data
+            for row in rows or []:
+                if not isinstance(row, dict):
+                    continue
+                px = _as_price(row.get("p") if row.get("p") is not None else row.get("price"))
+                ts = row.get("T") if row.get("T") is not None else row.get("t")
+                qty = row.get("v") if row.get("v") is not None else row.get("volume")
+                if px is None:
+                    continue
+                try:
+                    tsec = float(ts) / (1000.0 if float(ts) > 1e12 else 1.0)
+                    q = float(qty or 0) * px
+                except (TypeError, ValueError):
+                    continue
+                out.append({"ts": tsec, "price": px, "quote": q})
+        else:
+            url = f"{cli.spot_base}/trades"
+            resp = cli.session.get(
+                url,
+                params={"symbol": str(symbol).upper(), "limit": int(limit)},
+                timeout=2.0,
+            )
+            rows = resp.json() if resp.status_code == 200 else []
+            for row in rows or []:
+                if not isinstance(row, dict):
+                    continue
+                px = _as_price(row.get("price"))
+                if px is None:
+                    continue
+                try:
+                    tsec = float(row.get("time") or 0) / 1000.0
+                    q = float(row.get("quoteQty") or 0)
+                    if q <= 0:
+                        q = float(row.get("qty") or 0) * px
+                except (TypeError, ValueError):
+                    continue
+                out.append({"ts": tsec, "price": px, "quote": q})
+    except Exception as e:
+        logger.debug("machine trades %s %s: %s", market, symbol, e)
+        out = []
+    _trade_cache[key] = (now, out)
+    return out
+
+
+def hung_seconds_dump(
+    symbol: str,
+    last: Optional[float],
+    layers: Sequence[Dict[str, Any]],
+    trades: Sequence[Dict[str, Any]],
+    *,
+    now: Optional[float] = None,
+    window: float = 8.0,
+) -> Dict[str, Any]:
+    """Dump through a hung layer with $ volume in seconds. Not a 1m close."""
+    ts = float(now if now is not None else time.time())
+    key = str(symbol or "")
+    prev = _hung_last.get(key)
+    if last is not None:
+        _hung_last[key] = float(last)
+    vol = 0.0
+    older = 0.0
+    recent_px: List[float] = []
+    for t in trades or []:
+        age = ts - float(t.get("ts") or 0)
+        q = float(t.get("quote") or 0)
+        px = t.get("price")
+        if 0 <= age <= window:
+            vol += q
+            try:
+                if px is not None:
+                    recent_px.append(float(px))
+            except (TypeError, ValueError):
+                pass
+        elif window < age <= 60:
+            older += q
+    spike = False
+    if older > 0:
+        spike = vol >= 1.2 * (older / 52.0) * window
+    elif vol > 0 and last is not None and prev is not None and last < prev:
+        spike = True
+    elif vol > 0 and recent_px and max(recent_px) > min(recent_px):
+        spike = True
+    through = False
+    hi = max(recent_px) if recent_px else None
+    lo = min(recent_px) if recent_px else None
+    if last is not None:
+        lo = float(last) if lo is None else min(float(lo), float(last))
+        hi = float(last) if hi is None else max(float(hi), float(last))
+    if prev is not None:
+        hi = float(prev) if hi is None else max(float(hi), float(prev))
+    if hi is not None and lo is not None:
+        for layer in layers or []:
+            if str(layer.get("band") or "ad") != "ad":
+                continue
+            try:
+                lp = float(layer["price"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if float(hi) > lp >= float(lo):
+                through = True
+                break
+    return {
+        "vol_usd": vol,
+        "spike": spike,
+        "through_layer": through,
+        "fast_dump": bool(spike and through),
+        "last": last,
+        "prev": prev,
+    }
+
+
 def fetch_official_ticker(
     market: str,
     symbol: str,
@@ -230,16 +364,45 @@ def snapshot_for_plan(
     heat_breadth: Optional[int] = None,
     panic_board: bool = False,
     board: Optional[Dict[str, Any]] = None,
+    trades: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build one evaluate snapshot from official tape pieces only."""
     from .facts import dollar_volume, faster_tf_for
 
     tf = plan.get("tf") or "15m"
     last = official_last_price(ticker=ticker, bars=bars_1m or bars)
+    if trades:
+        newest = max(
+            (t for t in trades if isinstance(t, dict) and t.get("price") is not None),
+            key=lambda t: float(t.get("ts") or 0),
+            default=None,
+        )
+        if newest is not None:
+            tp = _as_price(newest.get("price"))
+            if tp is not None:
+                last = tp
     reds = official_reds(bars)
     snap: Dict[str, Any] = {}
     if last is not None:
         snap["last_price"] = last
+    if trades:
+        import json as _json
+
+        layers = plan.get("layers")
+        if not layers:
+            try:
+                layers = _json.loads(plan.get("layers_json") or "[]")
+            except (TypeError, ValueError):
+                layers = []
+        dump = hung_seconds_dump(
+            str(plan.get("symbol") or ""), last, layers or [], trades
+        )
+        snap["trade_vol_usd"] = dump.get("vol_usd")
+        if dump.get("vol_usd"):
+            snap["vol_usd_fast"] = dump.get("vol_usd")
+        if dump.get("fast_dump"):
+            snap["trade_dump"] = True
+            snap["fast_dump_volume"] = True
     reds_map: Dict[str, Any] = {}
     if bars:
         snap["bars"] = list(bars)
@@ -252,7 +415,7 @@ def snapshot_for_plan(
     if bars_1m:
         snap["bars_1m"] = list(bars_1m)
         vol_fast = dollar_volume(bars_1m)
-        if vol_fast is not None:
+        if vol_fast is not None and not snap.get("trade_dump"):
             snap["vol_usd_fast"] = vol_fast
         r1 = official_reds(bars_1m)
         if r1 is not None:

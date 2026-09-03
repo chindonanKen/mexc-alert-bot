@@ -1922,9 +1922,9 @@ class TestMachinePaperReact(unittest.TestCase):
         }
         c.post("/api/machine/evaluate", json={"snapshot": snap})
         c.post("/api/machine/evaluate", json={"snapshot": snap})
-        log = c.get(f"/api/machine/log?plan_id={ansem['id']}").json()["log"]
+        log = c.get("/api/machine/plans").json()["log"]
         pulls = [r for r in log if r.get("action") == "pull-pack"]
-        self.assertEqual(len(pulls), 1, pulls)
+        self.assertEqual(len(pulls), 0, pulls)
 
     def test_one_minute_reds_are_not_play_sitout(self):
         from mexc_bot.machine.facts import facts_from
@@ -1961,6 +1961,123 @@ class TestMachinePaperReact(unittest.TestCase):
         ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
         self.assertFalse(ansem["live"])
         self.assertFalse(ansem.get("filled_entry"))
+
+    def test_met_stays_met_after_bounce_above_band(self):
+        c = self._client()
+        c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"1h": 3},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        bounce = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.30,
+                        "reds": {"1h": 0},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in bounce.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertTrue(ansem.get("met"))
+
+    def test_kline_low_in_band_sets_met(self):
+        c = self._client()
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.30,
+                        "reds": {"1h": 0},
+                        "bars": [{"l": 0.145, "c": 0.20, "o": 0.21, "v": 1, "q": 10}],
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertTrue(ansem.get("met"))
+
+    def test_tape_omits_wait_and_sitout_far_from_ad(self):
+        c = self._client()
+        c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.30,
+                        "reds": {"1h": 1},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        log = c.get("/api/machine/plans").json()["log"]
+        self.assertFalse(any(str(r.get("action") or "") == "wait" for r in log))
+        self.assertFalse(
+            any(
+                str(r.get("action") or "") == "sit-out"
+                and str(r.get("symbol") or "") == "ANSEMUSDT"
+                for r in log
+            )
+        )
+
+    def test_seconds_dump_through_hung_layer(self):
+        import time as _t
+        from mexc_bot.machine.tape import hung_seconds_dump, _hung_last
+
+        _hung_last["X"] = 0.16
+        now = _t.time()
+        dump = hung_seconds_dump(
+            "X",
+            0.14,
+            [{"band": "ad", "price": 0.15}],
+            [
+                {"ts": now - 1, "quote": 8000, "price": 0.14},
+                {"ts": now - 20, "quote": 100, "price": 0.16},
+            ],
+            now=now,
+        )
+        self.assertTrue(dump["through_layer"])
+        self.assertTrue(dump["spike"])
+        self.assertTrue(dump["fast_dump"])
+        _hung_last.pop("Y", None)
+        dump2 = hung_seconds_dump(
+            "Y",
+            0.14,
+            [{"band": "ad", "price": 0.15}],
+            [
+                {"ts": now - 1, "quote": 8000, "price": 0.14},
+                {"ts": now - 2, "quote": 100, "price": 0.16},
+            ],
+            now=now,
+        )
+        self.assertTrue(dump2["through_layer"])
+        self.assertTrue(dump2["fast_dump"])
+
+    def test_board_flip_logs_once(self):
+        from mexc_bot.machine import engine as eng
+        from mexc_bot.machine.store import MachineStore
+
+        eng._board_prev = {}
+        store = MachineStore(self.db)
+        uid = 8630949601
+        eng.log_board_flip(store, uid, {"grind": False, "panic": False, "names": 40})
+        eng.log_board_flip(store, uid, {"grind": True, "panic": False, "names": 40})
+        eng.log_board_flip(store, uid, {"grind": True, "panic": False, "names": 40})
+        rows = store.list_log(uid, limit=20)
+        ons = [r for r in rows if r.get("action") == "grind-on"]
+        self.assertEqual(len(ons), 1)
 
 
 if __name__ == "__main__":

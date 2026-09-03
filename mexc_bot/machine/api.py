@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..webapi.app import require_auth
 from .engine import (
+    TAPE_ACTIONS,
     account_view,
     evaluate,
     get_store,
@@ -84,16 +85,7 @@ def list_plans(_: bool = Depends(require_auth)):
         "log": store.list_log(
             uid,
             limit=40,
-            actions=(
-                "paper-buy",
-                "paper-sell",
-                "add-panic",
-                "flatten-news",
-                "sit-out",
-                "paper_fill",
-                "arm",
-                "pull-pack",
-            ),
+            actions=TAPE_ACTIONS,
         ),
         "live_orders_sent": False,
     }
@@ -283,17 +275,7 @@ def get_feed(since: Optional[float] = None, limit: int = 40, _: bool = Depends(r
         uid,
         since=since,
         limit=min(int(limit), 100),
-        actions=(
-            "paper-buy",
-            "paper-sell",
-            "add-panic",
-            "flatten-news",
-            "sit-out",
-            "wait",
-            "paper_fill",
-            "arm",
-            "pull-pack",
-        ),
+        actions=TAPE_ACTIONS,
     )
     bubbles = []
     for r in rows:
