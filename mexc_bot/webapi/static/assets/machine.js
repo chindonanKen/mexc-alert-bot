@@ -119,7 +119,7 @@
     LINE: "next layer price",
     ENTER: "intended then filled paper entry",
     EXIT: "intended then filled paper exit",
-    MET: "last in the last 5% of L above B, through B",
+    MET: "printed in the AD band (last 5% of L above B, through B); a bounce does not clear it",
   };
 
   function newsText(p) {
