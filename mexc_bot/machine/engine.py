@@ -871,29 +871,53 @@ def log_board_flip(store: MachineStore, user_id: int, board: Dict[str, Any]) -> 
     now = time.time()
     grind = bool(board.get("grind"))
     panic = bool(board.get("panic"))
-    prev_g = _board_prev.get("grind")
-    prev_p = _board_prev.get("panic")
+    confirmed_g = _board_prev.get("grind")
+    confirmed_p = _board_prev.get("panic")
+    pending = dict(_board_prev.get("pending") or {})
     flips = []
-    if prev_g is not None and prev_g != grind:
-        flips.append(
-            (
-                "grind-on" if grind else "grind-off",
-                "Board-wide grind on."
-                if grind
-                else "Board-wide grind off.",
-            )
-        )
-    if prev_p is not None and prev_p != panic:
-        flips.append(
-            (
-                "panic-on" if panic else "panic-off",
-                "Board-wide panic on."
-                if panic
-                else "Board-wide panic off.",
-            )
-        )
-    _board_prev = {"grind": grind, "panic": panic, "names": board.get("names")}
-    if prev_g is None and prev_p is None:
+
+    def _hold(key: str, new: bool, confirmed: Optional[bool], on: str, off: str, why_on: str, why_off: str):
+        if confirmed is None:
+            pending.pop(key, None)
+            return new, []
+        if new == confirmed:
+            pending.pop(key, None)
+            return confirmed, []
+        if pending.get(key) == new:
+            pending.pop(key, None)
+            return new, [(on if new else off, why_on if new else why_off)]
+        pending[key] = new
+        return confirmed, []
+
+    grind, gflip = _hold(
+        "grind",
+        grind,
+        confirmed_g,
+        "grind-on",
+        "grind-off",
+        "Board-wide grind on.",
+        "Board-wide grind off.",
+    )
+    panic, pflip = _hold(
+        "panic",
+        panic,
+        confirmed_p,
+        "panic-on",
+        "panic-off",
+        "Board-wide panic on.",
+        "Board-wide panic off.",
+    )
+    flips.extend(gflip)
+    flips.extend(pflip)
+    _board_prev = {
+        "grind": grind if confirmed_g is not None else grind,
+        "panic": panic if confirmed_p is not None else panic,
+        "pending": pending,
+        "names": board.get("names"),
+    }
+    if confirmed_g is None and confirmed_p is None:
+        _board_prev["grind"] = grind
+        _board_prev["panic"] = panic
         return
     for action, why in flips:
         store.insert_log(

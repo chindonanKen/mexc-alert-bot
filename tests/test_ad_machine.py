@@ -2075,6 +2075,7 @@ class TestMachinePaperReact(unittest.TestCase):
         eng.log_board_flip(store, uid, {"grind": False, "panic": False, "names": 40})
         eng.log_board_flip(store, uid, {"grind": True, "panic": False, "names": 40})
         eng.log_board_flip(store, uid, {"grind": True, "panic": False, "names": 40})
+        eng.log_board_flip(store, uid, {"grind": True, "panic": False, "names": 40})
         rows = store.list_log(uid, limit=20)
         ons = [r for r in rows if r.get("action") == "grind-on"]
         self.assertEqual(len(ons), 1)

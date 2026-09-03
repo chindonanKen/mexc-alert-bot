@@ -106,7 +106,7 @@ def _watchlist_board(store, uid: int) -> Dict[str, Any]:
         return {
             "names": names,
             "fast": 0,
-            "slow": names,
+            "slow": 0,
             "panic": False,
             "grind": False,
             "sideways": True,
@@ -114,27 +114,53 @@ def _watchlist_board(store, uid: int) -> Dict[str, Any]:
     pxmap = _refresh_all_prices()
     fast_n = 0
     slow_n = 0
+    known = 0
     for row in coins:
         sym = str(row.get("symbol") or "")
-        px = pxmap.get(sym)
+        px = _px_for(sym, pxmap)
         if px is None:
-            slow_n += 1
             continue
+        known += 1
         if board_name_is_fast(sym, px):
             fast_n += 1
         else:
             slow_n += 1
-    panic = fast_n >= 3 and fast_n >= max(3, int(0.25 * names))
-    grind = (not panic) and slow_n >= int(0.6 * names) and fast_n < 3
+    if known < 8:
+        return {
+            "names": names,
+            "fast": fast_n,
+            "slow": slow_n,
+            "panic": False,
+            "grind": False,
+            "sideways": True,
+        }
+    panic = fast_n >= 3 and fast_n >= max(3, int(0.25 * known))
+    grind = (not panic) and slow_n >= int(0.6 * known) and fast_n < 3
     mixed = (not grind) and (not panic)
     return {
         "names": names,
+        "known": known,
         "fast": fast_n,
         "slow": slow_n,
         "panic": panic,
         "grind": grind,
-        "sideways": mixed or names < 8,
+        "sideways": mixed,
     }
+
+
+def _px_for(sym: str, pxmap: Dict[str, float]) -> Optional[float]:
+    if not sym:
+        return None
+    if sym in pxmap:
+        return pxmap[sym]
+    compact = sym.replace("_", "")
+    if compact in pxmap:
+        return pxmap[compact]
+    if "_" not in sym and sym.upper().endswith("USDT"):
+        alt = sym[:-4] + "_USDT"
+        if alt in pxmap:
+            return pxmap[alt]
+    return None
 
 
 def poll_once(
