@@ -1897,6 +1897,51 @@ class TestMachinePaperReact(unittest.TestCase):
         self.assertIn("killed", row["decision"].lower())
         self.assertNotEqual(row.get("decision_reason"), "wait")
 
+    def test_pull_pack_does_not_log_every_poll(self):
+        c = self._client()
+        first = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"1h": 3},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in first.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        snap = {
+            "ANSEMUSDT|spot": {
+                "last_price": 0.12,
+                "reds": {"1h": 3},
+                "heat_breadth": 1,
+                "quiet_grind": True,
+            }
+        }
+        c.post("/api/machine/evaluate", json={"snapshot": snap})
+        c.post("/api/machine/evaluate", json={"snapshot": snap})
+        log = c.get(f"/api/machine/log?plan_id={ansem['id']}").json()["log"]
+        pulls = [r for r in log if r.get("action") == "pull-pack"]
+        self.assertEqual(len(pulls), 1, pulls)
+
+    def test_one_minute_reds_are_not_play_sitout(self):
+        from mexc_bot.machine.facts import facts_from
+
+        facts = facts_from(
+            {
+                "tf": "1d",
+                "ad_status": "known",
+                "ad_top": 0.356,
+                "ad_bottom": 0.145,
+                "status": "watch",
+                "live": False,
+            },
+            {"last_price": 0.22, "reds": {"1m": 1}},
+        )
+        self.assertFalse(facts.get("first_or_second_red"))
+
 
 if __name__ == "__main__":
     unittest.main()

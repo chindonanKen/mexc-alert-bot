@@ -187,11 +187,13 @@ def facts_from(
             play_reds = int(reds_map[play_tf])
         except (TypeError, ValueError):
             play_reds = None
-    elif len(reds_map) == 1:
-        try:
-            play_reds = int(next(iter(reds_map.values())))
-        except (TypeError, ValueError):
-            play_reds = None
+    elif not play_tf:
+        others = {k: v for k, v in reds_map.items() if str(k) != "1m"}
+        if len(others) == 1:
+            try:
+                play_reds = int(next(iter(others.values())))
+            except (TypeError, ValueError):
+                play_reds = None
 
     first_or_second = play_reds in (1, 2)
     faster_reds = None

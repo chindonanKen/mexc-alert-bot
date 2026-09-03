@@ -38,11 +38,10 @@ def interpret(
 
 
 def why_sentence(result: Dict[str, Any], *, extra: Optional[str] = None) -> str:
-    ids = result.get("rule_ids") or [result.get("rule_id")]
-    ids = [i for i in ids if i]
+    rid = str(result.get("rule_id") or "")
     base = str(result.get("why") or "Wait.")
     if extra:
         base = f"{base} {extra}".strip()
-    if ids:
-        return f"{base} ({', '.join(ids[:3])})"
+    if rid:
+        return f"{base} ({rid})"
     return base

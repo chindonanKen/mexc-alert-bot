@@ -892,10 +892,16 @@ def _write_log(
         except (TypeError, ValueError, StopIteration):
             intended = None
     why = why_sentence(verdict)
-    if action in ("wait", "sit-out"):
+    filled_any = isinstance(filled, list) and bool(filled)
+    rid = str(verdict.get("rule_id") or "")
+    if not filled_any:
         prev = store.list_log(user_id, plan_id=int(plan["id"]), limit=1)
-        if prev and str(prev[0].get("action")) == action and str(prev[0].get("why") or "") == why:
-            return
+        if prev and str(prev[0].get("action") or "") == action:
+            prev_ids = str(prev[0].get("rule_ids") or "")
+            if rid and rid in prev_ids:
+                return
+            if str(prev[0].get("why") or "") == why:
+                return
     pnl = extra.get("money_pnl")
     if pnl is None:
         pnl = paper_pnl(store, user_id, int(plan["id"]), last=last)
@@ -911,7 +917,7 @@ def _write_log(
             "last_price": last,
             "action": action,
             "size_pct": size_pct,
-            "rule_ids": verdict.get("rule_ids") or [verdict.get("rule_id")],
+            "rule_ids": [verdict.get("rule_id")] if verdict.get("rule_id") else (verdict.get("rule_ids") or []),
             "why": why,
             "vol_usd_play": facts.get("_vol_usd_play"),
             "vol_usd_fast": facts.get("_vol_usd_fast"),
@@ -1156,6 +1162,13 @@ def _lower_pack(
             if o.get("side") != "sell"
         }
         remaining = [L for L in layers if int(L.get("idx") or 0) not in filled_idx]
+        old_px = [
+            round(float(o.get("price") or 0), 8)
+            for o in working
+        ]
+        new_px = [round(float(L.get("price") or 0), 8) for L in remaining]
+        if old_px == new_px:
+            return []
         store.replace_working_orders(user_id, int(plan["id"]), remaining)
         pulled = remaining
     else:
