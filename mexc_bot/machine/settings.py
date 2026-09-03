@@ -87,6 +87,8 @@ MACHINE_TABLES = (
     "machine_closes",
     "machine_kb",
     "machine_needs_you",
+    "machine_log",
+    "machine_process_pack",
 )
 
 # Tables the machine must never INSERT/UPDATE/DELETE.

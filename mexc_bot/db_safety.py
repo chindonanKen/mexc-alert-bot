@@ -61,6 +61,8 @@ PROTECTED_TABLES: frozenset[str] = frozenset(
         "machine_closes",
         "machine_kb",
         "machine_needs_you",
+        "machine_log",
+        "machine_process_pack",
     }
 )
 

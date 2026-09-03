@@ -7,6 +7,7 @@
     needs: [],
     room: {},
     account: {},
+    log: [],
     selected: null,
   };
 
@@ -116,6 +117,9 @@
     NEWS: "delist/scam or clear",
     REST: "time since the play armed",
     LINE: "next layer price",
+    ENTER: "intended then filled paper entry",
+    EXIT: "intended then filled paper exit",
+    MET: "last in the last 5% of L above B, through B",
   };
 
   function newsText(p) {
@@ -138,7 +142,7 @@
   }
 
   function field(key, value, extra) {
-    return `<div class="field">
+    return `<div class="field" data-k="${esc(key)}">
       <span class="lbl">${key}</span>
       <span class="gloss">${esc(GLOSS[key] || "")}</span>
       <div class="fig">${value}${extra || ""}</div>
@@ -189,6 +193,35 @@
     return String(s);
   }
 
+  function tapePx(t) {
+    if (!t || t.price == null) return "—";
+    return num(t.price);
+  }
+
+  function enterText(p) {
+    const i = p && p.intended_entry;
+    const f = p && p.filled_entry;
+    if (!i && !f) return "—";
+    if (f) return `filled ${tapePx(f)}`;
+    return `intend ${tapePx(i)}`;
+  }
+
+  function exitText(p) {
+    const i = p && p.intended_exit;
+    const f = p && p.filled_exit;
+    if (!i && !f) return "—";
+    if (f && f.price != null) return `filled ${tapePx(f)}`;
+    if (i && i.price != null) return `intend ${tapePx(i)}`;
+    if (i && i.note) return esc(i.note);
+    return "—";
+  }
+
+  function metText(p) {
+    if (p && p.met) return "met";
+    if (p && p.ad_status === "known") return "not met";
+    return "—";
+  }
+
   function whyLine(p) {
     const s = whyText(p);
     return s ? `<span class="why">${esc(s)}</span>` : "";
@@ -221,13 +254,56 @@
     back.hidden = true;
   }
 
+  function renderTape(rows) {
+    const host = $("#paperTape");
+    if (!host) return;
+    const show = (rows || []).filter((r) => {
+      const a = String(r.action || "");
+      return (
+        a.indexOf("paper") >= 0 ||
+        a === "add-panic" ||
+        a === "flatten-news" ||
+        a === "sit-out"
+      );
+    }).slice(0, 8);
+    const fp = show.map((r) => `${r.id || ""}|${r.ts || ""}|${r.action || ""}`).join(",");
+    if (!show.length) {
+      host.hidden = true;
+      host.innerHTML = "";
+      host.dataset.fp = "";
+      return;
+    }
+    if (host.dataset.fp === fp) return;
+    host.dataset.fp = fp;
+    host.hidden = false;
+    host.innerHTML =
+      "<h2>Paper tape</h2>" +
+      show
+        .map((r) => {
+          const when = esc(r.manila || "");
+          const who = esc((r.symbol || "").replace("USDT", "").replace("STOCK_", ""));
+          const act = esc(r.action || "");
+          const px = r.filled_price != null ? num(r.filled_price) : r.last_price != null ? num(r.last_price) : "";
+          const why = r.why ? `<span class="why">${esc(r.why)}</span>` : "";
+          return `<p class="tape-row">${when} · ${who} · ${act}${px ? " · " + px : ""}${why}</p>`;
+        })
+        .join("");
+  }
+
   function renderNeeds(needs) {
     const host = $("#needsStack");
     if (!needs || !needs.length) {
       host.hidden = true;
       host.innerHTML = "";
+      host.dataset.fp = "";
       return;
     }
+    const fp = needs.map((n) => String(n.id)).join(",");
+    if (host.dataset.fp === fp && host.querySelector("[data-need]")) {
+      host.hidden = false;
+      return;
+    }
+    host.dataset.fp = fp;
     host.hidden = false;
     host.innerHTML =
       "<h2>Needs you</h2>" +
@@ -272,16 +348,19 @@
         ${whyLine(p)}
       </div>
       <div class="body">
-        <div class="field">
+        <div class="field" data-k="AD">
           <span class="lbl">AD</span>
           <span class="gloss">${esc(GLOSS.AD)}</span>
-          <div class="ad-pair">${adTop(p)}<br>${adBot(p)}</div>
+          <div class="fig ad-pair">${adTop(p)}<br>${adBot(p)}</div>
         </div>
         ${field("LAST", lastText(p))}
+        ${field("MET", metText(p))}
+        ${field("ENTER", enterText(p))}
+        ${field("EXIT", exitText(p))}
         ${field("NEXT", money(p.next_layer_usd))}
         ${field("REDS", redsText(p), `<span class="pips">${pips(p.reds)}</span>`)}
         ${field("VOL", volText(p) || "—")}
-        <div class="field">
+        <div class="field" data-k="NEWS">
           <span class="lbl">NEWS</span>
           <span class="gloss">${esc(GLOSS.NEWS)}</span>
           <div class="fig${newsCls}">${newsText(p)}</div>
@@ -289,11 +368,54 @@
         ${field("REST", restClock(p) || "—")}
       </div>
       <div class="recut-bar">
-        <span><span class="lbl">LINE</span> <span class="gloss">${esc(GLOSS.LINE)}</span> ${linePrice(p)}</span>
-        <span>${esc(p.remaining_layers || 0)} LEFT</span>
+        <span data-k="LINE"><span class="lbl">LINE</span> <span class="gloss">${esc(GLOSS.LINE)}</span> <span class="fig">${linePrice(p)}</span></span>
+        <span data-k="LEFT">${esc(p.remaining_layers || 0)} LEFT</span>
         <button type="button" class="kill" data-kill="${p.id}">Kill</button>
       </div>
     </article>`;
+  }
+
+  function setFig(el, key, html) {
+    const field = el.querySelector(`.field[data-k="${key}"]`);
+    const fig = field && field.querySelector(".fig");
+    if (fig && fig.innerHTML !== html) fig.innerHTML = html;
+  }
+
+  function patchStage(el, p) {
+    if (!el) return;
+    const adHtml = `${adTop(p)}<br>${adBot(p)}`;
+    setFig(el, "AD", adHtml);
+    setFig(el, "LAST", lastText(p));
+    setFig(el, "MET", metText(p));
+    setFig(el, "ENTER", enterText(p));
+    setFig(el, "EXIT", exitText(p));
+    setFig(el, "NEXT", money(p.next_layer_usd));
+    setFig(el, "REDS", `${redsText(p)}<span class="pips">${pips(p.reds)}</span>`);
+    setFig(el, "VOL", volText(p) || "—");
+    setFig(el, "REST", restClock(p) || "—");
+    const news = el.querySelector('.field[data-k="NEWS"] .fig');
+    if (news) {
+      news.classList.toggle("news-hot", !!p.news);
+      const t = newsText(p);
+      if (news.textContent !== t) news.textContent = t;
+    }
+    const line = el.querySelector('[data-k="LINE"] .fig');
+    if (line && line.textContent !== linePrice(p)) line.textContent = linePrice(p);
+    const left = el.querySelector('[data-k="LEFT"]');
+    const leftT = `${p.remaining_layers || 0} LEFT`;
+    if (left && left.textContent !== leftT) left.textContent = leftT;
+    const why = whyText(p);
+    let w = el.querySelector(".who .why");
+    if (why) {
+      if (!w) {
+        w = document.createElement("span");
+        w.className = "why";
+        el.querySelector(".who").appendChild(w);
+      }
+      if (w.textContent !== why) w.textContent = why;
+    } else if (w) {
+      w.remove();
+    }
   }
 
   function renderStages(plans) {
@@ -302,12 +424,7 @@
     const ids = live.map((p) => String(p.id)).join(",");
     if (host.dataset.ids === ids && host.querySelector(".stage.live, .stage.open")) {
       live.forEach((p) => {
-        const el = host.querySelector(`.stage.live[data-id="${p.id}"]`);
-        if (!el) return;
-        const last = el.querySelector(".body .field:nth-child(2) .fig");
-        if (last) last.textContent = lastText(p);
-        const rest = el.querySelector(".body .field:last-child .fig");
-        if (rest) rest.textContent = restClock(p) || "—";
+        patchStage(host.querySelector(`.stage.live[data-id="${p.id}"]`), p);
       });
       return;
     }
@@ -328,6 +445,8 @@
   function patchRank(el, p, i) {
     if (!el) return;
     el.classList.toggle("killed", p.status === "killed");
+    el.classList.toggle("blocked", p.status === "blocked");
+    el.classList.toggle("closed", p.status === "closed");
     const set = (sel, html) => {
       const n = el.querySelector(sel);
       if (n && n.innerHTML !== html) n.innerHTML = html;
@@ -337,6 +456,9 @@
     set(".who .tf", tfText(p));
     set(".ad", rankAd(p));
     set(".last", lastText(p));
+    set(".met", metText(p));
+    set(".enter", enterText(p));
+    set(".exit", exitText(p));
     set(".next", money(p.next_layer_usd));
     set(".reds", `${redsText(p)}<span class="pips">${pips(p.reds)}</span>`);
     set(".vol", volText(p) || "—");
@@ -425,6 +547,9 @@
       <span></span>
       <span><span class="lbl">AD</span><span class="gloss">${esc(GLOSS.AD)}</span></span>
       <span><span class="lbl">LAST</span><span class="gloss">${esc(GLOSS.LAST)}</span></span>
+      <span><span class="lbl">MET</span><span class="gloss">${esc(GLOSS.MET)}</span></span>
+      <span><span class="lbl">ENTER</span><span class="gloss">${esc(GLOSS.ENTER)}</span></span>
+      <span><span class="lbl">EXIT</span><span class="gloss">${esc(GLOSS.EXIT)}</span></span>
       <span><span class="lbl">NEXT</span><span class="gloss">${esc(GLOSS.NEXT)}</span></span>
       <span><span class="lbl">REDS</span><span class="gloss">${esc(GLOSS.REDS)}</span></span>
       <span><span class="lbl">VOL</span><span class="gloss">${esc(GLOSS.VOL)}</span></span>
@@ -435,12 +560,16 @@
       head +
       rows
         .map((p, i) => {
-          const killed = p.status === "killed" ? " killed" : "";
-          return `<button type="button" class="rank${killed}" data-id="${p.id}">
+          const dead =
+            p.status === "killed" ? " killed" : p.status === "closed" ? " closed" : "";
+          return `<button type="button" class="rank${dead}" data-id="${p.id}">
           <span class="idx">${String(i + 1).padStart(2, "0")}</span>
           <span class="who"><span class="nm">${esc(instrument(p))}${esc(fut(p))}</span><span class="tf">${tfText(p)}</span></span>
           <span class="ad">${rankAd(p)}</span>
           <span class="last">${lastText(p)}</span>
+          <span class="met">${metText(p)}</span>
+          <span class="enter">${enterText(p)}</span>
+          <span class="exit">${exitText(p)}</span>
           <span class="next">${money(p.next_layer_usd)}</span>
           <span class="reds">${redsText(p)}<span class="pips">${pips(p.reds)}</span></span>
           <span class="vol">${volText(p) || "—"}</span>
@@ -487,6 +616,9 @@
           adKnown ? `${adTop(p)} → ${adBot(p)}` : "unknown"
         }<span class="gloss">${esc(GLOSS.AD)}</span></dd></div>
         <div class="sheet-row"><dt>LAST</dt><dd>${lastText(p)}<span class="gloss">${esc(GLOSS.LAST)}</span></dd></div>
+        <div class="sheet-row"><dt>MET</dt><dd>${metText(p)}<span class="gloss">${esc(GLOSS.MET)}</span></dd></div>
+        <div class="sheet-row"><dt>ENTER</dt><dd>${enterText(p)}<span class="gloss">${esc(GLOSS.ENTER)}</span></dd></div>
+        <div class="sheet-row"><dt>EXIT</dt><dd>${exitText(p)}<span class="gloss">${esc(GLOSS.EXIT)}</span></dd></div>
         <div class="sheet-row"><dt>NEXT</dt><dd>${money(p.next_layer_usd)}<span class="gloss">${esc(GLOSS.NEXT)}</span></dd></div>
         <div class="sheet-row"><dt>REDS</dt><dd>${redsText(p)} <span class="pips">${pips(p.reds)}</span><span class="gloss">${esc(GLOSS.REDS)}</span></dd></div>
         <div class="sheet-row"><dt>VOL</dt><dd>${volText(p) || "—"}<span class="gloss">${esc(GLOSS.VOL)}</span></dd></div>
@@ -499,17 +631,18 @@
       </dl>
       <h4 class="ladder-h">Layers</h4>
       ${ladder}
-      <form class="console" id="recutForm">
-        <label>Line<input name="ad_top" inputmode="decimal" value="${p.ad_top ?? ""}" placeholder="top" /></label>
+      ${
+        p.status === "closed" || p.status === "killed" || p.status === "blocked"
+          ? `<p class="ladder-empty">${esc(p.status)} — recut parked</p>`
+          : `<form class="console" id="recutForm">
+        <label>Top<input name="ad_top" inputmode="decimal" value="${p.ad_top ?? ""}" placeholder="top" /></label>
         <label>Bottom<input name="ad_bottom" inputmode="decimal" value="${p.ad_bottom ?? ""}" /></label>
-        <label>Left<input name="remaining_layers" type="number" min="1" max="12" value="${
-          p.remaining_layers || 5
-        }" /></label>
         <div class="sheet-actions">
           <button class="act" type="submit">Recut</button>
           <button class="kill" type="button" id="btnKill">Kill</button>
         </div>
-      </form>`;
+      </form>`
+      }`;
   }
 
   function recutDirty() {
@@ -521,17 +654,11 @@
     }
     const top = f.querySelector("[name=ad_top]");
     const bot = f.querySelector("[name=ad_bottom]");
-    const left = f.querySelector("[name=remaining_layers]");
     const p = state.plans.find((x) => x.id === state.selected);
     if (!p) return false;
     const curTop = String(p.ad_top ?? "");
     const curBot = String(p.ad_bottom ?? "");
-    const curLeft = String(p.remaining_layers || 5);
-    return (
-      (top && top.value !== curTop) ||
-      (bot && bot.value !== curBot) ||
-      (left && left.value !== curLeft)
-    );
+    return (top && top.value !== curTop) || (bot && bot.value !== curBot);
   }
 
   function patchSheet(p) {
@@ -546,7 +673,13 @@
       const gloss = dd.querySelector(".gloss");
       const g = gloss ? gloss.outerHTML : "";
       const pipsEl = dd.querySelector(".pips");
-      if (dt === "LAST") dd.innerHTML = lastText(p) + g;
+      if (dt === "AD")
+        dd.innerHTML =
+          (p.ad_status === "known" ? `${adTop(p)} → ${adBot(p)}` : "unknown") + g;
+      else if (dt === "LAST") dd.innerHTML = lastText(p) + g;
+      else if (dt === "MET") dd.innerHTML = metText(p) + g;
+      else if (dt === "ENTER") dd.innerHTML = enterText(p) + g;
+      else if (dt === "EXIT") dd.innerHTML = exitText(p) + g;
       else if (dt === "REST") dd.innerHTML = (restClock(p) || "—") + g;
       else if (dt === "REDS")
         dd.innerHTML = `${redsText(p)} <span class="pips">${pips(p.reds)}</span>${g}`;
@@ -556,7 +689,11 @@
       else if (dt === "LINE") dd.innerHTML = linePrice(p) + g;
       void pipsEl;
     };
+    setDd("AD");
     setDd("LAST");
+    setDd("MET");
+    setDd("ENTER");
+    setDd("EXIT");
     setDd("REST");
     setDd("REDS");
     setDd("VOL");
@@ -578,12 +715,15 @@
           : "$200 book idle · max 2 live";
     }
     renderNeeds(state.needs);
+    renderTape(state.log);
     renderStages(state.plans);
     renderRanks(state.plans);
     if (state.selected) {
       const p = state.plans.find((x) => x.id === state.selected);
       if (p) {
-        if (opts && opts.refreshSheet) renderSheet(p);
+        const parked =
+          p.status === "closed" || p.status === "killed" || p.status === "blocked";
+        if ((opts && opts.refreshSheet) || (parked && $("#recutForm"))) renderSheet(p);
         else patchSheet(p);
       }
     }
@@ -595,6 +735,7 @@
     state.needs = data.needs_you || [];
     state.room = data.room || {};
     state.account = data.account || {};
+    state.log = data.log || [];
     paint(opts);
   }
 
@@ -655,14 +796,28 @@
   });
 
   $("#needsStack").addEventListener("click", async (e) => {
-    const acc = e.target.getAttribute("data-acc");
-    const rej = e.target.getAttribute("data-rej");
+    const btn = e.target.closest("[data-acc], [data-rej]");
+    if (!btn) return;
+    if ($("#needsStack")._busy) return;
+    const acc = btn.getAttribute("data-acc");
+    const rej = btn.getAttribute("data-rej");
+    $("#needsStack")._busy = true;
+    $("#needsStack").querySelectorAll("[data-acc], [data-rej]").forEach((b) => {
+      b.disabled = true;
+    });
     try {
       if (acc) await api(`/api/machine/needs-you/${acc}/accept`, { method: "POST", body: "{}" });
       if (rej) await api(`/api/machine/needs-you/${rej}/reject`, { method: "POST", body: "{}" });
-      if (acc || rej) await load();
+      if (acc) toast("Accepted");
+      if (rej) toast("Rejected");
+      if (acc || rej) await load({ refreshSheet: true });
     } catch (err) {
       toast(err.message);
+    } finally {
+      $("#needsStack")._busy = false;
+      $("#needsStack").querySelectorAll("[data-acc], [data-rej]").forEach((b) => {
+        b.disabled = false;
+      });
     }
   });
 
@@ -680,9 +835,6 @@
         body: JSON.stringify({
           ad_top: fd.get("ad_top") ? Number(fd.get("ad_top")) : null,
           ad_bottom: fd.get("ad_bottom") ? Number(fd.get("ad_bottom")) : null,
-          remaining_layers: fd.get("remaining_layers")
-            ? Number(fd.get("remaining_layers"))
-            : null,
         }),
       });
       toast("Recut");

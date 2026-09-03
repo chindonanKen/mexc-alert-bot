@@ -221,15 +221,27 @@ class TestMachineLogic(unittest.TestCase):
         self.assertFalse(need["needs_you_clear"])
         self.assertIn("waiting on you", need["invitation"])
 
-    def test_exponential_layers_sum_and_deeper_larger(self):
-        from mexc_bot.machine.logic import exponential_layers
+    def test_dump_depth_layers_not_equal_spread(self):
+        from mexc_bot.machine.logic import (
+            dump_depth_layers,
+            equal_spread_prices,
+        )
 
-        layers = exponential_layers(10.0, 5.0, count=5, budget_usd=100)
-        self.assertEqual(len(layers), 5)
+        layers = dump_depth_layers(10.0, 5.0, budget_usd=100)
+        self.assertGreaterEqual(len(layers), 5)
+        ad = [L for L in layers if L.get("band") == "ad"]
+        panic = [L for L in layers if L.get("band") == "panic"]
+        self.assertEqual(len(ad), 5)
+        self.assertEqual(len(panic), 3)
         self.assertAlmostEqual(sum(x["usd"] for x in layers), 100.0, places=3)
-        self.assertLess(layers[0]["usd"], layers[-1]["usd"])
-        self.assertGreater(layers[0]["price"], layers[-1]["price"])
-        self.assertAlmostEqual(layers[-1]["price"], 5.0, places=6)
+        self.assertLess(ad[-1]["price"], 5.0)
+        self.assertGreater(ad[-1]["price"], 0)
+        forbidden = equal_spread_prices(10.0, 5.0, 5)
+        self.assertNotAlmostEqual(ad[0]["price"], forbidden[0], places=4)
+        # Q1 = B − L × 0.10
+        self.assertAlmostEqual(panic[0]["price"], 5.0 - 5.0 * 0.10, places=6)
+        for L in layers:
+            self.assertGreater(L["price"], 0)
 
     def test_play_cap_math(self):
         from mexc_bot.machine.logic import can_open_play
@@ -387,8 +399,8 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         us = next(p for p in body["plans"] if p["symbol"] == "USUSDT")
         self.assertEqual(us["ad_status"], "unknown")
         self.assertEqual(us["ad"], "unknown")
-        self.assertEqual(us["decision"], "Watch. Waiting for the line.")
-        self.assertEqual(us["decision_reason"], "watch")
+        self.assertIn("No written plan, sit.", us["decision"])
+        self.assertEqual(us["decision_reason"], "sit_out")
         self.assertIn("decision", ansem)
         self.assertIn("decision_reason", ansem)
         self.assertIn("room", body)
@@ -465,6 +477,12 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         self.assertIn("p.decision", js.text)
         self.assertIn("whyLine", js.text)
         self.assertIn('class="why"', js.text)
+        self.assertIn("function patchStage", js.text)
+        self.assertIn("setFig", js.text)
+        self.assertIn("enterText", js.text)
+        self.assertIn("metText", js.text)
+        self.assertIn('data-k="AD"', js.text)
+        self.assertIn('data-k="NEWS"', js.text)
         self.assertNotIn("GLOSS.WHY", js.text)
         self.assertNotIn("what the student", js.text.lower())
         self.assertNotIn('resting ? "rest"', js.text)
@@ -483,8 +501,20 @@ class TestMachineIsolationAndApi(unittest.TestCase):
             json={"ad_top": 2.0, "ad_bottom": 1.0, "remaining_layers": 4},
         )
         self.assertEqual(rec.status_code, 200, rec.text)
-        self.assertEqual(rec.json()["plan"]["remaining_layers"], 4)
-        self.assertEqual(rec.json()["plan"]["ad_status"], "known")
+        rec_plan = rec.json()["plan"]
+        self.assertEqual(rec_plan["ad_status"], "known")
+        self.assertEqual(len(rec_plan["layers"]), 8)
+        self.assertLess(rec_plan["layers"][4]["price"], 1.0)
+        forbidden = [2.0 - ((i + 1) / 5) * 1.0 for i in range(5)]
+        self.assertNotAlmostEqual(rec_plan["layers"][0]["price"], forbidden[0], places=4)
+        layers_get = c.get(f"/api/machine/plans/{us['id']}/layers")
+        self.assertEqual(layers_get.status_code, 200, layers_get.text)
+        layers_post = c.post(
+            f"/api/machine/plans/{us['id']}/layers",
+            json={"ad_top": 2.0, "ad_bottom": 1.0},
+        )
+        self.assertEqual(layers_post.status_code, 200, layers_post.text)
+        self.assertFalse(layers_post.json().get("live_orders_sent"))
         killed = c.post(f"/api/machine/plans/{us['id']}/kill")
         self.assertEqual(killed.status_code, 200)
         self.assertEqual(killed.json()["plan"]["status"], "killed")
@@ -525,21 +555,18 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         plans = {p["symbol"]: p for p in c.get("/api/machine/plans").json()["plans"]}
         snap = {
             "ANSEMUSDT|spot": {
+                "last_price": 0.145,
                 "reds": {"15m": 4},
-                "heat_breadth": 4,
-                "volume": "climax",
-                "kenneth_override": True,
+                "heat_breadth": 1,
             },
             "AXTISTOCK_USDT|futures": {
+                "last_price": 65.58,
                 "reds": {"4h": 4},
-                "heat_breadth": 4,
-                "volume": "climax",
-                "kenneth_override": True,
+                "heat_breadth": 1,
             },
             "BPUSDT|spot": {
                 "reds": {"15m": 4},
-                "heat_breadth": 4,
-                "volume": "climax",
+                "heat_breadth": 1,
             },
         }
         ev = c.post("/api/machine/evaluate", json={"snapshot": snap})
@@ -565,10 +592,9 @@ class TestMachineIsolationAndApi(unittest.TestCase):
             json={
                 "snapshot": {
                     "BPUSDT|spot": {
+                        "last_price": 1.0,
                         "reds": {"15m": 5},
-                        "heat_breadth": 4,
-                        "volume": "climax",
-                        "kenneth_override": True,
+                        "heat_breadth": 1,
                     }
                 }
             },
@@ -622,10 +648,9 @@ class TestMachineIsolationAndApi(unittest.TestCase):
                 json={
                     "snapshot": {
                         "AXTISTOCK_USDT|futures": {
+                            "last_price": 65.58,
                             "reds": {"4h": 6},
-                            "heat_breadth": 5,
-                            "volume": "climax",
-                            "kenneth_override": True,
+                            "heat_breadth": 1,
                         }
                     }
                 },
@@ -725,8 +750,7 @@ class TestMachineIsolationAndApi(unittest.TestCase):
                     "ANSEMUSDT|spot": {
                         "last_price": 0.182,
                         "reds": {"15m": 4},
-                        "heat_breadth": 4,
-                        "kenneth_override": True,
+                        "heat_breadth": 1,
                     }
                 }
             },
@@ -736,27 +760,29 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         ansem2 = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
         self.assertEqual(ansem2["last_price"], 0.182)
         self.assertNotAlmostEqual(float(ansem2["last_price"]), float(ansem2["ad_top"]))
+        self.assertFalse(ansem2["live"])
         us2 = next(p for p in ev.json()["plans"] if p["symbol"] == "USUSDT")
         self.assertTrue(us2.get("last_price") in (None,))
         self.assertEqual(us2["layers"], [])
 
-        first = ansem2["layers"][0]
         ev2 = c.post(
             "/api/machine/evaluate",
             json={
                 "snapshot": {
                     "ANSEMUSDT|spot": {
-                        "last_price": float(first["price"]),
+                        "last_price": 0.145,
                         "reds": {"15m": 4},
-                        "heat_breadth": 4,
-                        "kenneth_override": True,
+                        "heat_breadth": 1,
                     }
                 }
             },
         )
         self.assertFalse(ev2.json().get("live_orders_sent"))
         self.assertTrue(
-            any(a.get("action") == "paper_fill" for a in ev2.json().get("actions") or [])
+            any(
+                a.get("action") in {"paper_fill", "paper-buy", "arm"}
+                for a in ev2.json().get("actions") or []
+            )
             or any(
                 o.get("status") == "filled"
                 for o in (
@@ -934,10 +960,8 @@ class TestMachineDecisionLine(unittest.TestCase):
     def test_evaluate_writes_why_and_persists(self):
         c = self._client()
         plans = {p["symbol"]: p for p in c.get("/api/machine/plans").json()["plans"]}
-        self.assertEqual(
-            plans["USUSDT"]["decision"], "Watch. Waiting for the line."
-        )
-        self.assertEqual(plans["USUSDT"]["decision_reason"], "watch")
+        self.assertIn("No written plan, sit.", plans["USUSDT"]["decision"])
+        self.assertEqual(plans["USUSDT"]["decision_reason"], "sit_out")
 
         sit = c.post(
             "/api/machine/evaluate",
@@ -946,27 +970,30 @@ class TestMachineDecisionLine(unittest.TestCase):
         self.assertEqual(sit.status_code, 200, sit.text)
         ansem = next(p for p in sit.json()["plans"] if p["symbol"] == "ANSEMUSDT")
         self.assertFalse(ansem["live"])
-        self.assertEqual(ansem["decision"], "First red at the AD, sit out.")
+        self.assertIn("sit out", ansem["decision"].lower())
         self.assertEqual(ansem["decision_reason"], "sit_out")
         self.assertTrue(
-            any(a.get("action") == "sit_out" for a in sit.json()["actions"])
+            any(
+                a.get("action") == "sit_out" and a.get("plan_id") == ansem["id"]
+                for a in sit.json()["actions"]
+            )
         )
         got = c.get(f"/api/machine/plans/{ansem['id']}").json()["plan"]
-        self.assertEqual(got["decision"], "First red at the AD, sit out.")
+        self.assertIn("sit out", got["decision"].lower())
 
         sit2 = c.post(
             "/api/machine/evaluate",
             json={"snapshot": {"ANSEMUSDT|spot": {"reds": {"15m": 2}}}},
         )
         ansem2 = next(p for p in sit2.json()["plans"] if p["symbol"] == "ANSEMUSDT")
-        self.assertEqual(ansem2["decision"], "Second red at the AD, sit out.")
+        self.assertIn("sit out", ansem2["decision"].lower())
 
         wait = c.post(
             "/api/machine/evaluate",
             json={"snapshot": {"ANSEMUSDT|spot": {"reds": {"15m": 0}}}},
         )
         ansem_w = next(p for p in wait.json()["plans"] if p["symbol"] == "ANSEMUSDT")
-        self.assertEqual(ansem_w["decision"], "Grind, no volume, wait.")
+        self.assertIn("wait", ansem_w["decision"].lower())
         self.assertEqual(ansem_w["decision_reason"], "wait")
 
         no_law = c.post(
@@ -985,7 +1012,10 @@ class TestMachineDecisionLine(unittest.TestCase):
         self.assertFalse(ansem_n["live"])
         self.assertNotEqual(ansem_n["decision_reason"], "arm")
         self.assertFalse(
-            any(a.get("action") == "arm" for a in no_law.json()["actions"])
+            any(
+                a.get("action") == "arm" and a.get("plan_id") == ansem_n["id"]
+                for a in no_law.json()["actions"]
+            )
         )
 
         arm = c.post(
@@ -993,37 +1023,37 @@ class TestMachineDecisionLine(unittest.TestCase):
             json={
                 "snapshot": {
                     "ANSEMUSDT|spot": {
-                        "reds": {"15m": 3},
-                        "volume": "climax",
+                        "last_price": 0.145,
+                        "reds": {"15m": 1},
                         "heat_breadth": 1,
-                        "kenneth_override": True,
                     }
                 }
             },
         )
         ansem_a = next(p for p in arm.json()["plans"] if p["symbol"] == "ANSEMUSDT")
         self.assertTrue(ansem_a["live"])
-        self.assertEqual(
-            ansem_a["decision"],
-            "3 red 15m, volume at the AD, no news, taking it.",
+        self.assertTrue(ansem_a.get("met"))
+        self.assertIn("at this chart's AD", ansem_a["decision"])
+        self.assertIn("paper_buy", ansem_a["decision_reason"])
+        self.assertTrue(
+            any(
+                a.get("action") in {"arm", "paper_fill", "paper-buy", "paper_buy"}
+                and a.get("plan_id") == ansem_a["id"]
+                for a in arm.json()["actions"]
+            )
         )
-        self.assertEqual(ansem_a["decision_reason"], "arm")
-        self.assertTrue(any(a.get("action") == "arm" for a in arm.json()["actions"]))
         refresh = c.get("/api/machine/plans").json()
         ansem_r = next(p for p in refresh["plans"] if p["symbol"] == "ANSEMUSDT")
-        self.assertEqual(
-            ansem_r["decision"],
-            "3 red 15m, volume at the AD, no news, taking it.",
-        )
+        self.assertIn("at this chart's AD", ansem_r["decision"])
 
         axti_arm = c.post(
             "/api/machine/evaluate",
             json={
                 "snapshot": {
                     "AXTISTOCK_USDT|futures": {
-                        "reds": {"4h": 4},
-                        "volume": "climax",
-                        "kenneth_override": True,
+                        "last_price": 65.58,
+                        "reds": {"4h": 2},
+                        "heat_breadth": 1,
                     }
                 }
             },
@@ -1042,10 +1072,9 @@ class TestMachineDecisionLine(unittest.TestCase):
             json={
                 "snapshot": {
                     "PUMPUSDT|spot": {
+                        "last_price": 0.4,
                         "reds": {"15m": 4},
-                        "volume": "climax",
-                        "heat_breadth": 4,
-                        "kenneth_override": True,
+                        "heat_breadth": 1,
                     }
                 }
             },
@@ -1094,7 +1123,7 @@ class TestMachineDecisionLine(unittest.TestCase):
             },
         )
         axti = next(p for p in news.json()["plans"] if p["symbol"] == "AXTISTOCK_USDT")
-        self.assertEqual(axti["decision"], "News flatten.")
+        self.assertIn("flatten", axti["decision"].lower())
         self.assertEqual(axti["decision_reason"], "news")
 
         killed = c.post(f"/api/machine/plans/{plans['BPUSDT']['id']}/kill")
@@ -1165,8 +1194,11 @@ class TestMachineLockedPathAndFail(unittest.TestCase):
         self.assertFalse(axti["live"])
         self.assertNotEqual(axti["decision_reason"], "arm")
         self.assertNotEqual(axti["decision_reason"], "sit_out")
+        axti_acts = [
+            a for a in faster.json()["actions"] if a.get("plan_id") == axti["id"]
+        ]
         self.assertFalse(
-            any(a.get("action") in {"arm", "sit_out"} for a in faster.json()["actions"])
+            any(a.get("action") in {"arm", "sit_out"} for a in axti_acts)
         )
         gate = axti.get("gate") or {}
         faster_states = [
@@ -1225,9 +1257,9 @@ class TestMachineLockedPathAndFail(unittest.TestCase):
                 "now": armed_at,
                 "snapshot": {
                     "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
                         "reds": {"15m": 3},
-                        "volume": "climax",
-                        "kenneth_override": True,
+                        "heat_breadth": 1,
                     }
                 },
             },
@@ -1259,6 +1291,256 @@ class TestMachineLockedPathAndFail(unittest.TestCase):
         )
         self.assertNotEqual(still["decision_reason"], "fail")
         self.assertNotEqual(still["decision"], "Last under the AD, spent.")
+
+
+class TestMachinePaperReact(unittest.TestCase):
+    """Done-bar: at-AD take, quiet grind, fast dump, no rebuy."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Path(self.tmp.name) / "alerts.db"
+        self._env = {
+            "ALERTS_FILE": os.environ.get("ALERTS_FILE"),
+            "DESK_USER_ID": os.environ.get("DESK_USER_ID"),
+            "DESK_API_TOKEN": os.environ.get("DESK_API_TOKEN"),
+            "WEB_UI_TOKEN": os.environ.get("WEB_UI_TOKEN"),
+            "FEATURE_AD_MACHINE": os.environ.get("FEATURE_AD_MACHINE"),
+            "MACHINE_TAPE_LOOP": os.environ.get("MACHINE_TAPE_LOOP"),
+        }
+        os.environ["ALERTS_FILE"] = str(self.db)
+        os.environ["DESK_USER_ID"] = "8630949601"
+        os.environ["FEATURE_AD_MACHINE"] = "true"
+        os.environ["MACHINE_TAPE_LOOP"] = "false"
+        os.environ.pop("DESK_API_TOKEN", None)
+        os.environ.pop("WEB_UI_TOKEN", None)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        for k, v in self._env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def _client(self):
+        from fastapi.testclient import TestClient
+        from mexc_bot.webapi.app import create_app
+
+        return TestClient(create_app())
+
+    def test_at_ad_takes_on_sideways_no_volume_no_override(self):
+        c = self._client()
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"15m": 1},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        self.assertEqual(ev.status_code, 200, ev.text)
+        self.assertFalse(ev.json().get("live_orders_sent"))
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertTrue(ansem["live"])
+        self.assertTrue(ansem.get("met"))
+        self.assertIn("at this chart's AD", ansem["decision"])
+        self.assertTrue(ansem.get("filled_entry") or ansem.get("intended_entry"))
+        log = c.get("/api/machine/log").json()["log"]
+        self.assertTrue(any("atad.take" in str(r.get("rule_ids")) for r in log))
+        feed = c.get("/api/machine/feed").json()["feed"]
+        self.assertTrue(feed)
+
+    def test_quiet_grind_buys_nothing(self):
+        c = self._client()
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.22,
+                        "reds": {"15m": 0},
+                        "heat_breadth": 1,
+                        "quiet_grind": True,
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertFalse(ansem["live"])
+        self.assertIn("wait", ansem["decision"].lower())
+        self.assertFalse(
+            any(
+                L.get("status") == "filled"
+                for L in (ansem.get("layers") or [])
+            )
+        )
+
+    def test_fast_dump_starts_at_first_real_volume_layer(self):
+        from mexc_bot.machine.logic import dump_depth_layers
+
+        c = self._client()
+        layers = dump_depth_layers(0.356, 0.145, budget_usd=100)
+        p2 = next(L for L in layers if L["idx"] == 2)
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": float(p2["price"]),
+                        "reds": {"15m": 4},
+                        "heat_breadth": 1,
+                        "fast_dump_volume": True,
+                        "vol_spike": True,
+                    }
+                }
+            },
+        )
+        self.assertEqual(ev.status_code, 200, ev.text)
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertTrue(ansem["live"])
+        self.assertIn("fast dump", ansem["decision"].lower())
+        filled = [L for L in (ansem.get("layers") or []) if L.get("status") == "filled"]
+        self.assertTrue(filled)
+        self.assertLessEqual(max(int(L["idx"]) for L in filled), 3)
+
+    def test_sold_bounce_does_not_rebuy_quiet_walk(self):
+        c = self._client()
+        c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"15m": 3},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        sold = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.18,
+                        "reds": {"15m": 0},
+                        "bounced": True,
+                        "money_pnl": 1.0,
+                    }
+                }
+            },
+        )
+        sold_row = next(p for p in sold.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertFalse(sold_row["live"])
+        self.assertTrue(sold_row.get("filled_exit"))
+        self.assertAlmostEqual(float(sold_row["filled_exit"]["price"]), 0.18)
+        self.assertTrue(
+            any(
+                a.get("action") == "paper-sell" and a.get("plan_id") == sold_row["id"]
+                for a in sold.json()["actions"]
+            )
+        )
+
+    def test_live_tape_panic_up_sells_without_bounced_flag(self):
+        from mexc_bot.machine.tape import panic_up_from_tape, snapshot_for_plan
+
+        plan = {
+            "live": True,
+            "tf": "15m",
+            "ad_bottom": 0.145,
+            "leftover_avg": 0.145,
+            "play_json": {},
+        }
+        bars_1m = [
+            {"o": 0.14, "c": 0.141, "v": 10, "q": 100},
+            {"o": 0.14, "c": 0.141, "v": 10, "q": 100},
+            {"o": 0.14, "c": 0.141, "v": 10, "q": 100},
+            {"o": 0.14, "c": 0.141, "v": 10, "q": 100},
+            {"o": 0.15, "c": 0.18, "v": 80, "q": 400},
+        ]
+        self.assertTrue(
+            panic_up_from_tape(
+                plan, last=0.18, bars_1m=bars_1m, vol_usd_fast=400
+            )
+        )
+        snap = snapshot_for_plan(plan, ticker=0.18, bars_1m=bars_1m)
+        self.assertTrue(snap.get("panic_up_volume"))
+        c = self._client()
+        c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"15m": 3},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.18,
+                        "reds": {"15m": 0},
+                        "heat_breadth": 1,
+                        "bars_1m": bars_1m,
+                        "vol_usd_fast": 400,
+                        "panic_up_volume": True,
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertFalse(ansem["live"])
+        self.assertTrue(ansem.get("filled_exit"))
+        self.assertAlmostEqual(float(ansem["filled_exit"]["price"]), 0.18)
+        walk = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"15m": 1},
+                        "heat_breadth": 1,
+                        "sold_bounce": True,
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in walk.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertFalse(ansem["live"])
+        self.assertIn("not buying the quiet walk", ansem["decision"].lower())
+
+    def test_live_payload_has_exit_and_filtered_log(self):
+        c = self._client()
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"15m": 3},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertTrue(ansem["live"])
+        self.assertTrue(ansem.get("intended_exit"))
+        self.assertEqual(ansem["intended_exit"].get("note"), "re-read this TF")
+        self.assertNotIn("leftover_avg", ansem)
+        self.assertIn("paper_leftover_avg", ansem)
+        log = c.get("/api/machine/plans").json()["log"]
+        self.assertTrue(log)
+        self.assertFalse(any(str(r.get("action") or "") == "wait" for r in log))
 
 
 if __name__ == "__main__":

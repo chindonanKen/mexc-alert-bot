@@ -34,6 +34,13 @@ class RecutBody(BaseModel):
     ad_bottom: Optional[float] = None
     remaining_layers: Optional[int] = Field(default=None, ge=1, le=12)
     tf: Optional[str] = None
+    volume_habit_usd: Optional[float] = None
+    candles_to_bounce: Optional[int] = None
+
+
+class LayersBody(BaseModel):
+    ad_top: Optional[float] = None
+    ad_bottom: Optional[float] = None
 
 
 class NameBody(BaseModel):
@@ -74,6 +81,19 @@ def list_plans(_: bool = Depends(require_auth)):
         "plans": plans,
         "needs_you": needs,
         "room": room_state(plans, needs, closes=closes, kb=kb),
+        "log": store.list_log(
+            uid,
+            limit=40,
+            actions=(
+                "paper-buy",
+                "paper-sell",
+                "add-panic",
+                "flatten-news",
+                "sit-out",
+                "paper_fill",
+                "arm",
+            ),
+        ),
         "live_orders_sent": False,
     }
 
@@ -103,9 +123,13 @@ def recut_plan(plan_id: int, body: RecutBody, _: bool = Depends(require_auth)):
             ad_bottom=body.ad_bottom,
             remaining_layers=body.remaining_layers,
             tf=body.tf,
+            volume_habit_usd=body.volume_habit_usd,
+            candles_to_bounce=body.candles_to_bounce,
         )
     except KeyError:
         raise HTTPException(404, "plan not found")
+    except ValueError as e:
+        raise HTTPException(409, str(e))
     return {"ok": True, "plan": plan}
 
 
@@ -191,6 +215,97 @@ def list_ranks(_: bool = Depends(require_auth)):
         "ranks": plans,
         "room": room_state(plans, needs, closes=closes, kb=kb),
     }
+
+
+@router.get("/plans/{plan_id}/layers")
+def get_layers(plan_id: int, _: bool = Depends(require_auth)):
+    store = _store()
+    uid = _uid()
+    from .engine import public_plan
+
+    row = store.get_plan(uid, plan_id)
+    if not row:
+        raise HTTPException(404, "plan not found")
+    plan = public_plan(store, row)
+    return {
+        "ok": True,
+        "layers": plan.get("layers") or [],
+        "live_orders_sent": False,
+    }
+
+
+@router.post("/plans/{plan_id}/layers")
+def post_layers(plan_id: int, body: LayersBody, _: bool = Depends(require_auth)):
+    store = _store()
+    uid = _uid()
+    from .engine import recut
+
+    try:
+        plan = recut(
+            store,
+            uid,
+            plan_id,
+            ad_top=body.ad_top,
+            ad_bottom=body.ad_bottom,
+        )
+    except KeyError:
+        raise HTTPException(404, "plan not found")
+    return {
+        "ok": True,
+        "plan": plan,
+        "layers": plan.get("layers") or [],
+        "live_orders_sent": False,
+    }
+
+
+@router.get("/log")
+def get_log(
+    plan_id: Optional[int] = None,
+    since: Optional[float] = None,
+    limit: int = 80,
+    _: bool = Depends(require_auth),
+):
+    store = _store()
+    uid = _uid()
+    rows = store.list_log(uid, plan_id=plan_id, since=since, limit=min(int(limit), 400))
+    return {"ok": True, "log": rows, "live_orders_sent": False}
+
+
+@router.get("/feed")
+def get_feed(since: Optional[float] = None, limit: int = 40, _: bool = Depends(require_auth)):
+    """Paper actions for Trading Master. One bubble per row. No Telegram."""
+    store = _store()
+    uid = _uid()
+    rows = store.list_log(
+        uid,
+        since=since,
+        limit=min(int(limit), 100),
+        actions=(
+            "paper-buy",
+            "paper-sell",
+            "add-panic",
+            "flatten-news",
+            "sit-out",
+            "paper_fill",
+            "arm",
+        ),
+    )
+    bubbles = []
+    for r in rows:
+        bubbles.append(
+            {
+                "manila": r.get("manila"),
+                "name": r.get("symbol"),
+                "tf": r.get("tf"),
+                "last": r.get("last_price"),
+                "action": r.get("action"),
+                "why": r.get("why"),
+                "rule_ids": r.get("rule_ids"),
+                "need_chart": str(r.get("action") or "")
+                in ("sit-out", "flatten-news"),
+            }
+        )
+    return {"ok": True, "feed": bubbles, "live_orders_sent": False}
 
 
 @router.post("/evaluate")

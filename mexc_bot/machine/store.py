@@ -7,7 +7,7 @@ import sqlite3
 import time
 from pathlib import Path
 from threading import RLock
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from ..db_safety import ensure_column
 
@@ -184,6 +184,34 @@ class MachineStore:
                         created_at REAL NOT NULL,
                         resolved_at REAL
                     );
+                    CREATE TABLE IF NOT EXISTS machine_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        plan_id INTEGER,
+                        ts REAL NOT NULL,
+                        manila TEXT,
+                        symbol TEXT,
+                        market TEXT,
+                        tf TEXT,
+                        last_price REAL,
+                        action TEXT NOT NULL,
+                        size_pct REAL,
+                        rule_ids TEXT,
+                        why TEXT,
+                        vol_usd_play REAL,
+                        vol_usd_fast REAL,
+                        intended_price REAL,
+                        filled_price REAL,
+                        skip_reason TEXT,
+                        payload_json TEXT
+                    );
+                    CREATE TABLE IF NOT EXISTS machine_process_pack (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        version INTEGER NOT NULL,
+                        pack_json TEXT NOT NULL,
+                        note TEXT,
+                        created_at REAL NOT NULL
+                    );
                     """
                 )
                 for col, decl in (
@@ -195,8 +223,23 @@ class MachineStore:
                     ("gate_json", "TEXT"),
                     ("decision", "TEXT"),
                     ("decision_reason", "TEXT"),
+                    ("play_json", "TEXT"),
+                    ("process_version", "INTEGER"),
+                    ("met", "INTEGER"),
+                    ("leftover_avg", "REAL"),
+                    ("remaining_bag_pct", "REAL"),
                 ):
                     ensure_column(conn, "machine_plans", col, decl)
+                for col, decl in (
+                    ("side", "TEXT"),
+                    ("intended_price", "REAL"),
+                    ("filled_price", "REAL"),
+                    ("filled_at", "REAL"),
+                    ("skip_reason", "TEXT"),
+                    ("size_pct", "REAL"),
+                    ("band", "TEXT"),
+                ):
+                    ensure_column(conn, "machine_orders", col, decl)
                 conn.commit()
             finally:
                 conn.close()
@@ -320,6 +363,8 @@ class MachineStore:
             fields["layers_json"] = _json(fields.pop("layers"))
         if "gate" in fields:
             fields["gate_json"] = _json(fields.pop("gate"))
+        if "play" in fields:
+            fields["play_json"] = _json(fields.pop("play"))
         if "live" in fields:
             fields["live"] = 1 if fields["live"] else 0
         if "resting" in fields:
@@ -365,8 +410,8 @@ class MachineStore:
                 """
                 INSERT INTO machine_orders (
                     user_id, plan_id, layer_idx, price, usd, qty, status,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'working', ?, ?)
+                    created_at, updated_at, side, intended_price, size_pct, band
+                ) VALUES (?, ?, ?, ?, ?, ?, 'working', ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(user_id),
@@ -377,16 +422,82 @@ class MachineStore:
                     layer.get("qty"),
                     now,
                     now,
+                    str(layer.get("side") or "buy"),
+                    float(layer["price"]),
+                    layer.get("size_pct"),
+                    layer.get("band"),
                 ),
             )
         return self.list_orders(user_id, plan_id, status="working")
 
-    def fill_order(self, user_id: int, order_id: int) -> None:
+    def insert_order(
+        self,
+        user_id: int,
+        plan_id: int,
+        *,
+        layer_idx: int = 0,
+        price: float,
+        usd: float,
+        status: str = "filled",
+        side: str,
+        filled_price: Optional[float] = None,
+        size_pct: Optional[float] = None,
+        band: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        now = time.time()
+        oid = self._exec(
+            """
+            INSERT INTO machine_orders (
+                user_id, plan_id, layer_idx, price, usd, qty, status,
+                created_at, updated_at, side, intended_price, filled_price,
+                filled_at, size_pct, band
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(user_id),
+                int(plan_id),
+                int(layer_idx),
+                float(price),
+                float(usd),
+                None,
+                str(status),
+                now,
+                now,
+                str(side),
+                float(price),
+                float(filled_price) if filled_price is not None else float(price),
+                now if status == "filled" else None,
+                size_pct,
+                band,
+            ),
+        )
+        return self._exec(
+            "SELECT * FROM machine_orders WHERE id=?",
+            (int(oid),),
+            fetch="one",
+        )
+
+    def fill_order(
+        self,
+        user_id: int,
+        order_id: int,
+        *,
+        filled_price: Optional[float] = None,
+    ) -> None:
         """Paper fill only. Never writes journal_fills or talks to MEXC."""
+        now = time.time()
+        if filled_price is not None:
+            self._exec(
+                "UPDATE machine_orders SET status='filled', updated_at=?, "
+                "filled_at=?, filled_price=? "
+                "WHERE id=? AND user_id=? AND status='working'",
+                (now, now, float(filled_price), int(order_id), int(user_id)),
+            )
+            return
         self._exec(
-            "UPDATE machine_orders SET status='filled', updated_at=? "
+            "UPDATE machine_orders SET status='filled', updated_at=?, filled_at=? "
             "WHERE id=? AND user_id=? AND status='working'",
-            (time.time(), int(order_id), int(user_id)),
+            (now, now, int(order_id), int(user_id)),
         )
 
     def cancel_working(self, user_id: int, plan_id: int) -> None:
@@ -575,6 +686,103 @@ class MachineStore:
             (status, time.time(), int(user_id), int(need_id)),
         )
         return self.get_need(user_id, need_id)
+
+    def insert_log(self, user_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+        now = float(payload.get("ts") or time.time())
+        lid = self._exec(
+            """
+            INSERT INTO machine_log (
+                user_id, plan_id, ts, manila, symbol, market, tf, last_price,
+                action, size_pct, rule_ids, why, vol_usd_play, vol_usd_fast,
+                intended_price, filled_price, skip_reason, payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(user_id),
+                payload.get("plan_id"),
+                now,
+                payload.get("manila"),
+                payload.get("symbol"),
+                payload.get("market"),
+                payload.get("tf"),
+                payload.get("last_price"),
+                str(payload.get("action") or "wait"),
+                payload.get("size_pct"),
+                payload.get("rule_ids")
+                if isinstance(payload.get("rule_ids"), str)
+                else _json(payload.get("rule_ids")),
+                payload.get("why"),
+                payload.get("vol_usd_play"),
+                payload.get("vol_usd_fast"),
+                payload.get("intended_price"),
+                payload.get("filled_price"),
+                payload.get("skip_reason"),
+                _json(payload.get("payload")),
+            ),
+        )
+        return self._exec(
+            "SELECT * FROM machine_log WHERE id=?",
+            (int(lid),),
+            fetch="one",
+        )
+
+    def list_log(
+        self,
+        user_id: int,
+        *,
+        plan_id: Optional[int] = None,
+        since: Optional[float] = None,
+        limit: int = 80,
+        actions: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        sql = "SELECT * FROM machine_log WHERE user_id=?"
+        params: List[Any] = [int(user_id)]
+        if plan_id is not None:
+            sql += " AND plan_id=?"
+            params.append(int(plan_id))
+        if since is not None:
+            sql += " AND ts>?"
+            params.append(float(since))
+        if actions:
+            marks = ",".join("?" for _ in actions)
+            sql += f" AND action IN ({marks})"
+            params.extend(str(a) for a in actions)
+        sql += " ORDER BY ts DESC, id DESC LIMIT ?"
+        params.append(int(limit))
+        return self._exec(sql, tuple(params), fetch="all")
+
+    def latest_process_pack(self) -> Optional[Dict[str, Any]]:
+        row = self._exec(
+            "SELECT * FROM machine_process_pack ORDER BY version DESC, id DESC LIMIT 1",
+            fetch="one",
+        )
+        if not row:
+            return None
+        blob = parse_json(row.get("pack_json"), {})
+        row["json"] = blob
+        return row
+
+    def insert_process_pack(
+        self, pack: Dict[str, Any], *, note: Optional[str] = None
+    ) -> Dict[str, Any]:
+        latest = self.latest_process_pack()
+        version = int((latest or {}).get("version") or 0) + 1
+        pack = dict(pack)
+        pack["version"] = version
+        pid = self._exec(
+            """
+            INSERT INTO machine_process_pack (version, pack_json, note, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (version, _json(pack), note, time.time()),
+        )
+        row = self._exec(
+            "SELECT * FROM machine_process_pack WHERE id=?",
+            (int(pid),),
+            fetch="one",
+        )
+        row["json"] = pack
+        return row
 
     def live_count(self, user_id: int) -> int:
         row = self._exec(

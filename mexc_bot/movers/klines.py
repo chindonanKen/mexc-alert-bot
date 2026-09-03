@@ -219,16 +219,20 @@ class KlineClient:
         out: List[dict] = []
         for row in data:
             try:
-                out.append(
-                    {
-                        "ts": float(row[0]) / 1000.0,
-                        "o": float(row[1]),
-                        "h": float(row[2]),
-                        "l": float(row[3]),
-                        "c": float(row[4]),
-                        "v": float(row[5]),
-                    }
-                )
+                bar = {
+                    "ts": float(row[0]) / 1000.0,
+                    "o": float(row[1]),
+                    "h": float(row[2]),
+                    "l": float(row[3]),
+                    "c": float(row[4]),
+                    "v": float(row[5]),
+                }
+                if len(row) > 7 and row[7] is not None:
+                    try:
+                        bar["q"] = float(row[7])
+                    except (TypeError, ValueError):
+                        pass
+                out.append(bar)
             except (TypeError, ValueError, IndexError):
                 continue
         return out

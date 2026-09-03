@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "name": "ad-process",
+  "rules": [
+    {
+      "id": "fail.news",
+      "family": "fail",
+      "priority": 0,
+      "when": ["news_kill"],
+      "action": "flatten-news",
+      "why": "Real bad news, flatten."
+    },
+    {
+      "id": "plan.none",
+      "family": "plan",
+      "priority": 1,
+      "when": ["not_written_plan"],
+      "action": "sit-out",
+      "why": "No written plan, sit."
+    },
+    {
+      "id": "exit.no_rebuy",
+      "family": "exit",
+      "priority": 2,
+      "when": ["written_plan", "sold_bounce"],
+      "action": "wait",
+      "why": "Bounce already sold, not buying the quiet walk."
+    },
+    {
+      "id": "exit.sell",
+      "family": "exit",
+      "priority": 2,
+      "when": ["live", "should_sell", "not_sold_bounce", "not_killed"],
+      "action": "paper-sell",
+      "why": "Bounce already strong, into a hung base, or panic-like volume on the way up, selling a matching amount."
+    },
+    {
+      "id": "atad.take",
+      "family": "at-ad",
+      "priority": 2,
+      "when": ["written_plan", "at_ad", "not_killed", "not_sold_bounce", "not_should_sell"],
+      "action": "paper-buy",
+      "why": "Plan written and last at this chart's AD, taking the at-AD layer."
+    },
+    {
+      "id": "path.sit_reds",
+      "family": "path",
+      "priority": 4,
+      "when": ["written_plan", "not_at_ad", "first_or_second_red", "not_board_panic"],
+      "action": "sit-out",
+      "why": "First or second red on this TF, sit out on a normal dump."
+    },
+    {
+      "id": "size.quiet_grind",
+      "family": "size",
+      "priority": 5,
+      "when": ["written_plan", "not_at_ad", "quiet_grind"],
+      "action": "wait",
+      "why": "Quiet grind, no dollar volume spike, wait."
+    },
+    {
+      "id": "size.fast_dump",
+      "family": "size",
+      "priority": 5,
+      "when": ["written_plan", "fast_dump_volume", "not_sold_bounce", "not_killed"],
+      "action": "paper-buy",
+      "why": "Fast dump with dollar volume, taking from the first real-volume layer."
+    },
+    {
+      "id": "fail.add_panic",
+      "family": "fail",
+      "priority": 6,
+      "when": ["written_plan", "past_b", "fast_dump_volume", "not_news_kill", "not_killed"],
+      "action": "add-panic",
+      "why": "Break of AD, add with the panic half."
+    },
+    {
+      "id": "size.wait",
+      "family": "size",
+      "priority": 5,
+      "when": ["written_plan", "not_at_ad"],
+      "action": "wait",
+      "why": "Plan written, last not at the AD, wait."
+    }
+  ]
+}

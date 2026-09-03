@@ -191,6 +191,101 @@ def pick_working_tf(
     }
 
 
+# Dump-depth AD-side: cluster at the AD, not equal fifths from T.
+# P_i = B + L × frac. P5 slightly under B. Forbidden: P_i = T − L × i / 5.
+AD_SIDE_L_FRACS = (0.16, 0.10, 0.06, 0.02, -0.02)
+AD_SIDE_HALF_PCTS = (10.0, 15.0, 20.0, 25.0, 30.0)
+PANIC_HALF_PCTS = (20.0, 30.0, 50.0)
+PLAY_AD_HALF = 0.50
+
+
+def equal_spread_prices(ad_top: float, ad_bottom: float, n: int = 5) -> List[float]:
+    """Forbidden pack. Tests assert dump-depth is not this."""
+    length = float(ad_top) - float(ad_bottom)
+    return [float(ad_top) - ((i + 1) / n) * length for i in range(n)]
+
+
+def dump_depth_layers(
+    ad_top: Optional[float],
+    ad_bottom: Optional[float],
+    *,
+    budget_usd: float = MAX_PER_PLAY_USD,
+) -> List[Dict[str, Any]]:
+    """Default Size pack. D = L/T. Skip any price ≤ 0. Panic Q_i as specified."""
+    try:
+        top = float(ad_top) if ad_top is not None else None
+        bot = float(ad_bottom) if ad_bottom is not None else None
+    except (TypeError, ValueError):
+        return []
+    if top is None or bot is None:
+        return []
+    if top <= 0 or bot <= 0 or top <= bot:
+        return []
+    length = top - bot
+    depth = length / top
+    budget = max(0.0, min(float(budget_usd), MAX_PER_PLAY_USD))
+    if budget <= 0:
+        return []
+    out: List[Dict[str, Any]] = []
+    idx = 1
+    ad_budget = budget * PLAY_AD_HALF
+    for frac, half_pct in zip(AD_SIDE_L_FRACS, AD_SIDE_HALF_PCTS):
+        px = bot + length * frac
+        if px <= 0:
+            continue
+        usd = round(ad_budget * (half_pct / 100.0), 4)
+        out.append(
+            {
+                "idx": idx,
+                "price": round(float(px), 8),
+                "usd": max(0.0, usd),
+                "size_pct": round(PLAY_AD_HALF * half_pct, 4),
+                "half_pct": half_pct,
+                "band": "ad",
+                "d": round(depth, 6),
+            }
+        )
+        idx += 1
+    for i, half_pct in enumerate(PANIC_HALF_PCTS, start=1):
+        px = bot - length * (0.10 + 0.18 * (i - 1) / 2.0)
+        if px <= 0:
+            continue
+        usd = round(budget * PLAY_AD_HALF * (half_pct / 100.0), 4)
+        out.append(
+            {
+                "idx": idx,
+                "price": round(float(px), 8),
+                "usd": max(0.0, usd),
+                "size_pct": round(PLAY_AD_HALF * half_pct, 4),
+                "half_pct": half_pct,
+                "band": "panic",
+                "d": round(depth, 6),
+            }
+        )
+        idx += 1
+    if out:
+        used = sum(x["usd"] for x in out[:-1])
+        out[-1]["usd"] = round(max(0.0, budget - used), 4)
+    return out
+
+
+def at_ad_layer(layers: Sequence[Dict[str, Any]], ad_bottom: Any) -> Optional[Dict[str, Any]]:
+    """The AD-side layer at/just above B; else P5 slightly under."""
+    try:
+        bot = float(ad_bottom)
+    except (TypeError, ValueError):
+        bot = None
+    ad = [L for L in layers if str(L.get("band") or "ad") == "ad"]
+    if not ad:
+        return None
+    if bot is None:
+        return dict(ad[-1])
+    above = [L for L in ad if float(L.get("price") or 0) >= bot]
+    if above:
+        return dict(above[-1])
+    return dict(ad[-1])
+
+
 def exponential_layers(
     ad_top: Optional[float],
     ad_bottom: Optional[float],
@@ -199,7 +294,9 @@ def exponential_layers(
     budget_usd: float = MAX_PER_PLAY_USD,
     zone_prices: Optional[Sequence[float]] = None,
 ) -> List[Dict[str, Any]]:
-    """Layer toward AD bottom. Exponential size (small first, larger deeper)."""
+    """Deprecated equal-spread. Recut/seed use dump_depth_layers."""
+    del count, zone_prices
+    return dump_depth_layers(ad_top, ad_bottom, budget_usd=budget_usd)
     try:
         top = float(ad_top) if ad_top is not None else None
         bot = float(ad_bottom) if ad_bottom is not None else None

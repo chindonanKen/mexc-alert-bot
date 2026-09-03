@@ -132,34 +132,139 @@ def fatal_news_hits(db_path, symbol: str) -> List[Dict[str, Any]]:
         return []
 
 
+def _bar_green(bar: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(bar, dict):
+        return False
+    try:
+        o = float(bar.get("o") if bar.get("o") is not None else bar.get("open"))
+        c = float(bar.get("c") if bar.get("c") is not None else bar.get("close"))
+    except (TypeError, ValueError):
+        return False
+    return c > o
+
+
+def panic_up_from_tape(
+    plan: Dict[str, Any],
+    *,
+    last: Optional[float],
+    bars_1m: Optional[Sequence[Dict[str, Any]]] = None,
+    faster_bars: Optional[Sequence[Dict[str, Any]]] = None,
+    vol_usd_fast: Optional[float] = None,
+) -> bool:
+    """Live, last above the fill/AD, green fast tape, dollar spike. Not a guessed target."""
+    from .facts import typical_dollar_volume, VOL_SPIKE
+
+    if not plan.get("live"):
+        return False
+    floor = None
+    for raw in (plan.get("leftover_avg"), plan.get("ad_bottom")):
+        try:
+            if raw is not None and float(raw) > 0:
+                floor = float(raw)
+                break
+        except (TypeError, ValueError):
+            continue
+    if last is None or floor is None or last <= floor:
+        return False
+    green = False
+    if bars_1m:
+        green = _bar_green(bars_1m[-1] if bars_1m else None)
+    if not green and faster_bars:
+        green = _bar_green(faster_bars[-1])
+    if not green:
+        return False
+    habit = typical_dollar_volume(bars_1m)
+    spike = False
+    if vol_usd_fast is not None and habit and habit > 0:
+        spike = float(vol_usd_fast) >= VOL_SPIKE * habit
+    if not spike:
+        lab = volume_label(bars_1m)
+        spike = lab in {"elevated", "climax"}
+    return spike
+
+
 def snapshot_for_plan(
     plan: Dict[str, Any],
     *,
     ticker: Any = None,
     bars: Optional[Sequence[Dict[str, Any]]] = None,
+    bars_1m: Optional[Sequence[Dict[str, Any]]] = None,
+    faster_bars: Optional[Sequence[Dict[str, Any]]] = None,
+    faster_tf: Optional[str] = None,
     news: Optional[List[Dict[str, Any]]] = None,
     heat_breadth: Optional[int] = None,
     panic_board: bool = False,
+    board: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build one evaluate snapshot from official tape pieces only."""
+    from .facts import dollar_volume, faster_tf_for
+
     tf = plan.get("tf") or "15m"
-    last = official_last_price(ticker=ticker, bars=bars)
+    last = official_last_price(ticker=ticker, bars=bars_1m or bars)
     reds = official_reds(bars)
     snap: Dict[str, Any] = {}
     if last is not None:
         snap["last_price"] = last
+    reds_map: Dict[str, Any] = {}
     if bars:
         snap["bars"] = list(bars)
         snap["volume"] = volume_label(bars)
         vn = official_volume_n(bars)
         if vn is not None:
             snap["volume_n"] = vn
+        vol_play = dollar_volume(bars)
+        if vol_play is not None:
+            snap["vol_usd_play"] = vol_play
     if reds is not None:
-        snap["reds"] = {str(tf): reds}
+        reds_map[str(tf)] = reds
+    if bars_1m:
+        snap["bars_1m"] = list(bars_1m)
+        vol_fast = dollar_volume(bars_1m)
+        if vol_fast is not None:
+            snap["vol_usd_fast"] = vol_fast
+        r1 = official_reds(bars_1m)
+        if r1 is not None:
+            reds_map["1m"] = r1
+    if faster_bars:
+        ftf = str(faster_tf or faster_tf_for(tf))
+        snap["faster_bars"] = list(faster_bars)
+        fr = official_reds(faster_bars)
+        if fr is not None:
+            reds_map[ftf] = fr
+    if reds_map:
+        snap["reds"] = reds_map
     if news:
         snap["news"] = list(news)
     if heat_breadth is not None:
         snap["heat_breadth"] = heat_breadth
     if panic_board:
         snap["panic_board"] = True
+    if board:
+        snap["board"] = dict(board)
+    from .facts import play_from_row
+
+    play = play_from_row(plan)
+    if last is not None:
+        for raw in play.get("unmet_bases") or []:
+            try:
+                if last >= float(raw):
+                    snap["into_base"] = True
+                    break
+            except (TypeError, ValueError):
+                continue
+        typical = play.get("typical_bounce") or play.get("bounce_run")
+        fill = plan.get("leftover_avg")
+        try:
+            if typical is not None and fill is not None and last >= float(fill) + float(typical):
+                snap["bounce_strong"] = True
+        except (TypeError, ValueError):
+            pass
+    if panic_up_from_tape(
+        plan,
+        last=last,
+        bars_1m=bars_1m,
+        faster_bars=faster_bars,
+        vol_usd_fast=snap.get("vol_usd_fast"),
+    ):
+        snap["panic_up_volume"] = True
     return snap
