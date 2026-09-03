@@ -391,14 +391,16 @@ body[data-tone="needs_you"] .ranks { opacity: 0.4; }
   to { opacity: 1; transform: translateX(0); }
 }
 @media (max-width: 720px) {
-  .rank {
-    grid-template-columns: 2.2rem 1fr auto;
+  .rank, .rank-head {
+    grid-template-columns: 2.2rem 1fr 4.4rem;
     height: auto;
     min-height: 52px;
     padding: 0.45rem 0;
   }
-  .rank .vol, .rank .news, .rank .rest, .rank .next, .rank .reds,
-  .rank-head span:nth-child(n+8) { display: none; }
+  .rank .ad, .rank .met, .rank .enter, .rank .exit, .rank .next, .rank .reds,
+  .rank .vol, .rank .news, .rank .rest,
+  .rank-head span:nth-child(3),
+  .rank-head span:nth-child(n+5) { display: none; }
 }
 
 .rank.skeleton { cursor: default; }

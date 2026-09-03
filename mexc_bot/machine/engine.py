@@ -177,6 +177,47 @@ def recut(
     return public_plan(store, store.get_plan(user_id, plan_id))
 
 
+def write_layers(
+    store: MachineStore,
+    user_id: int,
+    plan_id: int,
+    *,
+    ad_top: Optional[float] = None,
+    ad_bottom: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Persist dump-depth pack. Allowed on closed/killed. Does not recut T/B unless given."""
+    plan = store.get_plan(user_id, plan_id)
+    if not plan:
+        raise KeyError("plan not found")
+    top = float(ad_top) if ad_top is not None else plan.get("ad_top")
+    bot = float(ad_bottom) if ad_bottom is not None else plan.get("ad_bottom")
+    layers = dump_depth_layers(top, bot, budget_usd=MAX_PER_PLAY_USD)
+    if not layers:
+        raise ValueError("need a written AD top and bottom")
+    parked = str(plan.get("status") or "") in ("closed", "killed", "blocked")
+    patch: Dict[str, Any] = {
+        "layers": layers,
+        "remaining_layers": 0 if parked else len(layers),
+        "next_layer_usd": None if parked else (layers[0]["usd"] if layers else None),
+    }
+    if ad_top is not None:
+        patch["ad_top"] = top
+    if ad_bottom is not None:
+        patch["ad_bottom"] = bot
+    if plan.get("live") and not parked:
+        filled_idx = {
+            int(o.get("layer_idx") or 0)
+            for o in store.list_orders(user_id, plan_id, status="filled")
+            if o.get("side") != "sell"
+        }
+        remaining = [L for L in layers if int(L.get("idx") or 0) not in filled_idx]
+        store.replace_working_orders(user_id, plan_id, remaining)
+        patch["remaining_layers"] = len(remaining)
+        patch["resting"] = bool(remaining)
+    store.patch_plan(user_id, plan_id, **patch)
+    return public_plan(store, store.get_plan(user_id, plan_id))
+
+
 def kill(store: MachineStore, user_id: int, plan_id: int) -> Dict[str, Any]:
     plan = store.get_plan(user_id, plan_id)
     if not plan:
@@ -393,7 +434,15 @@ def _evaluate_plan(
         tf = play_tf or "15m"
         reds_map = {tf: snap.get("reds")}
     volume = snap.get("volume") or plan.get("volume") or "unknown"
-    volume_n = plan.get("volume_n")
+    volume_n = (
+        snap.get("volume_n")
+        if snap.get("volume_n") is not None
+        else snap.get("vol_usd_fast")
+        if snap.get("vol_usd_fast") is not None
+        else snap.get("vol_usd_play")
+        if snap.get("vol_usd_play") is not None
+        else plan.get("volume_n")
+    )
     last_price = official_last_price(
         ticker=snap.get("last_price")
         if snap.get("last_price") is not None
@@ -403,13 +452,17 @@ def _evaluate_plan(
     if last_price is None:
         last_price = plan.get("last_price")
     if snap.get("bars"):
-        volume = volume_label(snap.get("bars"))
-        volume_n = official_volume_n(snap.get("bars"))
-        tape_reds = official_reds(snap.get("bars"))
-        if tape_reds is not None:
+        if not snap.get("volume"):
+            volume = volume_label(snap.get("bars"))
+        tape_reds_play = official_reds(snap.get("bars"))
+        if tape_reds_play is not None:
             tf_key = str(play_tf or "15m")
             reds_map = dict(reds_map)
-            reds_map[tf_key] = tape_reds
+            reds_map[tf_key] = tape_reds_play
+        if volume_n is None:
+            volume_n = official_volume_n(snap.get("bars"))
+    if snap.get("bars_1m") and volume_n is None:
+        volume_n = official_volume_n(snap.get("bars_1m"))
     heat = snap.get("heat_breadth")
     panic = bool(snap.get("panic_board"))
     ad_known = (plan.get("ad_status") == "known") and plan.get("ad_top") is not None
@@ -449,7 +502,7 @@ def _evaluate_plan(
     faster_log = [
         {"tf": s.get("tf"), "reds": s.get("reds")}
         for s in tf_states
-        if s.get("faster_tf_log_only")
+        if s.get("faster_tf_log_only") or str(s.get("tf") or "") == "1m"
     ]
     pack = load_process_pack(store)
     facts = facts_from(plan, snap, board=board)
@@ -478,7 +531,9 @@ def _evaluate_plan(
         "kenneth_override": False,
         "play_tf": play_tf,
         "faster_tf_reds": faster_log,
-        "faster_tf": faster_tf_for(play_tf),
+        "faster_tf": "1m"
+        if "1m" in reds_map
+        else faster_tf_for(play_tf),
         "rule_id": verdict.get("rule_id"),
         "rule_ids": verdict.get("rule_ids"),
         "action": verdict.get("action"),
@@ -493,7 +548,6 @@ def _evaluate_plan(
         else (tf_states[0].get("reds") if tf_states else None)
     )
     _tape_patch = {
-        "reds": tape_reds,
         "last_price": last_price,
         "volume": volume,
         "volume_n": volume_n,
@@ -504,33 +558,19 @@ def _evaluate_plan(
         "decision": why_text,
         "decision_reason": str(verdict.get("action") or "wait").replace("-", "_"),
     }
+    if tape_reds is not None:
+        _tape_patch["reds"] = tape_reds
     if play_tf:
         _tape_patch["tf"] = play_tf
+    if str(plan.get("status") or "") in ("killed", "blocked"):
+        _tape_patch["decision"] = "Killed, not in play."
+        _tape_patch["decision_reason"] = "killed"
+        store.patch_plan(user_id, int(plan["id"]), **_tape_patch)
+        return None
     store.patch_plan(user_id, int(plan["id"]), **_tape_patch)
     plan = store.get_plan(user_id, int(plan["id"]))
 
     action = str(verdict.get("action") or "wait")
-    if str(plan.get("status") or "") in ("killed", "blocked") and action not in (
-        "flatten-news",
-    ):
-        _write_log(
-            store,
-            user_id,
-            plan,
-            verdict,
-            now=now,
-            last=last_price,
-            facts=facts,
-            extra={"skipped": "killed"},
-        )
-        return {
-            "ok": True,
-            "action": action,
-            "plan_id": plan["id"],
-            "decision": why_text,
-            "decision_reason": _tape_patch["decision_reason"],
-            "rule_ids": verdict.get("rule_ids"),
-        }
 
     if action == "flatten-news" or kill:
         why = {"decision": why_text, "decision_reason": "news"}
@@ -701,7 +741,11 @@ def _evaluate_plan(
                 reason="bounce",
                 bounce_or_fail="bounce",
                 process_ok=True,
-                money_pnl=float(snap.get("money_pnl") or 0),
+                money_pnl=float(
+                snap.get("money_pnl")
+                if snap.get("money_pnl") is not None
+                else paper_pnl(store, user_id, int(plan["id"]), last=last_price)
+            ),
             )
             store.patch_plan(
                 user_id,
@@ -748,6 +792,63 @@ def _evaluate_plan(
     }
 
 
+def _map_log_action(raw: Any) -> str:
+    a = str(raw or "wait")
+    if a in ("arm", "paper_fill", "paper-buy", "paper_buy"):
+        return "paper-buy"
+    if a in ("bounce", "paper-sell", "paper_sell"):
+        return "paper-sell"
+    return a
+
+
+def paper_pnl(
+    store: MachineStore,
+    user_id: int,
+    plan_id: int,
+    *,
+    last: Optional[float] = None,
+) -> float:
+    """Mark-to-last paper P&L from filled buys vs sells. Never invent fills."""
+    orders = store.list_orders(user_id, int(plan_id))
+    buys = [o for o in orders if o.get("status") == "filled" and o.get("side") != "sell"]
+    sells = [o for o in orders if o.get("status") == "filled" and o.get("side") == "sell"]
+    cost = 0.0
+    qty = 0.0
+    for o in buys:
+        try:
+            usd = float(o.get("usd") or 0)
+            px = float(o.get("filled_price") or o.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if px <= 0 or usd <= 0:
+            continue
+        cost += usd
+        qty += usd / px
+    if qty <= 0:
+        return 0.0
+    avg = cost / qty
+    sold_qty = 0.0
+    proceeds = 0.0
+    for o in sells:
+        try:
+            usd = float(o.get("usd") or 0)
+            px = float(o.get("filled_price") or o.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if px <= 0:
+            continue
+        q = usd / avg if avg else 0.0
+        sold_qty += q
+        proceeds += q * px
+    remain = max(0.0, qty - sold_qty)
+    mark = last
+    try:
+        mark = float(last) if last is not None else avg
+    except (TypeError, ValueError):
+        mark = avg
+    return round(proceeds + remain * float(mark) - cost, 4)
+
+
 def _write_log(
     store: MachineStore,
     user_id: int,
@@ -760,17 +861,44 @@ def _write_log(
     extra: Optional[Dict[str, Any]] = None,
 ) -> None:
     extra = extra or {}
+    action = _map_log_action(verdict.get("action"))
     filled = extra.get("filled") or []
     filled_px = None
-    intended = None
-    size_pct = None
+    intended = extra.get("intended_price")
+    size_pct = extra.get("size_pct")
     if isinstance(filled, list) and filled:
         try:
             filled_px = float(filled[-1].get("filled_price") or filled[-1].get("price"))
-            intended = float(filled[0].get("price"))
-            size_pct = filled[-1].get("size_pct")
+            if intended is None:
+                intended = float(filled[0].get("price"))
+            if size_pct is None:
+                size_pct = filled[-1].get("size_pct")
         except (TypeError, ValueError, AttributeError):
             pass
+    if intended is None:
+        try:
+            layers = parse_json(plan.get("layers_json"), [])
+            want = "panic" if action == "add-panic" else "ad"
+            nxt = next(
+                (L for L in layers if str(L.get("band") or "ad") == want),
+                None,
+            )
+            if nxt is None:
+                nxt = next((L for L in layers if str(L.get("band") or "ad") == "ad"), None)
+            if nxt and nxt.get("price") is not None:
+                intended = float(nxt["price"])
+                if size_pct is None:
+                    size_pct = nxt.get("size_pct")
+        except (TypeError, ValueError, StopIteration):
+            intended = None
+    why = why_sentence(verdict)
+    if action in ("wait", "sit-out"):
+        prev = store.list_log(user_id, plan_id=int(plan["id"]), limit=1)
+        if prev and str(prev[0].get("action")) == action and str(prev[0].get("why") or "") == why:
+            return
+    pnl = extra.get("money_pnl")
+    if pnl is None:
+        pnl = paper_pnl(store, user_id, int(plan["id"]), last=last)
     store.insert_log(
         user_id,
         {
@@ -781,16 +909,17 @@ def _write_log(
             "market": plan.get("market"),
             "tf": plan.get("tf"),
             "last_price": last,
-            "action": verdict.get("action") or "wait",
+            "action": action,
             "size_pct": size_pct,
             "rule_ids": verdict.get("rule_ids") or [verdict.get("rule_id")],
-            "why": why_sentence(verdict),
+            "why": why,
             "vol_usd_play": facts.get("_vol_usd_play"),
             "vol_usd_fast": facts.get("_vol_usd_fast"),
             "intended_price": intended,
             "filled_price": filled_px,
             "skip_reason": extra.get("skip_reason") or extra.get("skipped"),
             "payload": extra,
+            "money_pnl": pnl,
         },
     )
 
@@ -1362,6 +1491,7 @@ def public_plan(store: MachineStore, row: Optional[Dict[str, Any]]) -> Dict[str,
         "reds": row.get("reds") if row.get("reds") is not None else "unknown",
         "volume": row.get("volume") or "unknown",
         "volume_n": row.get("volume_n"),
+        "vol_usd": row.get("volume_n"),
         "news": row.get("news"),
         "decision": row.get("decision") or "",
         "decision_reason": row.get("decision_reason"),

@@ -113,7 +113,7 @@
     LAST: "official last price",
     NEXT: "dollars for the next layer",
     REDS: "red candles on this TF",
-    VOL: "last bar size",
+    VOL: "last bar in dollars",
     NEWS: "delist/scam or clear",
     REST: "time since the play armed",
     LINE: "next layer price",
@@ -176,15 +176,18 @@
   }
 
   function fmtVol(n) {
-    if (n >= 1e6) {
+    const abs = Math.abs(n);
+    let body;
+    if (abs >= 1e6) {
       const x = n / 1e6;
-      return (x >= 10 ? x.toFixed(0) : x.toFixed(1).replace(/\.0$/, "")) + "M";
-    }
-    if (n >= 1e3) {
+      body = (Math.abs(x) >= 10 ? x.toFixed(0) : x.toFixed(1).replace(/\.0$/, "")) + "M";
+    } else if (abs >= 1e3) {
       const x = n / 1e3;
-      return (x >= 10 ? x.toFixed(0) : x.toFixed(1).replace(/\.0$/, "")) + "K";
+      body = (Math.abs(x) >= 10 ? x.toFixed(0) : x.toFixed(1).replace(/\.0$/, "")) + "K";
+    } else {
+      body = String(Math.round(n));
     }
-    return String(Math.round(n));
+    return "$" + body;
   }
 
   function tfText(p) {
@@ -257,6 +260,7 @@
   }
 
   function closeSheet() {
+    if (recutDirty() && !confirm("Drop unsaved Top/Bottom?")) return;
     state.selected = null;
     const sheet = $("#planSheet");
     const back = $("#sheetBack");
@@ -295,9 +299,14 @@
           const when = esc(r.manila || "");
           const who = esc((r.symbol || "").replace("USDT", "").replace("STOCK_", ""));
           const act = esc(r.action || "");
-          const px = r.filled_price != null ? num(r.filled_price) : r.last_price != null ? num(r.last_price) : "";
+          const bits = [when, who, act];
+          if (r.intended_price != null) bits.push("intend " + num(r.intended_price));
+          if (r.filled_price != null) bits.push("fill " + num(r.filled_price));
+          else if (r.last_price != null) bits.push(num(r.last_price));
+          if (r.size_pct != null) bits.push(Number(r.size_pct) + "%");
+          if (r.money_pnl != null) bits.push("pnl " + money(r.money_pnl));
           const why = r.why ? `<span class="why">${esc(r.why)}</span>` : "";
-          return `<p class="tape-row">${when} · ${who} · ${act}${px ? " · " + px : ""}${why}</p>`;
+          return `<p class="tape-row">${bits.map(esc).join(" · ")}${why}</p>`;
         })
         .join("");
   }
@@ -645,7 +654,10 @@
       ${ladder}
       ${
         p.status === "closed" || p.status === "killed" || p.status === "blocked"
-          ? `<p class="ladder-empty">${esc(p.status)} — recut parked</p>`
+          ? `<p class="ladder-empty">${esc(p.status)} — recut parked</p>
+        <div class="sheet-actions">
+          <button class="act" type="button" id="btnDumpDepth">Write dump-depth</button>
+        </div>`
           : `<form class="console" id="recutForm">
         <label>Top<input name="ad_top" inputmode="decimal" value="${p.ad_top ?? ""}" placeholder="top" /></label>
         <label>Bottom<input name="ad_bottom" inputmode="decimal" value="${p.ad_bottom ?? ""}" /></label>
@@ -797,6 +809,20 @@
   $("#planSheet").addEventListener("click", async (e) => {
     if (e.target.id === "sheetClose") {
       closeSheet();
+      return;
+    }
+    if (e.target.id === "btnDumpDepth") {
+      e.preventDefault();
+      try {
+        await api(`/api/machine/plans/${state.selected}/layers`, {
+          method: "POST",
+          body: "{}",
+        });
+        toast("Dump-depth written");
+        await load({ refreshSheet: true });
+      } catch (err) {
+        toast(err.message);
+      }
       return;
     }
     if (e.target.id !== "btnKill") return;

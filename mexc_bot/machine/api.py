@@ -239,10 +239,10 @@ def get_layers(plan_id: int, _: bool = Depends(require_auth)):
 def post_layers(plan_id: int, body: LayersBody, _: bool = Depends(require_auth)):
     store = _store()
     uid = _uid()
-    from .engine import recut
+    from .engine import write_layers
 
     try:
-        plan = recut(
+        plan = write_layers(
             store,
             uid,
             plan_id,
@@ -251,6 +251,8 @@ def post_layers(plan_id: int, body: LayersBody, _: bool = Depends(require_auth))
         )
     except KeyError:
         raise HTTPException(404, "plan not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return {
         "ok": True,
         "plan": plan,
@@ -287,6 +289,7 @@ def get_feed(since: Optional[float] = None, limit: int = 40, _: bool = Depends(r
             "add-panic",
             "flatten-news",
             "sit-out",
+            "wait",
             "paper_fill",
             "arm",
             "pull-pack",
@@ -305,6 +308,10 @@ def get_feed(since: Optional[float] = None, limit: int = 40, _: bool = Depends(r
                 "rule_ids": r.get("rule_ids"),
                 "need_chart": str(r.get("action") or "")
                 in ("sit-out", "flatten-news"),
+                "size_pct": r.get("size_pct"),
+                "intended": r.get("intended_price"),
+                "filled": r.get("filled_price"),
+                "pnl": r.get("money_pnl"),
             }
         )
     return {"ok": True, "feed": bubbles, "live_orders_sent": False}

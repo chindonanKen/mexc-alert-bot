@@ -100,17 +100,23 @@ def is_stock_symbol(symbol: Any, market: Any = None) -> bool:
     return "STOCK" in s
 
 
-def faster_tf_for(play_tf: Optional[str]) -> str:
-    from .settings import TF_SLOW_RANK, tf_slow_rank
+_FASTER_TF = {
+    "1w": "1d",
+    "1d": "15m",
+    "12h": "15m",
+    "8h": "15m",
+    "4h": "15m",
+    "1h": "5m",
+    "15m": "1m",
+    "5m": "1m",
+    "1m": "1m",
+}
 
-    rank = tf_slow_rank(play_tf)
-    if rank <= 0:
-        return "1m"
-    slower = sorted(
-        ((v, k) for k, v in TF_SLOW_RANK.items() if v < rank),
-        reverse=True,
-    )
-    return slower[0][1] if slower else "1m"
+
+def faster_tf_for(play_tf: Optional[str]) -> str:
+    """A faster tape than the play TF. Never the next-slower chart step (12h on 1d)."""
+    key = str(play_tf or "").strip()
+    return _FASTER_TF.get(key, "1m")
 
 
 def play_from_row(plan: Dict[str, Any]) -> Dict[str, Any]:

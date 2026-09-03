@@ -219,14 +219,25 @@ def hang_ad(
 
 
 def official_volume_n(bars: Optional[Iterable[Dict[str, Any]]]) -> Optional[float]:
-    """Last-bar or last-known official quote volume. Never invent a count."""
+    """Last-bar size. Prefer quote dollars; never invent a count."""
     seq = [b for b in (bars or []) if isinstance(b, dict)]
     for bar in reversed(seq):
         raw = None
-        for key in ("v", "volume", "q", "quote_volume", "quoteVolume"):
+        for key in ("q", "quote_volume", "quoteVolume"):
             if bar.get(key) is not None:
                 raw = bar.get(key)
                 break
+        if raw is None:
+            coin = bar.get("v") if bar.get("v") is not None else bar.get("volume")
+            close = bar.get("c") if bar.get("c") is not None else bar.get("close")
+            try:
+                if coin is not None and close is not None:
+                    c = float(coin) * float(close)
+                    if c > 0:
+                        return c
+            except (TypeError, ValueError):
+                pass
+            raw = coin
         if raw is None:
             continue
         try:
@@ -243,7 +254,16 @@ def volume_label(bars: Optional[Iterable[Dict[str, Any]]]) -> str:
     vols = []
     for b in seq:
         try:
-            vols.append(float(b.get("v") if b.get("v") is not None else b.get("volume") or 0))
+            q = None
+            for key in ("q", "quote_volume", "quoteVolume"):
+                if b.get(key) is not None:
+                    q = float(b.get(key))
+                    break
+            if q is None:
+                coin = float(b.get("v") if b.get("v") is not None else b.get("volume") or 0)
+                close = float(b.get("c") if b.get("c") is not None else b.get("close") or 0)
+                q = coin * close if close > 0 else coin
+            vols.append(q)
         except (TypeError, ValueError):
             vols.append(0.0)
     if not any(vols):

@@ -236,6 +236,16 @@ class TestMachineLogic(unittest.TestCase):
         self.assertAlmostEqual(sum(x["usd"] for x in layers), 100.0, places=3)
         self.assertLess(ad[-1]["price"], 5.0)
         self.assertGreater(ad[-1]["price"], 0)
+        asteroid = dump_depth_layers(0.00009, 0.00001942, budget_usd=100)
+        ast_ad = [L for L in asteroid if L.get("band") == "ad"]
+        self.assertAlmostEqual(ast_ad[0]["price"], 0.00002399, places=7)
+        self.assertAlmostEqual(ast_ad[1]["price"], 0.00002271, places=7)
+        self.assertAlmostEqual(ast_ad[2]["price"], 0.00002142, places=7)
+        self.assertAlmostEqual(ast_ad[3]["price"], 0.00002014, places=7)
+        self.assertAlmostEqual(ast_ad[4]["price"], 0.00001886, places=7)
+        self.assertAlmostEqual(ast_ad[0]["usd"], 5.0, places=1)
+        self.assertAlmostEqual(ast_ad[4]["usd"], 15.0, places=1)
+        self.assertLess(ast_ad[4]["price"], 0.00001942)
         forbidden = equal_spread_prices(10.0, 5.0, 5)
         self.assertNotAlmostEqual(ad[0]["price"], forbidden[0], places=4)
         # Q1 = B − L × 0.10
@@ -467,7 +477,7 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         self.assertIn("this copy, top → bottom", js.text)
         self.assertIn("dollars for the next layer", js.text)
         self.assertIn("red candles on this TF", js.text)
-        self.assertIn("last bar size", js.text)
+        self.assertIn("last bar in dollars", js.text)
         self.assertIn("delist/scam or clear", js.text)
         self.assertIn("time since the play armed", js.text)
         self.assertIn("next layer price", js.text)
@@ -477,6 +487,8 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         self.assertIn("p.decision", js.text)
         self.assertIn("whyLine", js.text)
         self.assertIn('class="why"', js.text)
+        self.assertIn("btnDumpDepth", js.text)
+        self.assertIn("/layers", js.text)
         self.assertIn("function patchStage", js.text)
         self.assertIn("setFig", js.text)
         self.assertIn("enterText", js.text)
@@ -800,7 +812,7 @@ class TestMachineIsolationAndApi(unittest.TestCase):
 
         self.assertEqual(
             official_volume_n([{"c": 1, "v": 100}, {"c": 2, "v": 1_200_000}]),
-            1_200_000.0,
+            2_400_000.0,
         )
         self.assertEqual(official_volume_n([{"v": 50}, {"c": 2}]), 50.0)
         self.assertIsNone(official_volume_n(None))
@@ -837,7 +849,7 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         self.assertEqual(ev.status_code, 200, ev.text)
         self.assertFalse(ev.json().get("live_orders_sent"))
         ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
-        self.assertEqual(ansem["volume_n"], 1_200_000)
+        self.assertEqual(ansem["volume_n"], 240_000.0)
         self.assertEqual(ansem["volume"], "climax")
         axti = next(p for p in ev.json()["plans"] if p["symbol"] == "AXTISTOCK_USDT")
         self.assertTrue(axti.get("volume_n") in (None,))
@@ -845,7 +857,7 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         us = next(p for p in ev.json()["plans"] if p["symbol"] == "USUSDT")
         self.assertTrue(us.get("volume_n") in (None,))
         got = c.get(f"/api/machine/plans/{ansem['id']}").json()["plan"]
-        self.assertEqual(got["volume_n"], 1_200_000)
+        self.assertEqual(got["volume_n"], 240_000.0)
         self.assertEqual(got["volume"], "climax")
 
     def test_named_bar_match_does_not_invent(self):
@@ -1383,14 +1395,13 @@ class TestMachinePaperReact(unittest.TestCase):
         from mexc_bot.machine.logic import dump_depth_layers
 
         c = self._client()
-        layers = dump_depth_layers(0.356, 0.145, budget_usd=100)
-        p2 = next(L for L in layers if L["idx"] == 2)
+        dump_depth_layers(0.356, 0.145, budget_usd=100)
         ev = c.post(
             "/api/machine/evaluate",
             json={
                 "snapshot": {
                     "ANSEMUSDT|spot": {
-                        "last_price": float(p2["price"]),
+                        "last_price": 0.157,
                         "reds": {"15m": 4},
                         "heat_breadth": 1,
                         "fast_dump_volume": True,
@@ -1542,7 +1553,12 @@ class TestMachinePaperReact(unittest.TestCase):
         self.assertIn("paper_leftover_avg", ansem)
         log = c.get("/api/machine/plans").json()["log"]
         self.assertTrue(log)
-        self.assertFalse(any(str(r.get("action") or "") == "wait" for r in log))
+        self.assertTrue(
+            any(
+                str(r.get("action") or "") in ("paper-buy", "paper_fill", "arm")
+                for r in log
+            )
+        )
 
     def test_into_base_sells_invested_bag(self):
         c = self._client()
@@ -1826,6 +1842,60 @@ class TestMachinePaperReact(unittest.TestCase):
         self.assertTrue(ansem["live"])
         self.assertNotIn("nibble", ansem["decision"].lower())
         self.assertGreater(float(ansem.get("allocated_usd") or 0), 10.0)
+
+    def test_post_layers_writes_dump_depth_on_closed(self):
+        c = self._client()
+        plans = c.get("/api/machine/plans").json()["plans"]
+        ansem = next(p for p in plans if p["symbol"] == "ANSEMUSDT")
+        c.post(f"/api/machine/plans/{ansem['id']}/kill")
+        post = c.post(
+            f"/api/machine/plans/{ansem['id']}/layers",
+            json={"ad_top": 0.00009, "ad_bottom": 0.00001942},
+        )
+        self.assertEqual(post.status_code, 200, post.text)
+        layers = post.json()["layers"]
+        ad = [L for L in layers if L.get("band") == "ad"]
+        self.assertAlmostEqual(float(ad[0]["price"]), 0.00002399, places=7)
+        self.assertAlmostEqual(float(ad[4]["price"]), 0.00001886, places=7)
+        self.assertNotAlmostEqual(float(ad[0]["price"]), 0.00007588, places=8)
+
+    def test_faster_tf_is_not_12h_on_1d(self):
+        from mexc_bot.machine.facts import faster_tf_for
+
+        self.assertEqual(faster_tf_for("1d"), "15m")
+        self.assertNotEqual(faster_tf_for("1d"), "12h")
+        self.assertEqual(faster_tf_for("4h"), "15m")
+        self.assertEqual(faster_tf_for("15m"), "1m")
+
+    def test_volume_n_prefers_quote_dollars(self):
+        from mexc_bot.machine.hang import official_volume_n
+
+        n = official_volume_n(
+            [{"v": 1_000_000_000, "c": 2e-5, "q": 4321.0}]
+        )
+        self.assertEqual(n, 4321.0)
+
+    def test_killed_under_ad_is_not_wait(self):
+        c = self._client()
+        plans = c.get("/api/machine/plans").json()["plans"]
+        axti = next(p for p in plans if "AXTI" in p["symbol"])
+        c.post(f"/api/machine/plans/{axti['id']}/kill")
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "AXTISTOCK_USDT|futures": {
+                        "last_price": 60.0,
+                        "reds": {"4h": 3},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        row = next(p for p in ev.json()["plans"] if "AXTI" in p["symbol"])
+        self.assertEqual(row["status"], "killed")
+        self.assertIn("killed", row["decision"].lower())
+        self.assertNotEqual(row.get("decision_reason"), "wait")
 
 
 if __name__ == "__main__":

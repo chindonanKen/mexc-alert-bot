@@ -192,8 +192,9 @@ def pick_working_tf(
 
 
 # Dump-depth AD-side: cluster at the AD, not equal fifths from T.
-# P_i = B + L × frac. P5 slightly under B. Forbidden: P_i = T − L × i / 5.
-AD_SIDE_L_FRACS = (0.16, 0.10, 0.06, 0.02, -0.02)
+# Equally spaced from B + 0.065 L down to slightly under B.
+# Forbidden: P_i = T − L × i / 5.
+AD_SIDE_L_FRACS = tuple(0.065 + (-0.008 - 0.065) * i / 4 for i in range(5))
 AD_SIDE_HALF_PCTS = (10.0, 15.0, 20.0, 25.0, 30.0)
 PANIC_HALF_PCTS = (20.0, 30.0, 50.0)
 PLAY_AD_HALF = 0.50

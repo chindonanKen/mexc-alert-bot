@@ -202,6 +202,7 @@ class MachineStore:
                         vol_usd_fast REAL,
                         intended_price REAL,
                         filled_price REAL,
+                        money_pnl REAL,
                         skip_reason TEXT,
                         payload_json TEXT
                     );
@@ -230,6 +231,7 @@ class MachineStore:
                     ("remaining_bag_pct", "REAL"),
                 ):
                     ensure_column(conn, "machine_plans", col, decl)
+                ensure_column(conn, "machine_log", "money_pnl", "REAL")
                 for col, decl in (
                     ("side", "TEXT"),
                     ("intended_price", "REAL"),
@@ -708,8 +710,8 @@ class MachineStore:
             INSERT INTO machine_log (
                 user_id, plan_id, ts, manila, symbol, market, tf, last_price,
                 action, size_pct, rule_ids, why, vol_usd_play, vol_usd_fast,
-                intended_price, filled_price, skip_reason, payload_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                intended_price, filled_price, skip_reason, payload_json, money_pnl
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 int(user_id),
@@ -732,6 +734,7 @@ class MachineStore:
                 payload.get("filled_price"),
                 payload.get("skip_reason"),
                 _json(payload.get("payload")),
+                payload.get("money_pnl"),
             ),
         )
         return self._exec(

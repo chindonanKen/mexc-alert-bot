@@ -3,11 +3,48 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+import time
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .hang import official_volume_n, volume_label
 
 logger = logging.getLogger(__name__)
+
+_kline_client = None
+_px_hist: Dict[str, List[Tuple[float, float]]] = {}
+_BOARD_LOOKBACK = 900.0
+_FAST_DD = 0.03
+
+
+def _kline_cli():
+    global _kline_client
+    if _kline_client is None:
+        from ..movers.klines import KlineClient
+
+        _kline_client = KlineClient(timeout=2.5, cache_ttl=2.5)
+    return _kline_client
+
+
+def note_board_price(key: str, px: Optional[float], now: Optional[float] = None) -> None:
+    if px is None or px <= 0:
+        return
+    ts = float(now if now is not None else time.time())
+    buf = _px_hist.setdefault(str(key), [])
+    buf.append((ts, float(px)))
+    cut = ts - _BOARD_LOOKBACK
+    _px_hist[str(key)] = [(t, p) for t, p in buf if t >= cut]
+
+
+def board_name_is_fast(key: str, px: Optional[float]) -> bool:
+    if px is None or px <= 0:
+        return False
+    buf = _px_hist.get(str(key)) or []
+    if not buf:
+        return False
+    hi = max(p for _, p in buf)
+    if hi <= 0:
+        return False
+    return (hi - float(px)) / hi >= _FAST_DD
 
 
 def _as_price(raw: Any) -> Optional[float]:
@@ -108,9 +145,7 @@ def fetch_official_klines(
     """Plan-TF bars including the forming candle. Soft-fail → []."""
     try:
         if client is None:
-            from ..movers.klines import KlineClient
-
-            client = KlineClient(cache_ttl=8.0)
+            client = _kline_cli()
         bars = client.get_ohlcv(
             market, symbol, tf or "15m", limit=limit, include_forming=True
         )
@@ -209,9 +244,6 @@ def snapshot_for_plan(
     if bars:
         snap["bars"] = list(bars)
         snap["volume"] = volume_label(bars)
-        vn = official_volume_n(bars)
-        if vn is not None:
-            snap["volume_n"] = vn
         vol_play = dollar_volume(bars)
         if vol_play is not None:
             snap["vol_usd_play"] = vol_play
@@ -225,6 +257,13 @@ def snapshot_for_plan(
         r1 = official_reds(bars_1m)
         if r1 is not None:
             reds_map["1m"] = r1
+        if not snap.get("volume") or snap.get("volume") == "unknown":
+            snap["volume"] = volume_label(bars_1m)
+    vn = snap.get("vol_usd_fast") or snap.get("vol_usd_play")
+    if vn is None:
+        vn = official_volume_n(bars_1m or bars)
+    if vn is not None:
+        snap["volume_n"] = vn
     if faster_bars:
         ftf = str(faster_tf or faster_tf_for(tf))
         snap["faster_bars"] = list(faster_bars)

@@ -102,7 +102,7 @@
       "id": "size.quiet_grind",
       "family": "size",
       "priority": 5,
-      "when": ["written_plan", "not_at_ad", "quiet_grind", "not_board_grind", "not_past_b"],
+      "when": ["written_plan", "not_killed", "not_at_ad", "quiet_grind", "not_board_grind", "not_past_b"],
       "action": "wait",
       "why": "Quiet grind, no dollar volume spike, wait."
     },
@@ -126,7 +126,7 @@
       "id": "size.wait",
       "family": "size",
       "priority": 5,
-      "when": ["written_plan", "not_at_ad", "not_past_b", "not_board_grind", "not_bounce_weak"],
+      "when": ["written_plan", "not_killed", "not_at_ad", "not_past_b", "not_board_grind", "not_bounce_weak"],
       "action": "wait",
       "why": "Plan written, last not at the AD, wait."
     }
