@@ -22,6 +22,7 @@ from .engine import (
     public_tape_rows,
     rank_plans,
     recut,
+    recompute_closed_money,
     resolve_need,
     room_state,
     seed_plans,
@@ -73,6 +74,7 @@ def list_plans(_: bool = Depends(require_auth)):
     store = _store()
     uid = _uid()
     seed_plans(store, uid)
+    recompute_closed_money(store, uid)
     plans = rank_plans(store, uid)
     needs = [public_need(n) for n in store.list_needs(uid)]
     closes = [public_close(c) for c in store.list_closes(uid)]

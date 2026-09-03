@@ -187,22 +187,33 @@ def poll_once(
         hung = (plan.get("ad_status") == "known") or plan.get("live")
         bars_1m = None
         trades = None
-        if hung:
-            trades = fetch_recent_trades(plan["market"], plan["symbol"])
         bars = None
         faster_bars = None
         ftf = None
         news = None
-        if fetch_klines:
-            tf = plan.get("tf") or "15m"
-            bars = fetch_official_klines(
-                plan["market"], plan["symbol"], str(tf), client=kline_client
+        if hung:
+            # Prints as they happen + 1m forming. Never a 15m close as the hung tape.
+            trades = fetch_recent_trades(plan["market"], plan["symbol"])
+            bars_1m = fetch_official_klines(
+                plan["market"], plan["symbol"], "1m", client=kline_client
             )
-            ftf = faster_tf_for(str(tf))
-            if ftf and ftf != str(tf) and ftf != "1m":
-                faster_bars = fetch_official_klines(
-                    plan["market"], plan["symbol"], ftf, client=kline_client
+            ftf = "1m"
+        if fetch_klines:
+            tf = plan.get("tf")
+            if tf:
+                bars = fetch_official_klines(
+                    plan["market"], plan["symbol"], str(tf), client=kline_client
                 )
+            elif not hung:
+                bars = fetch_official_klines(
+                    plan["market"], plan["symbol"], "15m", client=kline_client
+                )
+            if not hung:
+                ftf = faster_tf_for(str(tf or "15m"))
+                if ftf and ftf != str(tf or "15m") and ftf != "1m":
+                    faster_bars = fetch_official_klines(
+                        plan["market"], plan["symbol"], ftf, client=kline_client
+                    )
             news = fatal_news_hits(store.db_path, plan["symbol"])
         return plan, ticker, bars, bars_1m, faster_bars, ftf, news, trades
 

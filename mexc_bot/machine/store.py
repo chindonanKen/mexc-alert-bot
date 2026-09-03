@@ -597,6 +597,22 @@ class MachineStore:
             fetch="all",
         )
 
+    def patch_close_money(self, close_id: int, money_pnl: float) -> None:
+        self._exec(
+            "UPDATE machine_closes SET money_pnl=? WHERE id=?",
+            (float(money_pnl), int(close_id)),
+        )
+        self._exec(
+            "UPDATE machine_kb SET money_pnl=? WHERE close_id=?",
+            (float(money_pnl), int(close_id)),
+        )
+
+    def patch_log_money(self, log_id: int, money_pnl: float) -> None:
+        self._exec(
+            "UPDATE machine_log SET money_pnl=? WHERE id=?",
+            (float(money_pnl), int(log_id)),
+        )
+
     def list_kb(self, user_id: int, limit: int = 80) -> List[Dict[str, Any]]:
         return self._exec(
             "SELECT * FROM machine_kb WHERE user_id=? "

@@ -190,7 +190,7 @@ def facts_from(
         ticker=snap.get("last_price")
         if snap.get("last_price") is not None
         else snap.get("ticker"),
-        bars=snap.get("bars") or snap.get("bars_1m"),
+        bars=snap.get("bars_1m"),
     )
     if last is None:
         last = _f(plan.get("last_price"))

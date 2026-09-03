@@ -475,7 +475,9 @@ class TestMachineIsolationAndApi(unittest.TestCase):
         self.assertIn('"M"', js.text)
         self.assertIn("official last price", js.text)
         self.assertIn("this copy, top → bottom", js.text)
-        self.assertIn("dollars for the next layer", js.text)
+        self.assertIn("next layer dollars, or paper money on a close", js.text)
+        self.assertIn("function nextText", js.text)
+        self.assertIn("p.money_pnl", js.text)
         self.assertIn("red candles on this TF", js.text)
         self.assertIn("last bar in dollars", js.text)
         self.assertIn("delist/scam or clear", js.text)
@@ -2285,6 +2287,157 @@ class TestMachinePaperReact(unittest.TestCase):
         )
         self.assertTrue(snap.get("trade_dump") or snap.get("fast_dump_volume"))
         self.assertAlmostEqual(float(snap["last_price"]), 0.14)
+
+    def test_hung_last_is_print_not_15m_close(self):
+        from mexc_bot.machine.tape import snapshot_for_plan
+        import time as _t
+
+        plan = {
+            "symbol": "ASTEROIDUSDT",
+            "market": "spot",
+            "tf": "1d",
+            "ad_status": "known",
+            "ad_top": 0.00003,
+            "ad_bottom": 0.000019,
+        }
+        now = _t.time()
+        bars_15m = [{"o": 0.03, "c": 0.03, "h": 0.03, "l": 0.029, "q": 10}]
+        bars_1m = [{"o": 0.021, "c": 0.021, "h": 0.022, "l": 0.020, "q": 4}]
+        snap = snapshot_for_plan(
+            plan,
+            ticker=0.0205,
+            bars=bars_15m,
+            bars_1m=bars_1m,
+            trades=[{"ts": now, "price": 0.00002217, "quote": 12}],
+        )
+        self.assertAlmostEqual(float(snap["last_price"]), 0.00002217)
+        snap2 = snapshot_for_plan(
+            plan, ticker=None, bars=bars_15m, bars_1m=bars_1m, trades=[]
+        )
+        self.assertAlmostEqual(float(snap2["last_price"]), 0.021)
+        snap3 = snapshot_for_plan(
+            plan, ticker=None, bars=bars_15m, bars_1m=[], trades=[]
+        )
+        self.assertIsNone(snap3.get("last_price"))
+
+    def test_asteroid_close_pnl_is_nine_cents_not_zero(self):
+        from mexc_bot.machine.engine import (
+            _close_fill_pnl,
+            paper_pnl,
+            public_plan,
+            recompute_closed_money,
+        )
+        from mexc_bot.machine.store import MachineStore
+
+        store = MachineStore(self.db)
+        uid = 8630949601
+        c = self._client()
+        plans = c.get("/api/machine/plans").json()["plans"]
+        row = next(p for p in plans if p["symbol"] == "ANSEMUSDT")
+        pid = int(row["id"])
+        store.insert_order(
+            uid,
+            pid,
+            layer_idx=0,
+            price=0.00002213,
+            usd=51.6129,
+            status="filled",
+            side="buy",
+            filled_price=0.00002213,
+            size_pct=25.8,
+            band="ad",
+        )
+        store.patch_plan(uid, pid, leftover_avg=0.00002213, live=True, status="live")
+        store.insert_order(
+            uid,
+            pid,
+            layer_idx=0,
+            price=0.00002213,
+            usd=51.6129,
+            status="filled",
+            side="sell",
+            filled_price=0.00002217,
+            size_pct=25.8,
+            band="exit",
+        )
+        store.insert_close(
+            uid,
+            {
+                "plan_id": pid,
+                "symbol": "ANSEMUSDT",
+                "market": "spot",
+                "reason": "bounce",
+                "bounce_or_fail": "bounce",
+                "process_ok": True,
+                "money_pnl": 0.0,
+            },
+        )
+        store.patch_plan(uid, pid, live=False, status="closed", leftover_avg=0.00002213)
+        tick = _close_fill_pnl(
+            [{"filled_price": 0.00002217, "price": 0.00002217, "usd": 51.6129}],
+            0.00002213,
+        )
+        self.assertGreater(tick, 0.05)
+        self.assertLess(tick, 0.15)
+        mark = paper_pnl(store, uid, pid, leftover_avg=0.00002213)
+        self.assertGreater(mark, 0.05)
+        self.assertLess(mark, 0.15)
+        n = recompute_closed_money(store, uid)
+        self.assertGreaterEqual(n, 1)
+        pub = public_plan(store, store.get_plan(uid, pid))
+        self.assertGreater(float(pub.get("money_pnl") or 0), 0.05)
+        self.assertLess(float(pub["money_pnl"]), 0.15)
+        closes = store.list_closes(uid)
+        ast = next(x for x in closes if int(x.get("plan_id") or 0) == pid)
+        self.assertGreater(float(ast["money_pnl"]), 0.05)
+
+    def test_hung_poll_fetches_1m_not_15m_faster(self):
+        from mexc_bot.machine import loop as lp
+        from mexc_bot.machine.engine import seed_plans
+        from mexc_bot.machine.store import MachineStore
+
+        called = []
+
+        def fake_klines(market, symbol, tf, client=None):
+            called.append(str(tf))
+            return [{"o": 0.03, "c": 0.021, "h": 0.03, "l": 0.02, "q": 8}]
+
+        def fake_ticker(*_a, **_k):
+            return 0.0205
+
+        def fake_trades(*_a, **_k):
+            return [{"ts": 1.0, "price": 0.00002217, "quote": 20}]
+
+        orig = (
+            lp.fetch_official_klines,
+            lp.fetch_official_ticker,
+            lp.fetch_recent_trades,
+        )
+        lp.fetch_official_klines = fake_klines
+        lp.fetch_official_ticker = fake_ticker
+        lp.fetch_recent_trades = fake_trades
+        try:
+            store = MachineStore(self.db)
+            uid = 8630949601
+            seed_plans(store, uid)
+            for p in store.list_plans(uid):
+                if p["symbol"] != "ANSEMUSDT":
+                    continue
+                store.patch_plan(
+                    uid,
+                    int(p["id"]),
+                    tf="1d",
+                    ad_status="known",
+                    ad_top=0.356,
+                    ad_bottom=0.145,
+                )
+            out = lp.poll_once(store=store, user_id=uid, fetch_klines=True)
+        finally:
+            lp.fetch_official_klines, lp.fetch_official_ticker, lp.fetch_recent_trades = orig
+        self.assertIn("1m", called)
+        self.assertIn("1d", called)
+        ansem = next(p for p in out["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertAlmostEqual(float(ansem["last_price"]), 0.00002217)
 
     def test_same_add_why_logs_once(self):
         c = self._client()

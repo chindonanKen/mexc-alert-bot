@@ -80,6 +80,14 @@
     return "$" + (Math.abs(x) >= 1 ? String(Math.round(x)) : String(Number(x.toPrecision(4))));
   }
 
+  function nextText(p) {
+    if (p && (p.status === "closed" || p.status === "killed" || p.status === "blocked")) {
+      if (p.money_pnl != null) return money(p.money_pnl);
+      return "—";
+    }
+    return money(p && p.next_layer_usd);
+  }
+
   function cashInt() {
     const x = Number(state.account.cash_usd);
     return Number.isFinite(x) ? Math.round(x) : 200;
@@ -111,7 +119,7 @@
   const GLOSS = {
     AD: "this copy, top → bottom",
     LAST: "official last price",
-    NEXT: "dollars for the next layer",
+    NEXT: "next layer dollars, or paper money on a close",
     REDS: "red candles on this TF",
     VOL: "last bar in dollars",
     NEWS: "delist/scam or clear",
@@ -380,7 +388,7 @@
         ${field("MET", metText(p))}
         ${field("ENTER", enterText(p))}
         ${field("EXIT", exitText(p))}
-        ${field("NEXT", money(p.next_layer_usd))}
+        ${field("NEXT", nextText(p))}
         ${field("REDS", redsText(p), `<span class="pips">${pips(p.reds)}</span>`)}
         ${field("VOL", volText(p) || "—")}
         <div class="field" data-k="NEWS">
@@ -412,7 +420,7 @@
     setFig(el, "MET", metText(p));
     setFig(el, "ENTER", enterText(p));
     setFig(el, "EXIT", exitText(p));
-    setFig(el, "NEXT", money(p.next_layer_usd));
+    setFig(el, "NEXT", nextText(p));
     setFig(el, "REDS", `${redsText(p)}<span class="pips">${pips(p.reds)}</span>`);
     setFig(el, "VOL", volText(p) || "—");
     setFig(el, "REST", restClock(p) || "—");
@@ -482,7 +490,7 @@
     set(".met", metText(p));
     set(".enter", enterText(p));
     set(".exit", exitText(p));
-    set(".next", money(p.next_layer_usd));
+    set(".next", nextText(p));
     set(".reds", `${redsText(p)}<span class="pips">${pips(p.reds)}</span>`);
     set(".vol", volText(p) || "—");
     const news = el.querySelector(".news");
@@ -593,7 +601,7 @@
           <span class="met">${metText(p)}</span>
           <span class="enter">${enterText(p)}</span>
           <span class="exit">${exitText(p)}</span>
-          <span class="next">${money(p.next_layer_usd)}</span>
+          <span class="next">${nextText(p)}</span>
           <span class="reds">${redsText(p)}<span class="pips">${pips(p.reds)}</span></span>
           <span class="vol">${volText(p) || "—"}</span>
           <span class="news${p.news ? " news-hot" : ""}">${newsText(p)}</span>
@@ -642,7 +650,7 @@
         <div class="sheet-row"><dt>MET</dt><dd>${metText(p)}<span class="gloss">${esc(GLOSS.MET)}</span></dd></div>
         <div class="sheet-row"><dt>ENTER</dt><dd>${enterText(p)}<span class="gloss">${esc(GLOSS.ENTER)}</span></dd></div>
         <div class="sheet-row"><dt>EXIT</dt><dd>${exitText(p)}<span class="gloss">${esc(GLOSS.EXIT)}</span></dd></div>
-        <div class="sheet-row"><dt>NEXT</dt><dd>${money(p.next_layer_usd)}<span class="gloss">${esc(GLOSS.NEXT)}</span></dd></div>
+        <div class="sheet-row"><dt>NEXT</dt><dd>${nextText(p)}<span class="gloss">${esc(GLOSS.NEXT)}</span></dd></div>
         <div class="sheet-row"><dt>REDS</dt><dd>${redsText(p)} <span class="pips">${pips(p.reds)}</span><span class="gloss">${esc(GLOSS.REDS)}</span></dd></div>
         <div class="sheet-row"><dt>VOL</dt><dd>${volText(p) || "—"}<span class="gloss">${esc(GLOSS.VOL)}</span></dd></div>
         <div class="sheet-row"><dt>NEWS</dt><dd>${newsText(p)}<span class="gloss">${esc(GLOSS.NEWS)}</span></dd></div>
@@ -711,7 +719,7 @@
         dd.innerHTML = `${redsText(p)} <span class="pips">${pips(p.reds)}</span>${g}`;
       else if (dt === "VOL") dd.innerHTML = (volText(p) || "—") + g;
       else if (dt === "NEWS") dd.innerHTML = newsText(p) + g;
-      else if (dt === "NEXT") dd.innerHTML = money(p.next_layer_usd) + g;
+      else if (dt === "NEXT") dd.innerHTML = nextText(p) + g;
       else if (dt === "LINE") dd.innerHTML = linePrice(p) + g;
       void pipsEl;
     };

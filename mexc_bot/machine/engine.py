@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from .facts import bars_ever_met, facts_from, faster_tf_for
 from .hang import hang_ad, manila_label, official_volume_n, volume_label
@@ -502,6 +502,7 @@ def evaluate(
     wall = float(now if now is not None else time.time())
     snapshot = snapshot or {}
     seed_plans(store, user_id)
+    recompute_closed_money(store, user_id)
     actions: List[Dict[str, Any]] = []
     for plan in store.list_plans(user_id):
         key = f"{plan['symbol']}|{plan['market']}"
@@ -582,7 +583,7 @@ def _evaluate_plan(
         ticker=snap.get("last_price")
         if snap.get("last_price") is not None
         else snap.get("ticker"),
-        bars=snap.get("bars") or snap.get("bars_1m"),
+        bars=snap.get("bars_1m"),
     )
     if last_price is None:
         last_price = plan.get("last_price")
@@ -742,8 +743,12 @@ def _evaluate_plan(
                 reason="news_kill",
                 bounce_or_fail="fail",
                 process_ok=True,
-                money_pnl=paper_pnl(
-                    store, user_id, int(plan["id"]), last=last_price
+                money_pnl=_realized_or_mark(
+                    store,
+                    user_id,
+                    int(plan["id"]),
+                    leftover_avg=plan.get("leftover_avg"),
+                    last=last_price,
                 ),
             )
             store.patch_plan(
@@ -901,11 +906,14 @@ def _evaluate_plan(
                 reason="bounce",
                 bounce_or_fail="bounce",
                 process_ok=True,
-                money_pnl=float(
-                snap.get("money_pnl")
-                if snap.get("money_pnl") is not None
-                else paper_pnl(store, user_id, int(plan["id"]), last=last_price)
-            ),
+                money_pnl=_realized_or_mark(
+                    store,
+                    user_id,
+                    int(plan["id"]),
+                    leftover_avg=plan.get("leftover_avg"),
+                    last=last_price,
+                    filled=filled,
+                ),
             )
             store.patch_plan(
                 user_id,
@@ -963,39 +971,153 @@ def _tape_worthy(action: str, facts: Dict[str, Any], filled_any: bool) -> bool:
     return action in TAPE_ACTIONS
 
 
-def _close_fill_pnl(filled: List[Dict[str, Any]], leftover_avg: Any) -> Optional[float]:
-    """Money made or lost on this close only. Not leftover bounce on a wait."""
-    entry = None
+def _px(raw: Any) -> Optional[float]:
     try:
-        if leftover_avg is not None:
-            entry = float(leftover_avg)
+        x = float(raw)
     except (TypeError, ValueError):
-        entry = None
-    if not entry or entry <= 0:
-        for row in filled:
-            try:
-                p = float(row.get("price") or 0)
-            except (TypeError, ValueError):
-                continue
-            if p > 0:
+        return None
+    return x if x > 0 else None
+
+
+def _is_sell_order(row: Optional[Dict[str, Any]]) -> bool:
+    return str((row or {}).get("side") or "").lower() == "sell"
+
+
+def buy_entry_px(
+    orders: Sequence[Dict[str, Any]], leftover_avg: Any = None
+) -> Optional[float]:
+    """VWAP of filled buys. Never the sell print."""
+    cost = 0.0
+    qty = 0.0
+    for o in orders or []:
+        if not isinstance(o, dict) or o.get("status") != "filled" or _is_sell_order(o):
+            continue
+        px = _px(o.get("filled_price")) or _px(o.get("price"))
+        try:
+            usd = float(o.get("usd") or 0)
+        except (TypeError, ValueError):
+            continue
+        if px and usd > 0:
+            cost += usd
+            qty += usd / px
+    if qty > 0:
+        return cost / qty
+    return _px(leftover_avg)
+
+
+def realized_close_pnl(
+    orders: Sequence[Dict[str, Any]], leftover_avg: Any = None
+) -> Optional[float]:
+    """qty × (sell fill − buy fill). Sell intended is not entry."""
+    entry = buy_entry_px(orders, leftover_avg)
+    sells = [
+        o
+        for o in (orders or [])
+        if isinstance(o, dict) and o.get("status") == "filled" and _is_sell_order(o)
+    ]
+    if not sells:
+        return None
+    if entry is None:
+        for s in sells:
+            p = _px(s.get("entry")) or _px(s.get("intended_price"))
+            fp = _px(s.get("filled_price"))
+            if p and fp and abs(p - fp) > 1e-18:
                 entry = p
                 break
-    if not entry or entry <= 0:
+    if entry is None:
         return None
     pnl = 0.0
     any_row = False
-    for row in filled:
+    for s in sells:
+        px = _px(s.get("filled_price"))
         try:
-            usd = float(row.get("usd") or 0)
-            px = float(row.get("filled_price") or 0)
+            usd = float(s.get("usd") or 0)
         except (TypeError, ValueError):
             continue
-        if usd <= 0 or px <= 0:
+        if not px or usd <= 0:
             continue
-        qty = usd / entry
-        pnl += qty * (px - entry)
+        pnl += (usd / entry) * (px - entry)
         any_row = True
     return round(pnl, 4) if any_row else None
+
+
+def _close_fill_pnl(filled: List[Dict[str, Any]], leftover_avg: Any) -> Optional[float]:
+    """Money made or lost on this close only. Entry is buy VWAP, never the sell print."""
+    entry = _px(leftover_avg)
+    pnl = 0.0
+    any_row = False
+    for row in filled or []:
+        if not isinstance(row, dict):
+            continue
+        px = _px(row.get("filled_price"))
+        try:
+            usd = float(row.get("usd") or 0)
+        except (TypeError, ValueError):
+            continue
+        ent = entry or _px(row.get("entry"))
+        if not ent or not px or usd <= 0:
+            continue
+        pnl += (usd / ent) * (px - ent)
+        any_row = True
+    return round(pnl, 4) if any_row else None
+
+
+def _realized_or_mark(
+    store: MachineStore,
+    user_id: int,
+    plan_id: int,
+    *,
+    leftover_avg: Any = None,
+    last: Optional[float] = None,
+    filled: Optional[List[Dict[str, Any]]] = None,
+) -> float:
+    orders = store.list_orders(user_id, int(plan_id))
+    pnl = realized_close_pnl(orders, leftover_avg)
+    if pnl is None and filled:
+        pnl = _close_fill_pnl(filled, leftover_avg)
+    if pnl is None:
+        pnl = paper_pnl(
+            store, user_id, int(plan_id), last=last, leftover_avg=leftover_avg
+        )
+    return float(pnl or 0.0)
+
+
+def recompute_closed_money(store: MachineStore, user_id: int) -> int:
+    """Rewrite stored $0/null closes from actual buy vs sell fills."""
+    n = 0
+    plans = {int(p["id"]): p for p in store.list_plans(user_id)}
+    for close in store.list_closes(user_id, limit=200):
+        try:
+            pid = int(close.get("plan_id") or 0)
+            cid = int(close["id"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        plan = plans.get(pid) or {}
+        pnl = realized_close_pnl(
+            store.list_orders(user_id, pid), plan.get("leftover_avg")
+        )
+        if pnl is None:
+            continue
+        old = close.get("money_pnl")
+        try:
+            same = old is not None and abs(float(old) - pnl) < 1e-6
+        except (TypeError, ValueError):
+            same = False
+        if same:
+            continue
+        store.patch_close_money(cid, pnl)
+        for row in store.list_log(
+            user_id, plan_id=pid, actions=("paper-sell",), limit=80
+        ):
+            prev = row.get("money_pnl")
+            try:
+                empty = prev is None or abs(float(prev)) < 1e-9
+            except (TypeError, ValueError):
+                empty = True
+            if empty:
+                store.patch_log_money(int(row["id"]), pnl)
+        n += 1
+    return n
 
 
 def log_board_flip(store: MachineStore, user_id: int, board: Dict[str, Any]) -> None:
@@ -1087,41 +1209,51 @@ def paper_pnl(
     plan_id: int,
     *,
     last: Optional[float] = None,
+    leftover_avg: Any = None,
 ) -> float:
     """Mark-to-last paper P&L from filled buys vs sells. Never invent fills."""
     orders = store.list_orders(user_id, int(plan_id))
-    buys = [o for o in orders if o.get("status") == "filled" and o.get("side") != "sell"]
-    sells = [o for o in orders if o.get("status") == "filled" and o.get("side") == "sell"]
+    buys = [
+        o
+        for o in orders
+        if o.get("status") == "filled" and not _is_sell_order(o)
+    ]
+    sells = [
+        o for o in orders if o.get("status") == "filled" and _is_sell_order(o)
+    ]
     cost = 0.0
     qty = 0.0
     for o in buys:
+        px = _px(o.get("filled_price")) or _px(o.get("price"))
         try:
             usd = float(o.get("usd") or 0)
-            px = float(o.get("filled_price") or o.get("price") or 0)
         except (TypeError, ValueError):
             continue
-        if px <= 0 or usd <= 0:
+        if not px or usd <= 0:
             continue
         cost += usd
         qty += usd / px
+    avg = (cost / qty) if qty > 0 else _px(leftover_avg)
+    if not avg:
+        got = realized_close_pnl(orders, leftover_avg)
+        return float(got or 0.0)
     if qty <= 0:
-        return 0.0
-    avg = cost / qty
+        got = realized_close_pnl(orders, leftover_avg)
+        return float(got or 0.0)
     sold_qty = 0.0
     proceeds = 0.0
     for o in sells:
+        px = _px(o.get("filled_price"))
         try:
             usd = float(o.get("usd") or 0)
-            px = float(o.get("filled_price") or o.get("price") or 0)
         except (TypeError, ValueError):
             continue
-        if px <= 0:
+        if not px or usd <= 0:
             continue
-        q = usd / avg if avg else 0.0
+        q = usd / avg
         sold_qty += q
         proceeds += q * px
     remain = max(0.0, qty - sold_qty)
-    mark = last
     try:
         mark = float(last) if last is not None else avg
     except (TypeError, ValueError):
@@ -1198,7 +1330,13 @@ def _write_log(
     if action == "flatten-news":
         pnl = extra.get("money_pnl")
         if pnl is None:
-            pnl = paper_pnl(store, user_id, int(plan["id"]), last=last)
+            pnl = paper_pnl(
+                store,
+                user_id,
+                int(plan["id"]),
+                last=last,
+                leftover_avg=plan.get("leftover_avg"),
+            )
         leftover = plan.get("leftover_avg")
         intended = leftover if leftover is not None else intended
         filled_px = last if last is not None else filled_px
@@ -1268,11 +1406,9 @@ def _write_fill_rows(
                 size_pct = round(usd / MAX_PER_PLAY_USD * 100.0, 4) if usd else None
             except (TypeError, ValueError):
                 size_pct = None
-        if size_pct is None:
-            continue
         pnl = None
         if action == "paper-sell":
-            pnl = _close_fill_pnl([row], plan.get("leftover_avg") or intended)
+            pnl = _close_fill_pnl([row], plan.get("leftover_avg") or row.get("entry"))
         prev = store.list_log(
             user_id, plan_id=int(plan["id"]), actions=(action,), limit=1
         )
@@ -1587,6 +1723,7 @@ def _paper_sell(
         px = None
     if px is None or px <= 0:
         return []
+    leftover = _px(plan.get("leftover_avg"))
     bag = sum(float(o.get("usd") or 0) for o in filled_buys)
     target = max(0.0, bag * max(0.0, min(1.0, float(fraction))))
     sold: List[Dict[str, Any]] = []
@@ -1598,7 +1735,13 @@ def _paper_sell(
         take_usd = round(min(usd, target - acc), 4)
         if take_usd <= 0:
             break
-        buy_px = order.get("intended_price") or order.get("price") or px
+        buy_fill = _px(order.get("filled_price")) or leftover
+        buy_line = (
+            _px(order.get("intended_price"))
+            or _px(order.get("price"))
+            or buy_fill
+            or px
+        )
         size_pct = order.get("size_pct")
         if size_pct is None:
             try:
@@ -1609,7 +1752,7 @@ def _paper_sell(
             user_id,
             int(plan["id"]),
             layer_idx=int(order.get("layer_idx") or 0),
-            price=float(buy_px),
+            price=float(buy_line),
             usd=take_usd,
             status="filled",
             side="sell",
@@ -1626,8 +1769,9 @@ def _paper_sell(
             {
                 "id": row.get("id") if row else order.get("id"),
                 "idx": order.get("layer_idx"),
-                "price": order.get("intended_price") or order.get("price") or px,
+                "price": buy_line,
                 "filled_price": px,
+                "entry": buy_fill or leftover,
                 "usd": take_usd,
                 "size_pct": size_pct,
                 "side": "sell",
@@ -1739,7 +1883,20 @@ def _close_and_kb(
 def rank_plans(store: MachineStore, user_id: int) -> List[Dict[str, Any]]:
     from .logic import ad_gap_frac
 
-    plans = [public_plan(store, p) for p in store.list_plans(user_id)]
+    close_pnl: Dict[int, Any] = {}
+    list_closes = getattr(store, "list_closes", None)
+    if callable(list_closes):
+        for c in list_closes(user_id, limit=200) or []:
+            try:
+                pid = int(c.get("plan_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if pid and pid not in close_pnl:
+                close_pnl[pid] = c.get("money_pnl")
+    plans = [
+        public_plan(store, p, close_money=close_pnl.get(int(p["id"])))
+        for p in store.list_plans(user_id)
+    ]
     kb_rows = store.list_kb(user_id, limit=200)
     scores: Dict[int, float] = {}
     for r in kb_rows:
@@ -1784,7 +1941,12 @@ def rank_plans(store: MachineStore, user_id: int) -> List[Dict[str, Any]]:
     return ranked
 
 
-def public_plan(store: MachineStore, row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def public_plan(
+    store: MachineStore,
+    row: Optional[Dict[str, Any]],
+    *,
+    close_money: Any = None,
+) -> Dict[str, Any]:
     if not row:
         return {}
     raw_layers = parse_json(row.get("layers_json"), [])
@@ -1873,6 +2035,31 @@ def public_plan(store: MachineStore, row: Optional[Dict[str, Any]]) -> Dict[str,
     ad_line = "unknown"
     if known:
         ad_line = f"{_num(row.get('ad_top'))} → {_num(row.get('ad_bottom'))}"
+    money_pnl = close_money
+    status = str(row.get("status") or "")
+    closedish = bool(row.get("live")) or status in ("closed", "killed", "blocked")
+    stale_zero = False
+    try:
+        stale_zero = (
+            status == "closed"
+            and bool(sell_orders)
+            and money_pnl is not None
+            and abs(float(money_pnl)) < 1e-9
+        )
+    except (TypeError, ValueError):
+        stale_zero = False
+    if closedish and (money_pnl is None or stale_zero):
+        try:
+            money_pnl = paper_pnl(
+                store,
+                int(row["user_id"]),
+                int(row["id"]),
+                last=row.get("last_price"),
+                leftover_avg=row.get("leftover_avg"),
+            )
+        except (TypeError, ValueError, KeyError):
+            if not stale_zero:
+                money_pnl = None
     return {
         "id": row["id"],
         "symbol": row.get("symbol"),
@@ -1913,6 +2100,7 @@ def public_plan(store: MachineStore, row: Optional[Dict[str, Any]]) -> Dict[str,
         "armed_at": row.get("armed_at"),
         "live": bool(row.get("live")),
         "status": row.get("status"),
+        "money_pnl": money_pnl,
         "allocated_usd": row.get("allocated_usd") or 0,
         "working_orders": [
             {

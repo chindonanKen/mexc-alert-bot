@@ -382,7 +382,7 @@ def snapshot_for_plan(
     from .facts import dollar_volume, faster_tf_for
 
     tf = plan.get("tf") or "15m"
-    last = official_last_price(ticker=ticker, bars=bars_1m or bars)
+    last = None
     if trades:
         newest = max(
             (t for t in trades if isinstance(t, dict) and t.get("price") is not None),
@@ -390,9 +390,11 @@ def snapshot_for_plan(
             default=None,
         )
         if newest is not None:
-            tp = _as_price(newest.get("price"))
-            if tp is not None:
-                last = tp
+            last = _as_price(newest.get("price"))
+    if last is None:
+        last = official_last_price(ticker=ticker, bars=bars_1m)
+    if last is None and bars_1m is None:
+        last = last_bar_close(bars)
     reds = official_reds(bars)
     snap: Dict[str, Any] = {}
     if last is not None:
