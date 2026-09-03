@@ -183,7 +183,7 @@ def hung_seconds_dump(
     trades: Sequence[Dict[str, Any]],
     *,
     now: Optional[float] = None,
-    window: float = 8.0,
+    window: float = 3.0,
 ) -> Dict[str, Any]:
     """Dump through a hung layer with $ volume in seconds. Not a 1m close."""
     ts = float(now if now is not None else time.time())

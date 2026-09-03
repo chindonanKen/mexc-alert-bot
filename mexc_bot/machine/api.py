@@ -19,6 +19,7 @@ from .engine import (
     public_close,
     public_kb,
     public_need,
+    public_tape_rows,
     rank_plans,
     recut,
     resolve_need,
@@ -82,14 +83,7 @@ def list_plans(_: bool = Depends(require_auth)):
         "plans": plans,
         "needs_you": needs,
         "room": room_state(plans, needs, closes=closes, kb=kb),
-        "log": [
-            r
-            for r in store.list_log(uid, limit=80, actions=TAPE_ACTIONS)
-            if not (
-                str(r.get("action") or "") in ("paper-buy", "paper-sell", "add-panic")
-                and r.get("filled_price") is None
-            )
-        ][:40],
+        "log": public_tape_rows(store, uid, limit=40),
         "live_orders_sent": False,
     }
 
@@ -265,12 +259,8 @@ def get_log(
 ):
     store = _store()
     uid = _uid()
-    rows = store.list_log(
-        uid,
-        plan_id=plan_id,
-        since=since,
-        limit=min(int(limit), 400),
-        actions=TAPE_ACTIONS,
+    rows = public_tape_rows(
+        store, uid, plan_id=plan_id, since=since, limit=min(int(limit), 400)
     )
     return {"ok": True, "log": rows, "live_orders_sent": False}
 
@@ -280,12 +270,7 @@ def get_feed(since: Optional[float] = None, limit: int = 40, _: bool = Depends(r
     """Paper actions for Trading Master. One bubble per row. No Telegram."""
     store = _store()
     uid = _uid()
-    rows = store.list_log(
-        uid,
-        since=since,
-        limit=min(int(limit), 100),
-        actions=TAPE_ACTIONS,
-    )
+    rows = public_tape_rows(store, uid, since=since, limit=min(int(limit), 100))
     bubbles = []
     for r in rows:
         bubbles.append(

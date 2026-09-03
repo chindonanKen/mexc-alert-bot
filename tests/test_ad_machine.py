@@ -2087,6 +2087,61 @@ class TestMachinePaperReact(unittest.TestCase):
         ons = [r for r in rows if r.get("action") == "grind-on"]
         self.assertEqual(len(ons), 1)
 
+    def test_owner_fill_row_has_intended_filled_size(self):
+        c = self._client()
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"1h": 3},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        self.assertTrue(
+            any(p["symbol"] == "ANSEMUSDT" and p["live"] for p in ev.json()["plans"])
+        )
+        log = c.get("/api/machine/plans").json()["log"]
+        buys = [r for r in log if r.get("action") == "paper-buy" and r.get("symbol") == "ANSEMUSDT"]
+        self.assertTrue(buys)
+        row = buys[0]
+        self.assertIsNotNone(row.get("intended_price"))
+        self.assertIsNotNone(row.get("filled_price"))
+        self.assertAlmostEqual(float(row["filled_price"]), 0.145, places=5)
+        self.assertIsNotNone(row.get("size_pct"))
+
+    def test_hung_poll_does_not_need_1m_bars_for_dump(self):
+        from mexc_bot.machine.tape import snapshot_for_plan
+
+        plan = {
+            "symbol": "ANSEMUSDT",
+            "market": "spot",
+            "tf": "1d",
+            "ad_status": "known",
+            "ad_top": 0.356,
+            "ad_bottom": 0.145,
+            "live": True,
+            "layers_json": '[{"band":"ad","price":0.15,"idx":1}]',
+        }
+        import time as _t
+        from mexc_bot.machine.tape import _hung_last
+
+        _hung_last["ANSEMUSDT"] = 0.16
+        now = _t.time()
+        snap = snapshot_for_plan(
+            plan,
+            ticker=0.14,
+            trades=[
+                {"ts": now - 0.5, "quote": 9000, "price": 0.14},
+                {"ts": now - 2, "quote": 80, "price": 0.16},
+            ],
+        )
+        self.assertTrue(snap.get("trade_dump") or snap.get("fast_dump_volume"))
+        self.assertAlmostEqual(float(snap["last_price"]), 0.14)
+
     def test_same_add_why_logs_once(self):
         c = self._client()
         c.post(

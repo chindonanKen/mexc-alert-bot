@@ -133,7 +133,12 @@ def is_met(*, last: Any, ad_top: Any, ad_bottom: Any, ad_known: bool) -> bool:
 
 def is_stock_symbol(symbol: Any, market: Any = None) -> bool:
     s = str(symbol or "").upper()
-    return "STOCK" in s
+    if "STOCK" in s:
+        return True
+    # Compact MEXC stock perps (TSLAUSDT), not crypto BTC_USDT.
+    if str(market or "").lower() == "futures" and "_" not in s and s.endswith("USDT"):
+        return True
+    return False
 
 
 _FASTER_TF = {

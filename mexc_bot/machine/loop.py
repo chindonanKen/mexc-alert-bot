@@ -23,7 +23,7 @@ from .tape import (
 
 logger = logging.getLogger(__name__)
 
-TICKER_SECONDS = 2.0
+TICKER_SECONDS = 1.0
 KLINE_SECONDS = 8.0
 
 _lock = threading.Lock()
@@ -99,7 +99,7 @@ def _watchlist_board(store, uid: int) -> Dict[str, Any]:
     coins = [
         r
         for r in rows
-        if not is_stock_symbol(r.get("symbol"))
+        if not is_stock_symbol(r.get("symbol"), r.get("market"))
     ]
     names = len(coins)
     if names < 8:
@@ -189,18 +189,19 @@ def poll_once(
         trades = None
         if hung:
             trades = fetch_recent_trades(plan["market"], plan["symbol"])
-            bars_1m = fetch_official_klines(
-                plan["market"],
-                plan["symbol"],
-                "1m",
-                client=kline_client,
-                limit=12,
-            )
         bars = None
         faster_bars = None
         ftf = None
         news = None
         if fetch_klines:
+            if hung:
+                bars_1m = fetch_official_klines(
+                    plan["market"],
+                    plan["symbol"],
+                    "1m",
+                    client=kline_client,
+                    limit=12,
+                )
             tf = plan.get("tf") or "15m"
             bars = fetch_official_klines(
                 plan["market"], plan["symbol"], str(tf), client=kline_client

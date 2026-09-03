@@ -44,7 +44,37 @@ TAPE_ACTIONS = (
     "panic-on",
     "panic-off",
 )
+_FILLISH = ("paper-buy", "paper-sell", "add-panic")
 _board_prev: Dict[str, Any] = {}
+
+
+def public_tape_rows(
+    store: MachineStore,
+    user_id: int,
+    *,
+    plan_id: Optional[int] = None,
+    since: Optional[float] = None,
+    limit: int = 40,
+) -> List[Dict[str, Any]]:
+    """Tape the owner asked for. No wait, no ghost fills, no pull-pack."""
+    rows = store.list_log(
+        user_id,
+        plan_id=plan_id,
+        since=since,
+        limit=max(int(limit) * 3, 40),
+        actions=TAPE_ACTIONS,
+    )
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        a = str(r.get("action") or "")
+        if a in ("wait", "pull-pack"):
+            continue
+        if a in _FILLISH and r.get("filled_price") is None:
+            continue
+        out.append(r)
+        if len(out) >= int(limit):
+            break
+    return out
 
 
 def seed_plans(
@@ -843,24 +873,35 @@ def _tape_worthy(action: str, facts: Dict[str, Any], filled_any: bool) -> bool:
 
 def _close_fill_pnl(filled: List[Dict[str, Any]], leftover_avg: Any) -> Optional[float]:
     """Money made or lost on this close only. Not leftover bounce on a wait."""
+    entry = None
     try:
-        avg = float(leftover_avg) if leftover_avg is not None else None
+        if leftover_avg is not None:
+            entry = float(leftover_avg)
     except (TypeError, ValueError):
-        avg = None
-    if not avg or avg <= 0:
+        entry = None
+    if not entry or entry <= 0:
+        for row in filled:
+            try:
+                p = float(row.get("price") or 0)
+            except (TypeError, ValueError):
+                continue
+            if p > 0:
+                entry = p
+                break
+    if not entry or entry <= 0:
         return None
     pnl = 0.0
     any_row = False
     for row in filled:
         try:
             usd = float(row.get("usd") or 0)
-            px = float(row.get("filled_price") or row.get("price") or 0)
+            px = float(row.get("filled_price") or 0)
         except (TypeError, ValueError):
             continue
         if usd <= 0 or px <= 0:
             continue
-        qty = usd / avg
-        pnl += qty * (px - avg)
+        qty = usd / entry
+        pnl += qty * (px - entry)
         any_row = True
     return round(pnl, 4) if any_row else None
 
@@ -1036,22 +1077,6 @@ def _write_log(
                 size_pct = filled[-1].get("size_pct")
         except (TypeError, ValueError, AttributeError):
             pass
-    if intended is None:
-        try:
-            layers = parse_json(plan.get("layers_json"), [])
-            want = "panic" if action == "add-panic" else "ad"
-            nxt = next(
-                (L for L in layers if str(L.get("band") or "ad") == want),
-                None,
-            )
-            if nxt is None:
-                nxt = next((L for L in layers if str(L.get("band") or "ad") == "ad"), None)
-            if nxt and nxt.get("price") is not None:
-                intended = float(nxt["price"])
-                if size_pct is None:
-                    size_pct = nxt.get("size_pct")
-        except (TypeError, ValueError, StopIteration):
-            intended = None
     why = why_sentence(verdict)
     filled_any = isinstance(filled, list) and any(
         (row or {}).get("filled_price") is not None for row in filled if isinstance(row, dict)
