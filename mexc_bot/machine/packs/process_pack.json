@@ -86,7 +86,7 @@
       "id": "fail.lower_pack",
       "family": "fail",
       "priority": 6,
-      "when": ["live", "past_b", "not_board_panic", "not_fast_dump_volume", "not_killed"],
+      "when": ["live", "past_b", "not_past_panic", "not_board_panic", "not_fast_dump_volume", "not_killed"],
       "action": "pull-pack",
       "why": "Drop past AD that is not board-wide panic, lowering the pack from the new bottom."
     },

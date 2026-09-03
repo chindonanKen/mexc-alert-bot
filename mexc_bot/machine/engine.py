@@ -1053,17 +1053,16 @@ def _write_log(
         except (TypeError, ValueError, StopIteration):
             intended = None
     why = why_sentence(verdict)
-    filled_any = isinstance(filled, list) and bool(filled)
+    filled_any = isinstance(filled, list) and any(
+        (row or {}).get("filled_price") is not None for row in filled if isinstance(row, dict)
+    )
     if not _tape_worthy(action, facts, filled_any):
         return
-    rid = str(verdict.get("rule_id") or "")
-    prev = store.list_log(user_id, plan_id=int(plan["id"]), limit=1)
-    if prev and str(prev[0].get("action") or "") == action:
-        prev_ids = str(prev[0].get("rule_ids") or "")
-        same_why = str(prev[0].get("why") or "") == why
-        same_rule = bool(rid) and rid in prev_ids
-        if (same_why or same_rule) and not filled_any:
-            return
+    prev = store.list_log(
+        user_id, plan_id=int(plan["id"]), actions=(action,), limit=1
+    )
+    if prev and str(prev[0].get("why") or "") == why:
+        return
     pnl = None
     if action in ("paper-sell", "flatten-news"):
         pnl = extra.get("money_pnl")
@@ -1125,6 +1124,11 @@ def _paper_take(
     scale = 1.0
     if facts.get("board_grind") and rule != "atad.take":
         scale *= 0.5
+    filled_idx = {
+        int(o.get("layer_idx") or 0)
+        for o in store.list_orders(user_id, int(plan["id"]), status="filled")
+        if o.get("side") != "sell"
+    }
     if rule == "size.nibble":
         usd = round(MAX_PER_PLAY_USD * 0.10, 4)
         nibble_px = px if px is not None else float(
@@ -1178,6 +1182,8 @@ def _paper_take(
         for layer in layers:
             if str(layer.get("band") or "") != "panic":
                 continue
+            if int(layer.get("idx") or 0) in filled_idx:
+                continue
             if px is None:
                 take.append(layer)
                 break
@@ -1185,7 +1191,7 @@ def _paper_take(
                 take.append(layer)
     elif rule == "atad.take":
         target = at_ad_layer(layers, plan.get("ad_bottom"))
-        if target:
+        if target and px is not None and facts.get("at_ad"):
             take = [target]
     else:
         ad = [L for L in layers if str(L.get("band") or "ad") == "ad"]
@@ -1201,39 +1207,18 @@ def _paper_take(
                 pass
             take = tagged
 
-    if rule != "atad.take" and px is not None:
+    if px is not None and rule != "atad.take":
         take = [L for L in take if px <= float(L.get("price") or 0)]
+    if rule == "atad.take" and px is not None:
+        take = [L for L in take if facts.get("at_ad")]
     if not take:
         return []
 
-    filled_idx = {
-        int(o.get("layer_idx") or 0)
-        for o in store.list_orders(user_id, int(plan["id"]), status="filled")
-        if o.get("side") != "sell"
-    }
     working = store.list_orders(user_id, int(plan["id"]), status="working")
     if not working:
         plant = [L for L in layers if int(L.get("idx") or 0) not in filled_idx]
         if plant:
             store.replace_working_orders(user_id, int(plan["id"]), plant)
-
-    if not plan.get("live"):
-        if not working:
-            store.replace_working_orders(user_id, int(plan["id"]), layers)
-        store.patch_plan(
-            user_id,
-            int(plan["id"]),
-            status="live",
-            live=True,
-            resting=True,
-            allocated_usd=round(sum(float(x.get("usd") or 0) for x in layers), 4),
-            remaining_layers=len(layers),
-            next_layer_usd=layers[0]["usd"] if layers else None,
-            layers=layers,
-            armed_at=now,
-            leftover_avg=None,
-            remaining_bag_pct=100.0,
-        )
 
     filled: List[Dict[str, Any]] = []
     working = store.list_orders(user_id, int(plan["id"]), status="working")
@@ -1241,14 +1226,16 @@ def _paper_take(
     fill_at = px if px is not None else None
     for layer in take:
         idx = int(layer.get("idx") or 0)
+        if idx in filled_idx:
+            continue
         order = by_idx.get(idx)
         if not order:
             continue
         if fill_at is None:
             continue
-        # At-AD take fills even if last is slightly above the line but in the area.
         line = float(order.get("price"))
-        marketable = fill_at <= line or rule == "atad.take"
+        in_band = bool(facts.get("at_ad"))
+        marketable = fill_at <= line or (rule == "atad.take" and in_band)
         if not marketable:
             continue
         usd = float(order.get("usd") or layer.get("usd") or 0) * scale
@@ -1286,6 +1273,8 @@ def _paper_take(
             notion += usd
     if qty_sum > 0:
         leftover = round(notion / qty_sum, 8)
+    if not filled and not done:
+        return []
     play_budget = MAX_PER_PLAY_USD or 100.0
     remaining_pct = max(0.0, 100.0 - (bag / play_budget) * 100.0) if play_budget else 0.0
     store.patch_plan(
@@ -1299,6 +1288,7 @@ def _paper_take(
         allocated_usd=round(bag, 4),
         live=True,
         status="live",
+        armed_at=plan.get("armed_at") or now,
     )
     return filled
 

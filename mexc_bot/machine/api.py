@@ -82,11 +82,14 @@ def list_plans(_: bool = Depends(require_auth)):
         "plans": plans,
         "needs_you": needs,
         "room": room_state(plans, needs, closes=closes, kb=kb),
-        "log": store.list_log(
-            uid,
-            limit=40,
-            actions=TAPE_ACTIONS,
-        ),
+        "log": [
+            r
+            for r in store.list_log(uid, limit=80, actions=TAPE_ACTIONS)
+            if not (
+                str(r.get("action") or "") in ("paper-buy", "paper-sell", "add-panic")
+                and r.get("filled_price") is None
+            )
+        ][:40],
         "live_orders_sent": False,
     }
 
@@ -262,7 +265,13 @@ def get_log(
 ):
     store = _store()
     uid = _uid()
-    rows = store.list_log(uid, plan_id=plan_id, since=since, limit=min(int(limit), 400))
+    rows = store.list_log(
+        uid,
+        plan_id=plan_id,
+        since=since,
+        limit=min(int(limit), 400),
+        actions=TAPE_ACTIONS,
+    )
     return {"ok": True, "log": rows, "live_orders_sent": False}
 
 

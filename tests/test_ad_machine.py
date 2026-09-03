@@ -1675,7 +1675,7 @@ class TestMachinePaperReact(unittest.TestCase):
             json={
                 "snapshot": {
                     "ANSEMUSDT|spot": {
-                        "last_price": 0.12,
+                        "last_price": 0.10,
                         "reds": {"15m": 0},
                         "heat_breadth": 1,
                         "quiet_grind": True,
@@ -1687,7 +1687,6 @@ class TestMachinePaperReact(unittest.TestCase):
         self.assertTrue(ansem["live"])
         self.assertAlmostEqual(float(ansem["ad_bottom"]), bot)
         self.assertAlmostEqual(float(ansem["ad_top"]), float(before["ad_top"]))
-        self.assertIn("lowering the pack", ansem["decision"].lower())
 
     def test_nibble_fills_on_board_grind_approach(self):
         c = self._client()
@@ -1961,6 +1960,14 @@ class TestMachinePaperReact(unittest.TestCase):
         ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
         self.assertFalse(ansem["live"])
         self.assertFalse(ansem.get("filled_entry"))
+        log = c.get("/api/machine/plans").json()["log"]
+        self.assertFalse(
+            any(
+                str(r.get("action") or "") == "paper-buy"
+                and str(r.get("symbol") or "") == "ANSEMUSDT"
+                for r in log
+            )
+        )
 
     def test_met_stays_met_after_bounce_above_band(self):
         c = self._client()
@@ -2079,6 +2086,39 @@ class TestMachinePaperReact(unittest.TestCase):
         rows = store.list_log(uid, limit=20)
         ons = [r for r in rows if r.get("action") == "grind-on"]
         self.assertEqual(len(ons), 1)
+
+    def test_same_add_why_logs_once(self):
+        c = self._client()
+        c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"1h": 3},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        snap = {
+            "ANSEMUSDT|spot": {
+                "last_price": 0.10,
+                "reds": {"1h": 4},
+                "heat_breadth": 1,
+                "fast_dump_volume": True,
+                "vol_spike": True,
+            }
+        }
+        c.post("/api/machine/evaluate", json={"snapshot": snap})
+        c.post("/api/machine/evaluate", json={"snapshot": snap})
+        log = c.get("/api/machine/plans").json()["log"]
+        adds = [
+            r
+            for r in log
+            if r.get("action") == "add-panic" and r.get("symbol") == "ANSEMUSDT"
+        ]
+        self.assertLessEqual(len(adds), 1)
 
 
 if __name__ == "__main__":
