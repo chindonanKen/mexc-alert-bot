@@ -2175,6 +2175,48 @@ class TestMachinePaperReact(unittest.TestCase):
         self.assertNotEqual(float(srow["filled_price"]), 0.0)
         self.assertGreater(float(srow["money_pnl"]), 0.0)
 
+    def test_ghost_same_why_does_not_block_real_fill_on_evaluate(self):
+        from mexc_bot.machine.store import MachineStore
+        from mexc_bot.machine.hang import manila_label
+        import time as _t
+
+        store = MachineStore(self.db)
+        uid = 8630949601
+        c = self._client()
+        plans = c.get("/api/machine/plans").json()["plans"]
+        ansem = next(p for p in plans if p["symbol"] == "ANSEMUSDT")
+        now = _t.time()
+        why = "Plan written and last at this chart's AD, taking the at-AD layer. (atad.take)"
+        store.insert_log(
+            uid,
+            {
+                "plan_id": ansem["id"],
+                "ts": now,
+                "manila": manila_label(now),
+                "symbol": "ANSEMUSDT",
+                "action": "paper-buy",
+                "why": why,
+                "filled_price": None,
+            },
+        )
+        c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"1h": 3},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        rows = store.list_log(uid, plan_id=int(ansem["id"]), actions=("paper-buy",), limit=20)
+        complete = [r for r in rows if r.get("filled_price") is not None]
+        self.assertTrue(complete)
+        self.assertIsNotNone(complete[0].get("intended_price"))
+        self.assertIsNotNone(complete[0].get("size_pct"))
+
     def test_hung_poll_does_not_need_1m_bars_for_dump(self):
         from mexc_bot.machine.tape import snapshot_for_plan
 

@@ -1207,6 +1207,7 @@ def _write_fill_rows(
     filled: List[Any],
 ) -> None:
     """One tape row per real fill. Intended, filled, size; PnL only on a close."""
+    purge_empty_fills(store, user_id)
     for row in filled:
         if not isinstance(row, dict):
             continue
@@ -1233,11 +1234,15 @@ def _write_fill_rows(
             user_id, plan_id=int(plan["id"]), actions=(action,), limit=1
         )
         if prev and str(prev[0].get("why") or "") == why:
-            try:
-                if abs(float(prev[0].get("filled_price")) - filled_px) < 1e-12:
-                    continue
-            except (TypeError, ValueError):
-                continue
+            prev_fp = prev[0].get("filled_price")
+            if prev_fp is None:
+                pass
+            else:
+                try:
+                    if abs(float(prev_fp) - filled_px) < 1e-12:
+                        continue
+                except (TypeError, ValueError):
+                    pass
         store.insert_log(
             user_id,
             {
@@ -1582,7 +1587,7 @@ def _paper_sell(
                 "price": order.get("intended_price") or order.get("price") or px,
                 "filled_price": px,
                 "usd": take_usd,
-                "size_pct": order.get("size_pct"),
+                "size_pct": size_pct,
                 "side": "sell",
                 "partial": take_usd < usd - 1e-9,
             }
