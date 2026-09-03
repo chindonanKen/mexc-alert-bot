@@ -65,7 +65,7 @@ def sit_at_buy_line(plan: Optional[Dict[str, Any]], last: Any) -> bool:
 def purge_sit_not_at_line(store: MachineStore, user_id: int) -> int:
     """Delete sit-out tape rows whose last was not at that plan's buy line."""
     plans = {int(p["id"]): p for p in store.list_plans(user_id)}
-    sits = store.list_log(user_id, actions=("sit-out",), limit=500)
+    sits = store.list_log(user_id, actions=("sit-out",), limit=8000)
     bad: List[int] = []
     for r in sits:
         pid = r.get("plan_id")
