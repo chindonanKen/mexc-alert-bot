@@ -48,6 +48,38 @@ _FILLISH = ("paper-buy", "paper-sell", "add-panic")
 _board_prev: Dict[str, Any] = {}
 
 
+def sit_at_buy_line(plan: Optional[Dict[str, Any]], last: Any) -> bool:
+    """Sit tape only at this chart's buy line: last 5% of L above B, through B."""
+    if not plan:
+        return False
+    from .facts import is_met
+
+    return is_met(
+        last=last,
+        ad_top=plan.get("ad_top"),
+        ad_bottom=plan.get("ad_bottom"),
+        ad_known=(plan.get("ad_status") == "known") and plan.get("ad_top") is not None,
+    )
+
+
+def purge_sit_not_at_line(store: MachineStore, user_id: int) -> int:
+    """Delete sit-out tape rows whose last was not at that plan's buy line."""
+    plans = {int(p["id"]): p for p in store.list_plans(user_id)}
+    sits = store.list_log(user_id, actions=("sit-out",), limit=500)
+    bad: List[int] = []
+    for r in sits:
+        pid = r.get("plan_id")
+        plan = plans.get(int(pid)) if pid is not None else None
+        if not sit_at_buy_line(plan, r.get("last_price")):
+            try:
+                bad.append(int(r["id"]))
+            except (TypeError, ValueError, KeyError):
+                continue
+    if bad:
+        store.delete_log_ids(user_id, bad)
+    return len(bad)
+
+
 def public_tape_rows(
     store: MachineStore,
     user_id: int,
@@ -56,7 +88,9 @@ def public_tape_rows(
     since: Optional[float] = None,
     limit: int = 40,
 ) -> List[Dict[str, Any]]:
-    """Tape the owner asked for. No wait, no ghost fills, no pull-pack."""
+    """Tape the owner asked for. No wait, no ghost fills, no off-line sit."""
+    purge_sit_not_at_line(store, user_id)
+    plans = {int(p["id"]): p for p in store.list_plans(user_id)}
     rows = store.list_log(
         user_id,
         plan_id=plan_id,
@@ -71,6 +105,11 @@ def public_tape_rows(
             continue
         if a in _FILLISH and r.get("filled_price") is None:
             continue
+        if a == "sit-out":
+            pid = r.get("plan_id")
+            plan = plans.get(int(pid)) if pid is not None else None
+            if not sit_at_buy_line(plan, r.get("last_price")):
+                continue
         out.append(r)
         if len(out) >= int(limit):
             break

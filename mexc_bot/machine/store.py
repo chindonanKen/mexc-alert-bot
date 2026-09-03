@@ -703,6 +703,18 @@ class MachineStore:
         )
         return self.get_need(user_id, need_id)
 
+    def delete_log_ids(self, user_id: int, ids: Sequence[int]) -> int:
+        """User-asked tape cleanup. Never touches alerts or movers."""
+        ids = [int(i) for i in ids if i is not None]
+        if not ids:
+            return 0
+        marks = ",".join("?" for _ in ids)
+        self._exec(
+            f"DELETE FROM machine_log WHERE user_id=? AND id IN ({marks})",
+            (int(user_id), *ids),
+        )
+        return len(ids)
+
     def insert_log(self, user_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
         now = float(payload.get("ts") or time.time())
         lid = self._exec(

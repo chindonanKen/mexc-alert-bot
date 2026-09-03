@@ -123,14 +123,14 @@ def fetch_recent_trades(
     key = f"{market}|{symbol}"
     now = time.time()
     hit = _trade_cache.get(key)
-    if hit and now - hit[0] < 1.2:
+    if hit and now - hit[0] < 0.25:
         return hit[1]
     out: List[Dict[str, Any]] = []
     try:
         cli = _kline_cli()
         if str(market).lower() == "futures":
             url = f"{cli.futures_base}/contract/deals/{symbol}"
-            resp = cli.session.get(url, params={"limit": int(limit)}, timeout=2.0)
+            resp = cli.session.get(url, params={"limit": int(limit)}, timeout=1.0)
             data = resp.json() if resp.status_code == 200 else {}
             rows = data.get("data") if isinstance(data, dict) else data
             for row in rows or []:
@@ -148,24 +148,36 @@ def fetch_recent_trades(
                     continue
                 out.append({"ts": tsec, "price": px, "quote": q})
         else:
-            url = f"{cli.spot_base}/trades"
+            url = f"{cli.spot_base}/aggTrades"
             resp = cli.session.get(
                 url,
-                params={"symbol": str(symbol).upper(), "limit": int(limit)},
-                timeout=2.0,
+                params={"symbol": str(symbol).upper(), "limit": max(int(limit), 200)},
+                timeout=1.0,
             )
             rows = resp.json() if resp.status_code == 200 else []
+            if not isinstance(rows, list):
+                url = f"{cli.spot_base}/trades"
+                resp = cli.session.get(
+                    url,
+                    params={"symbol": str(symbol).upper(), "limit": int(limit)},
+                    timeout=1.0,
+                )
+                rows = resp.json() if resp.status_code == 200 else []
             for row in rows or []:
                 if not isinstance(row, dict):
                     continue
-                px = _as_price(row.get("price"))
+                px = _as_price(
+                    row.get("p") if row.get("p") is not None else row.get("price")
+                )
                 if px is None:
                     continue
                 try:
-                    tsec = float(row.get("time") or 0) / 1000.0
-                    q = float(row.get("quoteQty") or 0)
-                    if q <= 0:
-                        q = float(row.get("qty") or 0) * px
+                    raw_ts = row.get("T") if row.get("T") is not None else row.get("time")
+                    tsec = float(raw_ts or 0) / (1000.0 if float(raw_ts or 0) > 1e12 else 1.0)
+                    if row.get("quoteQty") is not None:
+                        q = float(row.get("quoteQty") or 0)
+                    else:
+                        q = float(row.get("q") if row.get("q") is not None else row.get("qty") or 0) * px
                 except (TypeError, ValueError):
                     continue
                 out.append({"ts": tsec, "price": px, "quote": q})
@@ -183,9 +195,9 @@ def hung_seconds_dump(
     trades: Sequence[Dict[str, Any]],
     *,
     now: Optional[float] = None,
-    window: float = 3.0,
+    window: float = 2.0,
 ) -> Dict[str, Any]:
-    """Dump through a hung layer with $ volume in seconds. Not a 1m close."""
+    """Dump through a hung layer on recent prints. Not a 1m close."""
     ts = float(now if now is not None else time.time())
     key = str(symbol or "")
     prev = _hung_last.get(key)

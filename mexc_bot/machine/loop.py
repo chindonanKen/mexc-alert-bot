@@ -194,14 +194,6 @@ def poll_once(
         ftf = None
         news = None
         if fetch_klines:
-            if hung:
-                bars_1m = fetch_official_klines(
-                    plan["market"],
-                    plan["symbol"],
-                    "1m",
-                    client=kline_client,
-                    limit=12,
-                )
             tf = plan.get("tf") or "15m"
             bars = fetch_official_klines(
                 plan["market"], plan["symbol"], str(tf), client=kline_client

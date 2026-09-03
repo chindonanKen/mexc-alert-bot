@@ -1941,6 +1941,41 @@ class TestMachinePaperReact(unittest.TestCase):
         )
         self.assertFalse(facts.get("first_or_second_red"))
 
+    def test_agi_sit_off_buy_line_is_cleared_from_tape(self):
+        from mexc_bot.machine.engine import public_tape_rows, purge_sit_not_at_line
+        from mexc_bot.machine.store import MachineStore
+        from mexc_bot.machine.hang import manila_label
+        import time as _t
+
+        store = MachineStore(self.db)
+        uid = 8630949601
+        c = self._client()
+        plans = c.get("/api/machine/plans").json()["plans"]
+        ansem = next(p for p in plans if p["symbol"] == "ANSEMUSDT")
+        now = _t.time()
+        store.insert_log(
+            uid,
+            {
+                "plan_id": ansem["id"],
+                "ts": now,
+                "manila": manila_label(now),
+                "symbol": "ANSEMUSDT",
+                "tf": "1d",
+                "last_price": 0.22,
+                "action": "sit-out",
+                "why": "First or second red on this TF, sit out on a normal dump. (path.sit_reds)",
+            },
+        )
+        n = purge_sit_not_at_line(store, uid)
+        self.assertGreaterEqual(n, 1)
+        tape = public_tape_rows(store, uid, limit=40)
+        self.assertFalse(
+            any(
+                r.get("action") == "sit-out" and r.get("symbol") == "ANSEMUSDT"
+                for r in tape
+            )
+        )
+
     def test_fast_dump_far_from_ad_does_not_occupy_live_slot(self):
         c = self._client()
         ev = c.post(
