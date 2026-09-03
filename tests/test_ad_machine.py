@@ -2172,6 +2172,8 @@ class TestMachinePaperReact(unittest.TestCase):
         self.assertIsNotNone(srow.get("filled_price"))
         self.assertIsNotNone(srow.get("size_pct"))
         self.assertIsNotNone(srow.get("money_pnl"))
+        self.assertNotEqual(float(srow["filled_price"]), 0.0)
+        self.assertGreater(float(srow["money_pnl"]), 0.0)
 
     def test_hung_poll_does_not_need_1m_bars_for_dump(self):
         from mexc_bot.machine.tape import snapshot_for_plan

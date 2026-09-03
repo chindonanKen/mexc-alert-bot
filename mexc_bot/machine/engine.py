@@ -80,6 +80,21 @@ def purge_sit_not_at_line(store: MachineStore, user_id: int) -> int:
     return len(bad)
 
 
+def purge_empty_fills(store: MachineStore, user_id: int) -> int:
+    """Remove buy/sell/add rows that never got a filled price. Those were not fills."""
+    rows = store.list_log(user_id, actions=_FILLISH, limit=8000)
+    bad: List[int] = []
+    for r in rows:
+        if r.get("filled_price") is None:
+            try:
+                bad.append(int(r["id"]))
+            except (TypeError, ValueError, KeyError):
+                continue
+    if bad:
+        store.delete_log_ids(user_id, bad)
+    return len(bad)
+
+
 def public_tape_rows(
     store: MachineStore,
     user_id: int,
@@ -88,8 +103,9 @@ def public_tape_rows(
     since: Optional[float] = None,
     limit: int = 40,
 ) -> List[Dict[str, Any]]:
-    """Tape the owner asked for. No wait, no ghost fills, no off-line sit."""
+    """Tape the owner asked for. Fills are fills. No wait. No off-line sit."""
     purge_sit_not_at_line(store, user_id)
+    purge_empty_fills(store, user_id)
     plans = {int(p["id"]): p for p in store.list_plans(user_id)}
     rows = store.list_log(
         user_id,
@@ -103,8 +119,9 @@ def public_tape_rows(
         a = str(r.get("action") or "")
         if a in ("wait", "pull-pack"):
             continue
-        if a in _FILLISH and r.get("filled_price") is None:
-            continue
+        if a in _FILLISH:
+            if r.get("filled_price") is None or r.get("intended_price") is None:
+                continue
         if a == "sit-out":
             pid = r.get("plan_id")
             plan = plans.get(int(pid)) if pid is not None else None
@@ -1122,9 +1139,19 @@ def _write_log(
     )
     if not _tape_worthy(action, facts, filled_any):
         return
-    if action in _FILLISH and (
-        intended is None or filled_px is None or size_pct is None
-    ):
+    if action in _FILLISH:
+        _write_fill_rows(
+            store,
+            user_id,
+            plan,
+            verdict,
+            action=action,
+            why=why,
+            last=last,
+            now=now,
+            facts=facts,
+            filled=filled if isinstance(filled, list) else [],
+        )
         return
     prev = store.list_log(
         user_id, plan_id=int(plan["id"]), actions=(action,), limit=1
@@ -1132,12 +1159,15 @@ def _write_log(
     if prev and str(prev[0].get("why") or "") == why:
         return
     pnl = None
-    if action in ("paper-sell", "flatten-news"):
+    if action == "flatten-news":
         pnl = extra.get("money_pnl")
-        if pnl is None and filled_any:
-            pnl = _close_fill_pnl(filled, plan.get("leftover_avg"))
-        if pnl is None and action == "flatten-news":
+        if pnl is None:
             pnl = paper_pnl(store, user_id, int(plan["id"]), last=last)
+        leftover = plan.get("leftover_avg")
+        intended = leftover if leftover is not None else intended
+        filled_px = last if last is not None else filled_px
+        if size_pct is None:
+            size_pct = plan.get("remaining_bag_pct")
     store.insert_log(
         user_id,
         {
@@ -1161,6 +1191,77 @@ def _write_log(
             "money_pnl": pnl,
         },
     )
+
+
+def _write_fill_rows(
+    store: MachineStore,
+    user_id: int,
+    plan: Dict[str, Any],
+    verdict: Dict[str, Any],
+    *,
+    action: str,
+    why: str,
+    last: Optional[float],
+    now: float,
+    facts: Dict[str, Any],
+    filled: List[Any],
+) -> None:
+    """One tape row per real fill. Intended, filled, size; PnL only on a close."""
+    for row in filled:
+        if not isinstance(row, dict):
+            continue
+        try:
+            filled_px = float(row["filled_price"]) if row.get("filled_price") is not None else None
+            intended = float(row["price"]) if row.get("price") is not None else None
+        except (TypeError, ValueError):
+            continue
+        if filled_px is None or intended is None:
+            continue
+        size_pct = row.get("size_pct")
+        if size_pct is None:
+            try:
+                usd = float(row.get("usd") or 0)
+                size_pct = round(usd / MAX_PER_PLAY_USD * 100.0, 4) if usd else None
+            except (TypeError, ValueError):
+                size_pct = None
+        if size_pct is None:
+            continue
+        pnl = None
+        if action == "paper-sell":
+            pnl = _close_fill_pnl([row], plan.get("leftover_avg") or intended)
+        prev = store.list_log(
+            user_id, plan_id=int(plan["id"]), actions=(action,), limit=1
+        )
+        if prev and str(prev[0].get("why") or "") == why:
+            try:
+                if abs(float(prev[0].get("filled_price")) - filled_px) < 1e-12:
+                    continue
+            except (TypeError, ValueError):
+                continue
+        store.insert_log(
+            user_id,
+            {
+                "plan_id": int(plan["id"]),
+                "ts": now,
+                "manila": manila_label(now),
+                "symbol": plan.get("symbol"),
+                "market": plan.get("market"),
+                "tf": plan.get("tf"),
+                "last_price": last,
+                "action": action,
+                "size_pct": size_pct,
+                "rule_ids": [verdict.get("rule_id")]
+                if verdict.get("rule_id")
+                else (verdict.get("rule_ids") or []),
+                "why": why,
+                "vol_usd_play": facts.get("_vol_usd_play"),
+                "vol_usd_fast": facts.get("_vol_usd_fast"),
+                "intended_price": intended,
+                "filled_price": filled_px,
+                "money_pnl": pnl,
+                "payload": {"idx": row.get("idx"), "usd": row.get("usd")},
+            },
+        )
 
 
 def _paper_take(
@@ -1450,16 +1551,23 @@ def _paper_sell(
         take_usd = round(min(usd, target - acc), 4)
         if take_usd <= 0:
             break
+        buy_px = order.get("intended_price") or order.get("price") or px
+        size_pct = order.get("size_pct")
+        if size_pct is None:
+            try:
+                size_pct = round(take_usd / MAX_PER_PLAY_USD * 100.0, 4)
+            except (TypeError, ValueError, ZeroDivisionError):
+                size_pct = None
         row = store.insert_order(
             user_id,
             int(plan["id"]),
             layer_idx=int(order.get("layer_idx") or 0),
-            price=px,
+            price=float(buy_px),
             usd=take_usd,
             status="filled",
             side="sell",
             filled_price=px,
-            size_pct=order.get("size_pct"),
+            size_pct=size_pct,
             band="exit",
         )
         if take_usd < usd - 1e-9:
@@ -1505,8 +1613,17 @@ def _paper_fill(
         except (TypeError, ValueError):
             continue
         if px <= line:
-            store.fill_order(user_id, int(order["id"]))
-            filled.append({"id": order["id"], "idx": order.get("layer_idx"), "price": line})
+            store.fill_order(user_id, int(order["id"]), filled_price=px)
+            filled.append(
+                {
+                    "id": order["id"],
+                    "idx": order.get("layer_idx"),
+                    "price": line,
+                    "filled_price": px,
+                    "usd": order.get("usd"),
+                    "size_pct": order.get("size_pct"),
+                }
+            )
     if not filled:
         return []
     left = store.list_orders(user_id, int(plan["id"]), status="working")

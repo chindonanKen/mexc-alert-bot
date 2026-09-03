@@ -274,11 +274,9 @@
     if (!host) return;
     const show = (rows || []).filter((r) => {
       const a = String(r.action || "");
-      const fillish = a.indexOf("paper") >= 0 || a === "add-panic";
-      if (fillish && r.filled_price == null) return false;
       if (a === "sit-out") return true;
+      if (a.indexOf("paper") >= 0 || a === "add-panic") return r.filled_price != null && r.intended_price != null;
       return (
-        fillish ||
         a === "flatten-news" ||
         a === "grind-on" ||
         a === "grind-off" ||
