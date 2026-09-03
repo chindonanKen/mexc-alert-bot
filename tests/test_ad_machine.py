@@ -2521,6 +2521,115 @@ class TestMachinePaperReact(unittest.TestCase):
         ]
         self.assertTrue(buys, log)
 
+    def test_one_buy_pack_working_mirrors_layers(self):
+        from mexc_bot.machine.engine import last_reached_layer
+        from mexc_bot.machine.logic import pack_notional
+        from mexc_bot.machine.store import MachineStore
+
+        store = MachineStore(self.db)
+        uid = 8630949601
+        c = self._client()
+        plans = c.get("/api/machine/plans").json()["plans"]
+        row = next(p for p in plans if p["symbol"] == "ANSEMUSDT")
+        pid = int(row["id"])
+        ghost_layers = [
+            {"idx": i, "price": p, "usd": 12.5}
+            for i, p in enumerate(
+                [0.205, 0.19065, 0.1763, 0.16195, 0.1476, 0.195416, 0.164458, 0.1335],
+                1,
+            )
+        ]
+        ghost_working = [
+            {"idx": i, "price": p, "usd": 12.5, "size_pct": 12.5, "band": "ad"}
+            for i, p in enumerate(
+                [
+                    0.153222,
+                    0.1470389,
+                    0.1408558,
+                    0.1346727,
+                    0.1284896,
+                    0.09732,
+                    0.066828,
+                    0.036336,
+                ],
+                1,
+            )
+        ]
+        store.patch_plan(
+            uid,
+            pid,
+            live=True,
+            status="live",
+            last_price=0.1298,
+            ad_top=0.47,
+            ad_bottom=0.2008,
+            ad_status="known",
+            layers=ghost_layers,
+        )
+        store.replace_working_orders(uid, pid, ghost_working, retire="cancelled")
+        got = next(
+            p
+            for p in c.get("/api/machine/plans").json()["plans"]
+            if p["id"] == pid
+        )
+        layers = [L for L in (got.get("layers") or []) if L.get("band") in ("ad", "panic")]
+        working = got.get("working_orders") or []
+        self.assertTrue(layers)
+        for L in layers:
+            self.assertIsNotNone(L.get("size_pct"), L)
+            self.assertIn(L.get("band"), ("ad", "panic"), L)
+        pack_keys = {
+            (int(L["idx"]), round(float(L["price"]), 8)) for L in layers
+        }
+        for o in working:
+            self.assertIn((int(o["idx"]), round(float(o["price"]), 8)), pack_keys)
+            self.assertFalse(
+                last_reached_layer(0.1298, o["price"]),
+                o,
+            )
+            self.assertIsNotNone(o.get("size_pct"))
+            self.assertIn(o.get("band"), ("ad", "panic"))
+        self.assertLessEqual(pack_notional(layers), 100.0001)
+        work_usd = sum(float(o.get("usd") or 0) for o in working)
+        self.assertLessEqual(
+            work_usd + float(got.get("allocated_usd") or 0), 100.0001
+        )
+        self.assertFalse(got.get("live_orders_allowed"))
+        still_ghost = [
+            o
+            for o in store.list_orders(uid, pid, status="working")
+            if abs(float(o.get("price") or 0) - 0.153222) < 1e-8
+        ]
+        self.assertFalse(still_ghost)
+        retired = [
+            o
+            for o in store.list_orders(uid, pid)
+            if o.get("status") == "superseded"
+        ]
+        self.assertTrue(retired)
+
+    def test_buy_pack_rejects_over_one_hundred(self):
+        from mexc_bot.machine.engine import write_buy_pack
+        from mexc_bot.machine.store import MachineStore
+
+        store = MachineStore(self.db)
+        uid = 8630949601
+        c = self._client()
+        plans = c.get("/api/machine/plans").json()["plans"]
+        row = next(p for p in plans if p["symbol"] == "ANSEMUSDT")
+        fat = [
+            {
+                "idx": i,
+                "price": 0.2 - i * 0.01,
+                "usd": 40.0,
+                "size_pct": 40.0,
+                "band": "ad",
+            }
+            for i in range(1, 5)
+        ]
+        with self.assertRaises(ValueError):
+            write_buy_pack(store, uid, store.get_plan(uid, int(row["id"])), fat)
+
     def test_same_add_why_logs_once(self):
         c = self._client()
         c.post(

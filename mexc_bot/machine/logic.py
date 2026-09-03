@@ -270,6 +270,39 @@ def dump_depth_layers(
     return out
 
 
+def pack_notional(layers: Sequence[Dict[str, Any]]) -> float:
+    """Working AD + panic dollars. Nibble/exit rows do not count twice."""
+    total = 0.0
+    for layer in layers or []:
+        band = str(layer.get("band") or "ad").lower()
+        if band not in ("ad", "panic"):
+            continue
+        try:
+            total += float(layer.get("usd") or 0)
+        except (TypeError, ValueError):
+            continue
+    return round(total, 4)
+
+
+def pack_complete(layers: Sequence[Dict[str, Any]]) -> bool:
+    """Every buy row has idx, price, usd, size_pct, band ad|panic. ≤ $100."""
+    seq = [L for L in (layers or []) if isinstance(L, dict)]
+    if not seq:
+        return False
+    for layer in seq:
+        band = str(layer.get("band") or "").lower()
+        if band not in ("ad", "panic"):
+            return False
+        if layer.get("size_pct") is None:
+            return False
+        try:
+            if float(layer.get("price") or 0) <= 0:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return pack_notional(seq) <= MAX_PER_PLAY_USD + 1e-6
+
+
 def at_ad_layer(layers: Sequence[Dict[str, Any]], ad_bottom: Any) -> Optional[Dict[str, Any]]:
     """The AD-side layer at/just above B; else P5 slightly under."""
     try:

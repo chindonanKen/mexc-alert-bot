@@ -399,13 +399,21 @@ class MachineStore:
         return self._exec(sql, tuple(params), fetch="all")
 
     def replace_working_orders(
-        self, user_id: int, plan_id: int, layers: List[Dict[str, Any]]
+        self,
+        user_id: int,
+        plan_id: int,
+        layers: List[Dict[str, Any]],
+        *,
+        retire: str = "superseded",
     ) -> List[Dict[str, Any]]:
         now = time.time()
+        mark = str(retire or "superseded")
+        if mark not in ("cancelled", "superseded"):
+            mark = "superseded"
         self._exec(
-            "UPDATE machine_orders SET status='cancelled', updated_at=? "
+            "UPDATE machine_orders SET status=?, updated_at=? "
             "WHERE user_id=? AND plan_id=? AND status='working'",
-            (now, int(user_id), int(plan_id)),
+            (mark, now, int(user_id), int(plan_id)),
         )
         for layer in layers:
             self._exec(
