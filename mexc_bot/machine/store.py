@@ -430,6 +430,20 @@ class MachineStore:
             )
         return self.list_orders(user_id, plan_id, status="working")
 
+    def patch_order(self, user_id: int, order_id: int, **fields: Any) -> None:
+        if not fields:
+            return
+        allowed = {"price", "intended_price", "usd"}
+        fields = {k: v for k, v in fields.items() if k in allowed}
+        if not fields:
+            return
+        fields["updated_at"] = time.time()
+        sets = ", ".join(f"{k}=?" for k in fields)
+        self._exec(
+            f"UPDATE machine_orders SET {sets} WHERE id=? AND user_id=?",
+            tuple(fields.values()) + (int(order_id), int(user_id)),
+        )
+
     def insert_order(
         self,
         user_id: int,

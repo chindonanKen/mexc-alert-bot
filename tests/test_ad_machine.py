@@ -1435,9 +1435,10 @@ class TestMachinePaperReact(unittest.TestCase):
             },
         )
         sold_row = next(p for p in sold.json()["plans"] if p["symbol"] == "ANSEMUSDT")
-        self.assertFalse(sold_row["live"])
+        self.assertTrue(sold_row["live"])
         self.assertTrue(sold_row.get("filled_exit"))
         self.assertAlmostEqual(float(sold_row["filled_exit"]["price"]), 0.18)
+        self.assertGreater(float(sold_row.get("allocated_usd") or 0), 0)
         self.assertTrue(
             any(
                 a.get("action") == "paper-sell" and a.get("plan_id") == sold_row["id"]
@@ -1498,9 +1499,10 @@ class TestMachinePaperReact(unittest.TestCase):
             },
         )
         ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
-        self.assertFalse(ansem["live"])
+        self.assertTrue(ansem["live"])
         self.assertTrue(ansem.get("filled_exit"))
         self.assertAlmostEqual(float(ansem["filled_exit"]["price"]), 0.18)
+        self.assertGreater(float(ansem.get("allocated_usd") or 0), 0)
         walk = c.post(
             "/api/machine/evaluate",
             json={
@@ -1515,8 +1517,8 @@ class TestMachinePaperReact(unittest.TestCase):
             },
         )
         ansem = next(p for p in walk.json()["plans"] if p["symbol"] == "ANSEMUSDT")
-        self.assertFalse(ansem["live"])
         self.assertIn("not buying the quiet walk", ansem["decision"].lower())
+        self.assertLess(float(ansem.get("allocated_usd") or 0), 50)
 
     def test_live_payload_has_exit_and_filtered_log(self):
         c = self._client()
@@ -1541,6 +1543,289 @@ class TestMachinePaperReact(unittest.TestCase):
         log = c.get("/api/machine/plans").json()["log"]
         self.assertTrue(log)
         self.assertFalse(any(str(r.get("action") or "") == "wait" for r in log))
+
+    def test_into_base_sells_invested_bag(self):
+        c = self._client()
+        c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"15m": 3},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.22,
+                        "reds": {"15m": 0},
+                        "into_base": True,
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertFalse(ansem["live"])
+        self.assertTrue(ansem.get("filled_exit"))
+        self.assertIn("big base", ansem["decision"].lower())
+
+    def test_add_panic_on_fast_dump_past_b_not_flatten(self):
+        c = self._client()
+        c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"15m": 3},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.12,
+                        "reds": {"15m": 4},
+                        "heat_breadth": 1,
+                        "fast_dump_volume": True,
+                        "vol_spike": True,
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertTrue(ansem["live"])
+        self.assertIn("panic", ansem["decision"].lower())
+        panic_filled = [
+            L
+            for L in (ansem.get("layers") or [])
+            if L.get("band") == "panic" and L.get("status") == "filled"
+        ]
+        self.assertTrue(panic_filled)
+
+    def test_grind_does_not_sit_out_at_ad(self):
+        c = self._client()
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"15m": 1},
+                        "heat_breadth": 1,
+                        "board": {
+                            "grind": True,
+                            "panic": False,
+                            "names": 5,
+                            "slow": 4,
+                            "fast": 1,
+                        },
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertTrue(ansem["live"])
+        self.assertIn("at this chart's AD", ansem["decision"])
+
+    def test_lower_pack_on_drop_past_ad_without_panic(self):
+        c = self._client()
+        first = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"15m": 3},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        before = next(p for p in first.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        bot = float(before["ad_bottom"])
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.12,
+                        "reds": {"15m": 0},
+                        "heat_breadth": 1,
+                        "quiet_grind": True,
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertTrue(ansem["live"])
+        self.assertAlmostEqual(float(ansem["ad_bottom"]), bot)
+        self.assertAlmostEqual(float(ansem["ad_top"]), float(before["ad_top"]))
+        self.assertIn("lowering the pack", ansem["decision"].lower())
+
+    def test_nibble_fills_on_board_grind_approach(self):
+        c = self._client()
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.17,
+                        "reds": {"15m": 0},
+                        "heat_breadth": 1,
+                        "board": {
+                            "grind": True,
+                            "panic": False,
+                            "names": 5,
+                            "slow": 4,
+                            "fast": 1,
+                        },
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertTrue(ansem["live"])
+        self.assertIn("nibble", ansem["decision"].lower())
+        self.assertTrue(ansem.get("filled_entry"))
+        self.assertAlmostEqual(float(ansem["filled_entry"]["usd"]), 10.0, places=1)
+        self.assertAlmostEqual(float(ansem.get("allocated_usd") or 0), 10.0, places=1)
+        acct = c.get("/api/machine/plans").json().get("account") or {}
+        self.assertAlmostEqual(float(acct.get("allocated_usd") or 0), 10.0, places=1)
+        self.assertEqual(int(ansem.get("remaining_layers") or 0), 0)
+
+    def test_nibble_then_at_ad_still_fills(self):
+        c = self._client()
+        c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.17,
+                        "reds": {"15m": 0},
+                        "heat_breadth": 1,
+                        "board": {
+                            "grind": True,
+                            "panic": False,
+                            "names": 5,
+                            "slow": 4,
+                            "fast": 1,
+                        },
+                    }
+                }
+            },
+        )
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"15m": 0},
+                        "heat_breadth": 1,
+                        "board": {
+                            "grind": True,
+                            "panic": False,
+                            "names": 5,
+                            "slow": 4,
+                            "fast": 1,
+                        },
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertTrue(ansem["live"])
+        self.assertIn("at this chart's AD", ansem["decision"])
+        self.assertGreater(float(ansem.get("allocated_usd") or 0), 10.0)
+        filled = [L for L in (ansem.get("layers") or []) if L.get("status") == "filled"]
+        self.assertGreaterEqual(len(filled), 1)
+
+    def test_nibble_shows_on_ladder_and_recut_does_not_rearm(self):
+        c = self._client()
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.17,
+                        "reds": {"15m": 0},
+                        "heat_breadth": 1,
+                        "board": {
+                            "grind": True,
+                            "panic": False,
+                            "names": 5,
+                            "slow": 4,
+                            "fast": 1,
+                        },
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        nibble = next(
+            (L for L in (ansem.get("layers") or []) if L.get("band") == "nibble"),
+            None,
+        )
+        self.assertIsNotNone(nibble)
+        self.assertEqual(nibble.get("status"), "filled")
+        self.assertFalse(any(L.get("next") for L in (ansem.get("layers") or [])))
+        rec = c.post(
+            f"/api/machine/plans/{ansem['id']}/recut",
+            json={"ad_top": 0.356, "ad_bottom": 0.145},
+        )
+        self.assertEqual(rec.status_code, 200, rec.text)
+        after = rec.json()["plan"]
+        self.assertAlmostEqual(float(after.get("allocated_usd") or 0), 10.0, places=1)
+        self.assertEqual(int(after.get("remaining_layers") or 0), 0)
+
+    def test_live_plan_does_not_nibble(self):
+        c = self._client()
+        c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.145,
+                        "reds": {"15m": 3},
+                        "heat_breadth": 1,
+                    }
+                }
+            },
+        )
+        ev = c.post(
+            "/api/machine/evaluate",
+            json={
+                "snapshot": {
+                    "ANSEMUSDT|spot": {
+                        "last_price": 0.17,
+                        "reds": {"15m": 0},
+                        "heat_breadth": 1,
+                        "board": {
+                            "grind": True,
+                            "panic": False,
+                            "names": 5,
+                            "slow": 4,
+                            "fast": 1,
+                        },
+                    }
+                }
+            },
+        )
+        ansem = next(p for p in ev.json()["plans"] if p["symbol"] == "ANSEMUSDT")
+        self.assertTrue(ansem["live"])
+        self.assertNotIn("nibble", ansem["decision"].lower())
+        self.assertGreater(float(ansem.get("allocated_usd") or 0), 10.0)
 
 
 if __name__ == "__main__":

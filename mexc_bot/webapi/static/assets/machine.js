@@ -138,7 +138,9 @@
   }
 
   function layerLine(L) {
-    return `layer ${L.idx} · ${money(L.usd)} at ${num(L.price)}`;
+    const st = L.status && L.status !== "planned" ? ` · ${L.status}` : " · planned";
+    const band = L.band && L.band !== "ad" ? ` ${L.band}` : "";
+    return `layer ${L.idx}${band} · ${money(L.usd)} at ${num(L.price)}${st}`;
   }
 
   function field(key, value, extra) {
@@ -155,8 +157,10 @@
       .slice()
       .sort((a, b) => Number(a.idx || 0) - Number(b.idx || 0));
     if (orders[0]) return num(orders[0].price);
-    const layers = p.layers || [];
-    if (layers[0] && layers[0].price != null) return num(layers[0].price);
+    if (Number(p.remaining_layers || 0) === 0) return "—";
+    const nxt = (p.layers || []).find((L) => L && L.next && L.status === "working")
+      || (p.layers || []).find((L) => L && L.status === "working");
+    if (nxt && nxt.price != null) return num(nxt.price);
     if (p.recut_line != null) return num(p.recut_line);
     return "—";
   }
@@ -202,7 +206,10 @@
     const i = p && p.intended_entry;
     const f = p && p.filled_entry;
     if (!i && !f) return "—";
-    if (f) return `filled ${tapePx(f)}`;
+    if (f) {
+      const u = f.usd != null ? ` · ${money(f.usd)}` : "";
+      return `filled ${tapePx(f)}${u}`;
+    }
     return `intend ${tapePx(i)}`;
   }
 
@@ -210,7 +217,11 @@
     const i = p && p.intended_exit;
     const f = p && p.filled_exit;
     if (!i && !f) return "—";
-    if (f && f.price != null) return `filled ${tapePx(f)}`;
+    if (f && f.price != null) {
+      const u = f.usd != null ? ` · ${money(f.usd)}` : "";
+      const bag = p.remaining_bag_pct != null ? ` · bag ${Math.round(Number(p.remaining_bag_pct))}%` : "";
+      return `filled ${tapePx(f)}${u}${bag}`;
+    }
     if (i && i.price != null) return `intend ${tapePx(i)}`;
     if (i && i.note) return esc(i.note);
     return "—";
@@ -263,7 +274,8 @@
         a.indexOf("paper") >= 0 ||
         a === "add-panic" ||
         a === "flatten-news" ||
-        a === "sit-out"
+        a === "sit-out" ||
+        a === "pull-pack"
       );
     }).slice(0, 8);
     const fp = show.map((r) => `${r.id || ""}|${r.ts || ""}|${r.action || ""}`).join(",");

@@ -10,7 +10,19 @@ from .tape import official_last_price, official_reds
 
 
 MET_FRAC = 0.05  # last 5% of L above B, through B
+THROUGH_FRAC = 0.03  # slightly through B is still the AD area, not panic Q
 VOL_SPIKE = 1.2
+TF_BAR_SECONDS = {
+    "1m": 60,
+    "5m": 300,
+    "15m": 900,
+    "1h": 3600,
+    "4h": 14400,
+    "8h": 28800,
+    "12h": 43200,
+    "1d": 86400,
+    "1w": 604800,
+}
 
 
 def _f(raw: Any) -> Optional[float]:
@@ -72,14 +84,15 @@ def met_ceiling(ad_top: Any, ad_bottom: Any) -> Optional[float]:
 
 
 def is_met(*, last: Any, ad_top: Any, ad_bottom: Any, ad_known: bool) -> bool:
-    """Met area: last in the last 5% of L above B, through B. Not a buy."""
+    """Met area: last in the last 5% of L above B, slightly through B. Not a buy."""
     if not ad_known:
         return False
     px, ceil = _f(last), met_ceiling(ad_top, ad_bottom)
-    b = _f(ad_bottom)
-    if px is None or ceil is None or b is None:
+    t, b = _f(ad_top), _f(ad_bottom)
+    if px is None or ceil is None or b is None or t is None or t <= b:
         return False
-    return px <= ceil
+    floor = b - THROUGH_FRAC * (t - b)
+    return floor <= px <= ceil
 
 
 def is_stock_symbol(symbol: Any, market: Any = None) -> bool:
@@ -141,9 +154,17 @@ def facts_from(
         ad_known=written,
     )
     past_b = False
+    past_panic = False
+    approaching = False
     b = _f(plan.get("ad_bottom"))
+    t = _f(plan.get("ad_top"))
     if written and last is not None and b is not None:
         past_b = last < b
+        if t is not None and t > b:
+            length = t - b
+            past_panic = last < b - THROUGH_FRAC * length
+            ceil = b + MET_FRAC * length
+            approaching = (not met) and last <= b + 0.20 * length and last > ceil
 
     play_tf = str(plan.get("tf") or play.get("tf") or "").strip() or None
     reds_map = snap.get("reds") if isinstance(snap.get("reds"), dict) else {}
@@ -223,6 +244,56 @@ def facts_from(
             pass
     grind_board = bool(board.get("grind")) and not panic
 
+    fill = _f(plan.get("leftover_avg"))
+    typical = _f(play.get("typical_bounce") or play.get("bounce_run"))
+    bounce_strong = bool(snap.get("bounce_strong") or snap.get("bounced"))
+    panic_up = bool(snap.get("panic_up_volume"))
+    into_base = bool(snap.get("into_base"))
+    bounce_weak = bool(snap.get("bounce_weak"))
+    if (
+        not bounce_weak
+        and plan.get("live")
+        and last is not None
+        and fill is not None
+        and last > fill
+        and not bounce_strong
+        and not panic_up
+        and not into_base
+    ):
+        bounce_weak = typical is None or last < fill + typical
+
+    candles_stale = bool(snap.get("candles_stale"))
+    need_n = play.get("candles_to_bounce")
+    armed = _f(plan.get("armed_at"))
+    if (
+        not candles_stale
+        and need_n
+        and armed
+        and met
+        and plan.get("live")
+        and not bounce_strong
+        and not panic_up
+    ):
+        n_bars = 0
+        for bar in snap.get("bars") or []:
+            if not isinstance(bar, dict):
+                continue
+            ts = _f(bar.get("ts"))
+            if ts is not None and ts >= armed:
+                n_bars += 1
+        try:
+            candles_stale = n_bars >= int(need_n)
+        except (TypeError, ValueError):
+            candles_stale = False
+
+    should_sell = bool(
+        snap.get("bounced")
+        or bounce_strong
+        or into_base
+        or panic_up
+        or candles_stale
+    )
+
     facts = {
         "written_plan": written,
         "not_written_plan": not written,
@@ -230,6 +301,7 @@ def facts_from(
         "not_at_ad": not met,
         "met": met,
         "past_b": past_b,
+        "not_past_b": not past_b,
         "first_or_second_red": first_or_second,
         "not_first_or_second_red": not first_or_second,
         "board_panic": panic,
@@ -247,21 +319,22 @@ def facts_from(
         "not_killed": status not in ("killed", "blocked"),
         "live": bool(plan.get("live")),
         "no_repeat": bool(play.get("no_repeat")),
-        "into_base": bool(snap.get("into_base")),
-        "bounce_strong": bool(snap.get("bounce_strong")),
-        "panic_up_volume": bool(snap.get("panic_up_volume")),
-        "should_sell": bool(
-            snap.get("bounced")
-            or snap.get("bounce_strong")
-            or snap.get("into_base")
-            or snap.get("panic_up_volume")
-        ),
-        "not_should_sell": not bool(
-            snap.get("bounced")
-            or snap.get("bounce_strong")
-            or snap.get("into_base")
-            or snap.get("panic_up_volume")
-        ),
+        "into_base": into_base,
+        "bounce_strong": bounce_strong,
+        "panic_up_volume": panic_up,
+        "should_sell": should_sell,
+        "not_should_sell": not should_sell,
+        "past_panic": past_panic,
+        "not_past_panic": not past_panic,
+        "approaching_ad": approaching,
+        "not_live": not bool(plan.get("live")),
+        "not_board_grind": not grind_board,
+        "nibble_done": bool(play.get("nibble_done")),
+        "not_nibble_done": not bool(play.get("nibble_done")),
+        "bounce_weak": bounce_weak and not should_sell,
+        "not_bounce_weak": not (bounce_weak and not should_sell),
+        "candles_stale": candles_stale,
+        "not_fast_dump_volume": not fast_dump_volume,
     }
     facts["_last"] = last
     facts["_play_reds"] = play_reds

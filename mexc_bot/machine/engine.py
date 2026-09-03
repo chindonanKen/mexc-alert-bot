@@ -150,9 +150,29 @@ def recut(
     if tf:
         patch["tf"] = tf
     if plan.get("live"):
-        store.replace_working_orders(user_id, plan_id, layers)
-        patch["resting"] = bool(layers)
-        patch["allocated_usd"] = round(sum(x["usd"] for x in layers), 4)
+        working = store.list_orders(user_id, plan_id, status="working")
+        filled_usd = sum(
+            float(o.get("usd") or 0)
+            for o in store.list_orders(user_id, plan_id, status="filled")
+            if o.get("side") != "sell"
+        )
+        nibble_book = bool(play.get("nibble_done")) and not working
+        if nibble_book:
+            patch["resting"] = False
+            patch["remaining_layers"] = 0
+            patch["next_layer_usd"] = None
+            patch["allocated_usd"] = round(filled_usd, 4)
+        else:
+            filled_idx = {
+                int(o.get("layer_idx") or 0)
+                for o in store.list_orders(user_id, plan_id, status="filled")
+                if o.get("side") != "sell"
+            }
+            remaining = [L for L in layers if int(L.get("idx") or 0) not in filled_idx]
+            store.replace_working_orders(user_id, plan_id, remaining)
+            patch["resting"] = bool(remaining)
+            patch["remaining_layers"] = len(remaining)
+            patch["allocated_usd"] = round(filled_usd, 4)
     store.patch_plan(user_id, plan_id, **patch)
     return public_plan(store, store.get_plan(user_id, plan_id))
 
@@ -620,35 +640,80 @@ def _evaluate_plan(
             "tf": play_tf,
         }
 
-    if action == "paper-sell" and plan.get("live"):
-        filled = _paper_sell(store, user_id, plan, last_price, facts=facts, now=now)
-        play = parse_json(plan.get("play_json"), {}) or {}
-        play["sold_bounce"] = True
-        store.cancel_working(user_id, int(plan["id"]))
-        _close_and_kb(
+    if action == "pull-pack" and plan.get("live"):
+        lowered = _lower_pack(store, user_id, plan, last_price)
+        _write_log(
             store,
             user_id,
             plan,
-            reason="bounce",
-            bounce_or_fail="bounce",
-            process_ok=True,
-            money_pnl=float(snap.get("money_pnl") or 0),
+            verdict,
+            now=now,
+            last=last_price,
+            facts=facts,
+            extra={"lowered": lowered},
+        )
+        return {
+            "ok": True,
+            "action": "pull-pack",
+            "plan_id": plan["id"],
+            "decision": why_text,
+            "rule_ids": verdict.get("rule_ids"),
+            "live_orders_sent": False,
+        }
+
+    if action == "paper-sell" and plan.get("live"):
+        rule = str(verdict.get("rule_id") or "")
+        fraction = 1.0 if rule in ("exit.into_base", "exit.stale_ad") else 0.5
+        filled = _paper_sell(
+            store, user_id, plan, last_price, facts=facts, now=now, fraction=fraction
+        )
+        play = parse_json(plan.get("play_json"), {}) or {}
+        play["sold_bounce"] = True
+        still_usd = sum(
+            float(o.get("usd") or 0)
+            for o in store.list_orders(user_id, int(plan["id"]), status="filled")
+            if o.get("side") != "sell"
         )
         why = {
             "decision": why_text,
             "decision_reason": "paper_sell",
         }
-        store.patch_plan(
-            user_id,
-            int(plan["id"]),
-            status="closed",
-            live=False,
-            resting=False,
-            allocated_usd=0,
-            armed_at=None,
-            play=play,
-            **why,
-        )
+        if still_usd > 1e-9 and fraction < 1.0:
+            store.patch_plan(
+                user_id,
+                int(plan["id"]),
+                play=play,
+                live=True,
+                status="live",
+                allocated_usd=round(still_usd, 4),
+                remaining_bag_pct=round(
+                    100.0 * still_usd / max(still_usd + sum(float(x.get("usd") or 0) for x in filled), 1e-9),
+                    4,
+                ),
+                **why,
+            )
+        else:
+            store.cancel_working(user_id, int(plan["id"]))
+            _close_and_kb(
+                store,
+                user_id,
+                plan,
+                reason="bounce",
+                bounce_or_fail="bounce",
+                process_ok=True,
+                money_pnl=float(snap.get("money_pnl") or 0),
+            )
+            store.patch_plan(
+                user_id,
+                int(plan["id"]),
+                status="closed",
+                live=False,
+                resting=False,
+                allocated_usd=0,
+                armed_at=None,
+                play=play,
+                **why,
+            )
         _write_log(
             store,
             user_id,
@@ -757,7 +822,58 @@ def _paper_take(
     action = str(verdict.get("action") or "")
     take: List[Dict[str, Any]] = []
     scale = 1.0
-    if action == "add-panic" or rule == "fail.add_panic":
+    if facts.get("board_grind") and rule != "atad.take":
+        scale *= 0.5
+    if rule == "size.nibble":
+        usd = round(MAX_PER_PLAY_USD * 0.10, 4)
+        nibble_px = px if px is not None else float(
+            (at_ad_layer(layers, plan.get("ad_bottom")) or {}).get("price") or 0
+        )
+        if nibble_px <= 0:
+            return []
+        play = parse_json(plan.get("play_json"), {}) or {}
+        play["nibble_done"] = True
+        if not plan.get("live"):
+            store.replace_working_orders(user_id, int(plan["id"]), [])
+        row = store.insert_order(
+            user_id,
+            int(plan["id"]),
+            layer_idx=0,
+            price=nibble_px,
+            usd=usd,
+            status="filled",
+            side="buy",
+            filled_price=nibble_px,
+            size_pct=10.0,
+            band="nibble",
+        )
+        store.patch_plan(
+            user_id,
+            int(plan["id"]),
+            play=play,
+            status="live",
+            live=True,
+            resting=False,
+            leftover_avg=nibble_px,
+            remaining_bag_pct=10.0,
+            allocated_usd=usd,
+            remaining_layers=0,
+            next_layer_usd=None,
+            armed_at=now,
+            layers=layers,
+        )
+        return [
+            {
+                "id": (row or {}).get("id"),
+                "idx": 0,
+                "price": nibble_px,
+                "filled_price": nibble_px,
+                "usd": usd,
+                "size_pct": 10.0,
+                "band": "nibble",
+            }
+        ]
+    elif action == "add-panic" or rule == "fail.add_panic":
         for layer in layers:
             if str(layer.get("band") or "") != "panic":
                 continue
@@ -789,8 +905,20 @@ def _paper_take(
     if not take:
         return []
 
+    filled_idx = {
+        int(o.get("layer_idx") or 0)
+        for o in store.list_orders(user_id, int(plan["id"]), status="filled")
+        if o.get("side") != "sell"
+    }
+    working = store.list_orders(user_id, int(plan["id"]), status="working")
+    if not working:
+        plant = [L for L in layers if int(L.get("idx") or 0) not in filled_idx]
+        if plant:
+            store.replace_working_orders(user_id, int(plan["id"]), plant)
+
     if not plan.get("live"):
-        store.replace_working_orders(user_id, int(plan["id"]), layers)
+        if not working:
+            store.replace_working_orders(user_id, int(plan["id"]), layers)
         store.patch_plan(
             user_id,
             int(plan["id"]),
@@ -836,7 +964,11 @@ def _paper_take(
             }
         )
     left = store.list_orders(user_id, int(plan["id"]), status="working")
-    done = store.list_orders(user_id, int(plan["id"]), status="filled")
+    done = [
+        o
+        for o in store.list_orders(user_id, int(plan["id"]), status="filled")
+        if o.get("side") != "sell"
+    ]
     leftover = None
     bag = 0.0
     notion = 0.0
@@ -863,10 +995,58 @@ def _paper_take(
         resting=bool(left),
         leftover_avg=leftover,
         remaining_bag_pct=round(remaining_pct, 4),
+        allocated_usd=round(bag, 4),
         live=True,
         status="live",
     )
     return filled
+
+
+def _lower_pack(
+    store: MachineStore,
+    user_id: int,
+    plan: Dict[str, Any],
+    last_price: Optional[float],
+) -> List[Dict[str, Any]]:
+    """Move remaining working prices down. Do not recut hung T/B."""
+    try:
+        last = float(last_price) if last_price is not None else None
+        bot = float(plan.get("ad_bottom")) if plan.get("ad_bottom") is not None else None
+        top = float(plan.get("ad_top")) if plan.get("ad_top") is not None else None
+    except (TypeError, ValueError):
+        return []
+    if last is None or top is None or bot is None:
+        return []
+    working = store.list_orders(user_id, int(plan["id"]), status="working")
+    pulled: List[Dict[str, Any]] = []
+    if last < bot:
+        layers = dump_depth_layers(top, last, budget_usd=MAX_PER_PLAY_USD)
+        filled_idx = {
+            int(o.get("layer_idx") or 0)
+            for o in store.list_orders(user_id, int(plan["id"]), status="filled")
+            if o.get("side") != "sell"
+        }
+        remaining = [L for L in layers if int(L.get("idx") or 0) not in filled_idx]
+        store.replace_working_orders(user_id, int(plan["id"]), remaining)
+        pulled = remaining
+    else:
+        for order in working:
+            try:
+                px = float(order.get("price") or 0)
+            except (TypeError, ValueError):
+                continue
+            if px > last:
+                store.patch_order(user_id, int(order["id"]), price=last, intended_price=last)
+                pulled.append({**order, "price": last})
+    left = store.list_orders(user_id, int(plan["id"]), status="working")
+    store.patch_plan(
+        user_id,
+        int(plan["id"]),
+        remaining_layers=len(left),
+        next_layer_usd=left[0]["usd"] if left else None,
+        resting=bool(left),
+    )
+    return pulled
 
 
 def _paper_sell(
@@ -877,6 +1057,7 @@ def _paper_sell(
     *,
     facts: Dict[str, Any],
     now: float,
+    fraction: float = 1.0,
 ) -> List[Dict[str, Any]]:
     del facts, now
     filled_buys = [
@@ -892,29 +1073,43 @@ def _paper_sell(
         px = None
     if px is None or px <= 0:
         return []
+    bag = sum(float(o.get("usd") or 0) for o in filled_buys)
+    target = max(0.0, bag * max(0.0, min(1.0, float(fraction))))
     sold: List[Dict[str, Any]] = []
-    for order in filled_buys:
+    acc = 0.0
+    for order in reversed(filled_buys):
+        if acc >= target - 1e-9:
+            break
         usd = float(order.get("usd") or 0)
+        take_usd = round(min(usd, target - acc), 4)
+        if take_usd <= 0:
+            break
         row = store.insert_order(
             user_id,
             int(plan["id"]),
             layer_idx=int(order.get("layer_idx") or 0),
             price=px,
-            usd=usd,
+            usd=take_usd,
             status="filled",
             side="sell",
             filled_price=px,
             size_pct=order.get("size_pct"),
             band="exit",
         )
+        if take_usd < usd - 1e-9:
+            store.patch_order(
+                user_id, int(order["id"]), usd=round(usd - take_usd, 4)
+            )
+        acc += take_usd
         sold.append(
             {
                 "id": row.get("id") if row else order.get("id"),
                 "idx": order.get("layer_idx"),
                 "price": px,
                 "filled_price": px,
-                "usd": usd,
+                "usd": take_usd,
                 "side": "sell",
+                "partial": take_usd < usd - 1e-9,
             }
         )
     return sold
@@ -1080,15 +1275,29 @@ def public_plan(store: MachineStore, row: Optional[Dict[str, Any]]) -> Dict[str,
     next_idx = None
     if working:
         next_idx = int(working[0].get("layer_idx") or 0)
-    elif layers:
-        next_idx = int(layers[0].get("idx") or 0)
+    layer_idxs = {int(L.get("idx") or 0) for L in layers}
     public_layers = []
+    for order in filled_orders:
+        idx = int(order.get("layer_idx") or 0)
+        if idx in layer_idxs:
+            continue
+        public_layers.append(
+            {
+                "idx": idx,
+                "price": order.get("filled_price") or order.get("price"),
+                "usd": order.get("usd"),
+                "size_pct": order.get("size_pct") or 10.0,
+                "band": order.get("band") or "nibble",
+                "status": "filled",
+                "next": False,
+            }
+        )
     for layer in layers:
         item = dict(layer)
         idx = int(item.get("idx") or 0)
         order = by_idx.get(idx)
         item["status"] = (order or {}).get("status") or "planned"
-        item["next"] = bool(next_idx and idx == next_idx)
+        item["next"] = bool(next_idx is not None and idx == next_idx)
         public_layers.append(item)
     intended_entry = None
     if working:

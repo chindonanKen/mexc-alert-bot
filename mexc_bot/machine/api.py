@@ -92,6 +92,7 @@ def list_plans(_: bool = Depends(require_auth)):
                 "sit-out",
                 "paper_fill",
                 "arm",
+                "pull-pack",
             ),
         ),
         "live_orders_sent": False,
@@ -288,6 +289,7 @@ def get_feed(since: Optional[float] = None, limit: int = 40, _: bool = Depends(r
             "sit-out",
             "paper_fill",
             "arm",
+            "pull-pack",
         ),
     )
     bubbles = []
