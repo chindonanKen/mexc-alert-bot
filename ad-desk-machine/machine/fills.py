@@ -1,152 +1,117 @@
-"""Simulated fills only. Last must reach the layer. Never send to MEXC."""
+"""Fills: print at-or-through layer price. Unreached stay empty. One buy set."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Any
 
-from .exit import leftover_remaining_cost
-from .settings import LIVE_ORDERS_ALLOWED, MAX_PER_PLAY_USD
-
-
-def last_reached_layer(last: Any, layer: Any) -> bool:
-    try:
-        return float(last) <= float(layer) * (1.0 + 1e-9)
-    except (TypeError, ValueError):
-        return False
+from .size import BuyLayer, SellLayer, _refresh_next
 
 
-def last_reached_sell(last: Any, layer: Any) -> bool:
-    try:
-        return float(last) >= float(layer) * (1.0 - 1e-9)
-    except (TypeError, ValueError):
-        return False
+@dataclass
+class FillEvent:
+    side: str  # buy | sell
+    layer_idx: int
+    price: float
+    usd: float
+    role: str | None = None
+    why: str | None = None
 
 
-def _px(raw: Any) -> Optional[float]:
-    try:
-        x = float(raw)
-    except (TypeError, ValueError):
-        return None
-    return x if x > 0 else None
+@dataclass
+class FillState:
+    buy_layers: list[BuyLayer]
+    sell_layers: list[SellLayer] = field(default_factory=list)
+    buy_set_id: str = "1"  # one buy set per hung plan
+    fills: list[FillEvent] = field(default_factory=list)
+
+    def remaining_buys(self) -> list[BuyLayer]:
+        return [b for b in self.buy_layers if b.status in ("empty", "next")]
+
+    def remaining_sells(self) -> list[SellLayer]:
+        return [s for s in self.sell_layers if s.status == "remaining"]
 
 
-def simulate_buy_fills(
-    layers: Sequence[Dict[str, Any]],
-    last: Any,
-    *,
-    already: Optional[Sequence[int]] = None,
-    scale: float = 1.0,
-    bag_usd: float = 0.0,
-) -> List[Dict[str, Any]]:
-    """Fill buy layers last has actually traded. Simulated book only."""
-    if LIVE_ORDERS_ALLOWED:
-        raise RuntimeError("live orders are hard-off")
-    px = _px(last)
-    if px is None:
-        return []
-    filled_idx = {int(i) for i in (already or [])}
-    out: List[Dict[str, Any]] = []
-    bag = float(bag_usd)
-    for layer in layers or []:
-        if not isinstance(layer, dict):
+def try_fill_buys(
+    state: FillState,
+    print_price: float,
+    layer_idxs: set[int] | None = None,
+    ad_usd_scale: float = 1.0,
+) -> list[FillEvent]:
+    """
+    Fill when print price is at or through (≤ for buys) layer price.
+    filled USD = Size share already on the layer (AD may be scaled).
+    Unreached stay empty. Only the one hung buy set.
+    layer_idxs None → all reached empty/next (unit-test default).
+    """
+    events: list[FillEvent] = []
+    # Fill all reached empty/next layers this print (cascade down)
+    for ly in state.buy_layers:
+        if ly.status not in ("empty", "next"):
             continue
-        try:
-            idx = int(layer.get("idx") or 0)
-        except (TypeError, ValueError):
+        if print_price > ly.price:
             continue
-        if idx in filled_idx:
+        if layer_idxs is not None and ly.idx not in layer_idxs:
             continue
-        line = _px(layer.get("price"))
-        if line is None or not last_reached_layer(px, line):
-            continue
-        try:
-            usd = float(layer.get("usd") or 0) * float(scale)
-        except (TypeError, ValueError):
-            usd = 0.0
-        if usd <= 0:
-            continue
-        if bag + usd > MAX_PER_PLAY_USD + 1e-6:
-            continue
-        bag += usd
-        filled_idx.add(idx)
-        out.append(
-            {
-                "side": "buy",
-                "idx": idx,
-                "price": line,
-                "filled_price": px,
-                "usd": round(usd, 4),
-                "size_pct": float(layer.get("size_pct") or 0) * float(scale),
-                "band": str(layer.get("band") or "ad"),
-                "simulated": True,
-                "live_sent": False,
-            }
+        fill_usd = ly.usd
+        if ly.role == "AD" and ad_usd_scale != 1.0:
+            fill_usd = round(ly.usd * ad_usd_scale, 4)
+            ly.usd = fill_usd  # persist scaled Size USD on the layer
+        ly.status = "filled"
+        ev = FillEvent(
+            side="buy",
+            layer_idx=ly.idx,
+            price=ly.price,
+            usd=fill_usd,
+            role=ly.role,
         )
-    return out
+        state.fills.append(ev)
+        events.append(ev)
+    _refresh_next(state.buy_layers)
+    return events
 
 
-def simulate_sell_fills(
-    sell_layers: Sequence[Dict[str, Any]],
-    last: Any,
-    *,
-    already: Optional[Sequence[int]] = None,
-    remaining_usd: float = 0.0,
-) -> List[Dict[str, Any]]:
-    """Fill hung sell layers last has reached. Empty list → nothing. No invent."""
-    if LIVE_ORDERS_ALLOWED:
-        raise RuntimeError("live orders are hard-off")
-    if not sell_layers:
-        return []
-    px = _px(last)
-    if px is None:
-        return []
-    filled_idx = {int(i) for i in (already or [])}
-    out: List[Dict[str, Any]] = []
-    left = float(remaining_usd)
-    for layer in sell_layers:
-        if not isinstance(layer, dict):
+def try_fill_sells(state: FillState, print_price: float) -> list[FillEvent]:
+    """Fill sells when print >= layer price. Empty OUT when no sells — invent nothing."""
+    events: list[FillEvent] = []
+    for ly in state.sell_layers:
+        if ly.status != "remaining":
             continue
-        try:
-            idx = int(layer.get("idx") or 0)
-        except (TypeError, ValueError):
-            continue
-        if idx in filled_idx:
-            continue
-        line = _px(layer.get("price"))
-        if line is None or not last_reached_sell(px, line):
-            continue
-        pct = float(layer.get("pct") or layer.get("size_pct") or 0)
-        usd = round(left * (pct / 100.0), 4) if pct > 0 else 0.0
-        if usd <= 0 and left > 0:
-            usd = round(min(left, left if idx == int(sell_layers[-1].get("idx") or 0) else 0), 4)
-        if usd <= 0:
-            continue
-        left = max(0.0, left - usd)
-        filled_idx.add(idx)
-        out.append(
+        if print_price >= ly.price:
+            ly.status = "filled"
+            ev = FillEvent(
+                side="sell",
+                layer_idx=ly.idx,
+                price=ly.price,
+                usd=ly.usd,
+                why=ly.why,
+            )
+            state.fills.append(ev)
+            events.append(ev)
+    return events
+
+
+def summary(state: FillState) -> dict[str, Any]:
+    return {
+        "buy_set_id": state.buy_set_id,
+        "layers": [b.to_dict() for b in state.buy_layers],
+        "sell_layers": [s.to_dict() for s in state.remaining_sells()],
+        "fills": [
             {
-                "side": "sell",
-                "idx": idx,
-                "price": line,
-                "filled_price": px,
-                "usd": usd,
-                "pct": pct,
-                "simulated": True,
-                "live_sent": False,
+                "side": f.side,
+                "layer_idx": f.layer_idx,
+                "price": f.price,
+                "usd": f.usd,
+                "role": f.role,
+                "why": f.why,
             }
-        )
-    return out
+            for f in state.fills
+        ],
+    }
 
 
-def empty_out_after_buy(buy_fills: Sequence[Dict[str, Any]], sell_layers: Sequence[Any]) -> bool:
-    """needs_you when a buy fills and sell layers are empty."""
-    return bool(buy_fills) and not bool(sell_layers)
+def remaining_cost_from_state(state: FillState):
+    """Remaining-cost leftover from this plan's simulated fills."""
+    from .exit import remaining_cost_from_fill_events
 
-
-def book_leftover(fills: Sequence[Dict[str, Any]]) -> Optional[float]:
-    return leftover_remaining_cost(fills)
-
-
-def assert_no_live_send() -> None:
-    if LIVE_ORDERS_ALLOWED:
-        raise RuntimeError("live orders are hard-off")
+    return remaining_cost_from_fill_events(state.fills)

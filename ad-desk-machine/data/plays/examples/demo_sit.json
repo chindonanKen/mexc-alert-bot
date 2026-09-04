@@ -1,0 +1,18 @@
+{
+  "id": "SIT1",
+  "name": "SIT1",
+  "chosen_tf": "15m",
+  "faster_tfs": ["5m"],
+  "chosen_tf_reds_into_met": null,
+  "faster_tf_reds_at_low": null,
+  "vol_at_bottom_usd": null,
+  "habit_ready": false,
+  "example_hint": "habit not ready — sit first/second chosen TF red",
+  "ad_top": 2.00,
+  "ad_bottom": 1.60,
+  "play_usd": 100,
+  "current_price": 1.70,
+  "copy_count": 0,
+  "high_magnet": false,
+  "sell_layers": []
+}

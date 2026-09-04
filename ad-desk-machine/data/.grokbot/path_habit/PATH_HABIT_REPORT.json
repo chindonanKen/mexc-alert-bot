@@ -1,0 +1,331 @@
+{
+  "venue": "https://api.mexc.com",
+  "measured_at_pht": "2026-09-04 17:30 PHT",
+  "note": "Data only \u2014 play files not edited. Reds = trailing consecutive close<open into the met-low bar; if met low is a wick on a non-red, count the red streak ending on the prior bar.",
+  "history_fetched": {
+    "SYNUSDT": {
+      "4h_bars": 5867,
+      "1h_bars": 23466,
+      "from": "2024-01-01",
+      "to": "2026-09-04"
+    },
+    "AGIUSDT": {
+      "4h_bars": 7452,
+      "1h_bars": 29806,
+      "from": "2023-04-11",
+      "to": "2026-09-04"
+    },
+    "USUSDT": {
+      "4h_bars": 1602,
+      "1h_bars": 6405,
+      "from": "2025-12-11 listing",
+      "to": "2026-09-04"
+    }
+  },
+  "plays": {
+    "SYNUSDT": {
+      "ad": {
+        "T": 0.14753,
+        "B": 0.0413,
+        "L": 0.10623
+      },
+      "chosen_tf": "4h",
+      "faster_tfs": [
+        "1h"
+      ],
+      "chosen_tf_reds_into_met": null,
+      "faster_tf_reds_at_low": null,
+      "vol_at_bottom_usd": null,
+      "habit_ready": false,
+      "why": "Two finished mets of this L (COPY+SOURCE) disagree on reds: 4h 3 vs 2; 1h 9 vs 0 (SOURCE wick). No additional finished same-L copy in the live top box 0.14\u20130.22. July Reed back-clones (0.32/0.25 tops) add 4h tallies {2,8} \u2014 still no reliable single count. No invent.",
+      "proving_dumps": [
+        {
+          "role": "COPY",
+          "top_bar": "2025-08-14 12:00 PHT",
+          "low_bar": "2025-10-11 04:00 PHT",
+          "H_to_L": "0.15797\u21920.04078",
+          "dump_B": 0.05174,
+          "bounce_high": 0.1149,
+          "bounce_frac_L": 0.698,
+          "reds_4h": 3,
+          "reds_1h": 9,
+          "vol_4h_usd": 555093,
+          "vol_1h_usd": 225637
+        },
+        {
+          "role": "SOURCE",
+          "top_bar": "2026-07-26 00:00 PHT",
+          "low_bar": "2026-08-03 12:00 PHT",
+          "H_to_L": "0.18758\u21920.08135",
+          "dump_B": 0.08135,
+          "bounce_high": 0.14753,
+          "bounce_frac_L": 0.623,
+          "reds_4h": 2,
+          "reds_4h_note": "wick-green met low; 2 reds immediately prior",
+          "reds_1h": 0,
+          "reds_1h_note": "wick-green 1h low after green; approach had 6 reds ending 2h before low",
+          "vol_4h_usd": 64679,
+          "vol_1h_usd": 18658
+        }
+      ],
+      "reed_back_clones_same_L_not_used_for_habit": [
+        {
+          "top_bar": "2026-07-14 20:00 PHT",
+          "H_to_L": "0.31779\u21920.16848",
+          "reds_4h": 2,
+          "reds_1h": 1,
+          "vol_4h_usd": 134272
+        },
+        {
+          "top_bar": "2026-07-20 16:00 PHT",
+          "H_to_L": "0.24611\u21920.12908",
+          "reds_4h": 8,
+          "reds_1h": 4,
+          "vol_4h_usd": 143780
+        }
+      ],
+      "recommended_habit_ready": false
+    },
+    "AGIUSDT": {
+      "ad": {
+        "T": 0.00748,
+        "B": 0.004172,
+        "L": 0.003308
+      },
+      "chosen_tf": "4h",
+      "faster_tfs": [
+        "1h"
+      ],
+      "chosen_tf_reds_into_met": 1,
+      "faster_tf_reds_at_low": null,
+      "vol_at_bottom_usd": 16623,
+      "habit_ready": true,
+      "why": "4h reds_into_met=1 repeats on SOURCE and older May16\u2192Jun6 copy (both wick-green lows with 1 prior red). 1h reds 1 vs 4 \u2014 no faster-TF habit. Typical 4h bottom quote vol mid \u2248 $16.6k. Thin habit (both wick-assisted 1-red) but meets \u22652 repeat rule \u2014 no invent beyond measured.",
+      "proving_dumps": [
+        {
+          "role": "SOURCE",
+          "top_bar": "2026-08-26 04:00 PHT",
+          "low_bar": "2026-08-26 20:00 PHT",
+          "H_to_L": "0.009\u21920.005704",
+          "dump_B": 0.005692,
+          "bounce_high": 0.007453,
+          "bounce_abs": 0.001749,
+          "bounce_frac_L": 0.529,
+          "bounce_pct_of_low": 30.66,
+          "candles_4h_to_bounce_start": 2,
+          "candles_4h_to_bounce_high": 2,
+          "reds_4h": 1,
+          "reds_4h_note": "wick-green met low; 1 prior red (16:00)",
+          "reds_1h": 1,
+          "vol_4h_usd": 22795,
+          "vol_1h_usd": 3702
+        },
+        {
+          "role": "OLDER_COPY",
+          "top_bar": "2026-05-16 00:00 PHT",
+          "low_bar": "2026-06-06 12:00 PHT",
+          "H_to_L": "0.00938\u21920.004931",
+          "dump_B": 0.006072,
+          "bounce_high": 0.006524,
+          "bounce_abs": 0.001593,
+          "bounce_frac_L": 0.482,
+          "bounce_pct_of_low": 32.31,
+          "candles_4h_to_bounce_start": 3,
+          "candles_4h_to_bounce_high": 65,
+          "reds_4h": 1,
+          "reds_4h_note": "wick-green met low; 1 prior red",
+          "reds_1h": 4,
+          "vol_4h_usd": 10452,
+          "vol_1h_usd": 3097,
+          "note": "Same L hung on ~0.009 top; low near live B zone. Missed by prior 500-bar exit window."
+        }
+      ],
+      "recommended_habit_ready": true,
+      "bounce_habit_facts": {
+        "n": 2,
+        "typical_bounce_height_abs_from_low": {
+          "events": [
+            0.001749,
+            0.001593
+          ],
+          "mid": 0.001671
+        },
+        "typical_bounce_frac_of_L": {
+          "events": [
+            0.529,
+            0.482
+          ],
+          "mid": 0.506
+        },
+        "typical_bounce_pct_of_low": {
+          "events": [
+            30.66,
+            32.31
+          ],
+          "mid": 31.48
+        },
+        "live_map_note": "If live tags near B 0.004172, mid bounce abs ~0.001671 maps bounce high near ~0.005843. Map only.",
+        "candles_to_bounce_start_4h": {
+          "events": [
+            2,
+            3
+          ],
+          "typical": "2\u20133\u00d74h"
+        },
+        "major_bases_4h": [
+          {
+            "zone": "0.0057\u20130.0058",
+            "role": "source low shelf",
+            "examples": [
+              "2026-08-26 20:00 PHT L 0.005704",
+              "2026-06-15 12:00 PHT L 0.005694"
+            ]
+          },
+          {
+            "zone": "0.0049\u20130.0052",
+            "role": "May-copy low / printed shelf",
+            "examples": [
+              "2026-06-06 12:00 PHT L 0.004931",
+              "2026-06-08 00:00 PHT L 0.005038"
+            ]
+          },
+          {
+            "zone": "0.0041\u20130.0042",
+            "role": "near live B",
+            "examples": [
+              "2026-06-26 08:00 PHT L ~0.0041",
+              "2026-06-29 08:00 PHT L ~0.0040"
+            ]
+          }
+        ]
+      },
+      "rejected_near_copy": {
+        "top_bar": "2026-04-25 16:00 PHT",
+        "H_to_L": "0.01097\u21920.007054",
+        "reds_4h": 3,
+        "why_not_primary": "dump_B 0.007662 sits at/above live T \u2014 not the live-B neighborhood used for Path prove; kept out of habit vote"
+      }
+    },
+    "USUSDT": {
+      "ad": {
+        "T": 0.02475,
+        "B": 0.0115,
+        "L": 0.01325
+      },
+      "chosen_tf": "4h",
+      "faster_tfs": [
+        "1h"
+      ],
+      "chosen_tf_reds_into_met": null,
+      "faster_tf_reds_at_low": null,
+      "vol_at_bottom_usd": null,
+      "habit_ready": false,
+      "why": "Two short-L finished mets found (Dec listing-adjacent 0.0267\u21920.01035 and Aug 0.03242\u21920.01388) but reds disagree: 4h 0 vs 4; 1h 1 vs 2. Higher 0.047\u20130.061 family is spent (exit-facts) \u2014 not used. No reliable repeating red count. No invent.",
+      "proving_dumps": [
+        {
+          "role": "DEC_OLDER",
+          "top_bar": "2025-12-12 16:00 PHT",
+          "low_bar": "2025-12-15 20:00 PHT",
+          "H_to_L": "0.0267\u21920.01035",
+          "dump_B": 0.01345,
+          "bounce_high": 0.01842,
+          "bounce_abs": 0.00807,
+          "bounce_frac_L": 0.609,
+          "bounce_pct_of_low": 77.97,
+          "candles_4h_to_bounce_start": 1,
+          "candles_4h_to_bounce_high": 1,
+          "reds_4h": 0,
+          "reds_4h_note": "flash wick-green low after greens \u2014 no trailing red streak",
+          "reds_1h": 1,
+          "vol_4h_usd": 543039,
+          "vol_1h_usd": 166180,
+          "caveat": "Listing-adjacent (spot listed 2025-12-11); prior bar 2025-12-11 20:00 printed H=0.029 L=0.005 artifact. Same short L met+bounced, but structure is wick-chaos vs Aug dump."
+        },
+        {
+          "role": "AUG_COPY",
+          "top_bar": "2026-08-13 16:00 PHT",
+          "low_bar": "2026-08-15 00:00 PHT",
+          "H_to_L": "0.03242\u21920.01388",
+          "dump_B": 0.01917,
+          "bounce_high": 0.02466,
+          "bounce_abs": 0.01078,
+          "bounce_frac_L": 0.814,
+          "bounce_pct_of_low": 77.67,
+          "candles_4h_to_bounce_start": 1,
+          "candles_4h_to_bounce_high": 44,
+          "reds_4h": 4,
+          "reds_4h_note": "wick-green met low; 4 prior reds",
+          "reds_1h": 2,
+          "vol_4h_usd": 1517398,
+          "vol_1h_usd": 770626
+        }
+      ],
+      "recommended_habit_ready": false,
+      "bounce_habit_facts": {
+        "n": 2,
+        "typical_bounce_height_abs_from_low": {
+          "events": [
+            0.00807,
+            0.01078
+          ],
+          "mid": 0.00942
+        },
+        "typical_bounce_frac_of_L": {
+          "events": [
+            0.609,
+            0.814
+          ],
+          "mid": 0.712
+        },
+        "typical_bounce_pct_of_low": {
+          "events": [
+            77.97,
+            77.67
+          ],
+          "mid": 77.82,
+          "note": "Both finished mets bounced ~78% off the low \u2014 strongest repeating bounce fact on this short L."
+        },
+        "live_map_note": "If live tags near B 0.0115, mid bounce abs ~0.009425 maps bounce high near ~0.02093. Map only \u2014 Dec is listing-adjacent.",
+        "candles_to_bounce_start_4h": {
+          "events": [
+            1,
+            1
+          ],
+          "typical": "1\u00d74h"
+        },
+        "major_bases_4h": [
+          {
+            "zone": "~0.0138\u20130.0140",
+            "role": "Aug met-low / shelf",
+            "examples": [
+              "2026-08-15 00:00 PHT L 0.01388",
+              "2026-08-26 16:00 PHT L ~0.01384"
+            ]
+          },
+          {
+            "zone": "~0.0167",
+            "role": "post-dump shelf",
+            "examples": [
+              "2026-08-20 12:00 PHT L 0.01667"
+            ]
+          },
+          {
+            "zone": "~0.0114\u20130.0117",
+            "role": "near live B",
+            "examples": [
+              "2025-12-19 00:00 PHT L 0.01138",
+              "2026-06-29 area"
+            ]
+          },
+          {
+            "zone": "~0.01035",
+            "role": "Dec met low",
+            "examples": [
+              "2025-12-15 20:00 PHT L 0.01035"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

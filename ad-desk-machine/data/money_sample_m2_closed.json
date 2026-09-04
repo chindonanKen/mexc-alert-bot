@@ -1,0 +1,446 @@
+{
+  "when": "2026-09-04 13:19 PHT",
+  "play": "data/plays/SYNUSDT_4h.json",
+  "note": "closes present \u2014 expectancy=mean pnl_usd; payoff=avg_win/|avg_loss|; tail=worst",
+  "live_orders_allowed": false,
+  "plan_state": "out",
+  "buys_filled": 8,
+  "sells_filled": 5,
+  "sells_remaining": 0,
+  "log": [
+    {
+      "ts": "2026-09-04T05:19:38.185444+00:00",
+      "manila": "13:19:38",
+      "action": "sell-layers",
+      "name": "SYNUSDT",
+      "price": null,
+      "size_pct": null,
+      "why": "sell layers hung on written plan"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.185472+00:00",
+      "manila": "13:19:38",
+      "action": "board-panic",
+      "name": null,
+      "price": null,
+      "size_pct": null,
+      "why": "board-wide panic on"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.185700+00:00",
+      "manila": "13:19:38",
+      "action": "met",
+      "name": "SYNUSDT",
+      "price": 0.04567917866666668,
+      "size_pct": null,
+      "why": "low entered AD met band \u2014 met stays met"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.185723+00:00",
+      "manila": "13:19:38",
+      "action": "paper-buy",
+      "name": "SYNUSDT",
+      "price": 0.04567917866666668,
+      "size_pct": 12.5,
+      "why": "board-wide panic \u2014 buy without red-habit wait"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.185837+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.037090604,
+      "size_pct": null,
+      "why": "too early \u2014 bounce has not travelled yet vs usual; first weak tick is not the sell"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.185858+00:00",
+      "manila": "13:19:38",
+      "action": "paper-buy",
+      "name": "SYNUSDT",
+      "price": 0.037090604,
+      "size_pct": 37.5,
+      "why": "board-wide panic \u2014 buy without red-habit wait"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.185889+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.037090604,
+      "size_pct": null,
+      "why": "too early \u2014 bounce has not travelled yet vs usual; first weak tick is not the sell"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.185920+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.02850202933333333,
+      "size_pct": null,
+      "why": "too early \u2014 bounce has not travelled yet vs usual; first weak tick is not the sell"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.185931+00:00",
+      "manila": "13:19:38",
+      "action": "add-panic",
+      "name": "SYNUSDT",
+      "price": 0.02850202933333333,
+      "size_pct": 10.0,
+      "why": "board-wide panic \u2014 buy without red-habit wait"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.185949+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.02850202933333333,
+      "size_pct": null,
+      "why": "too early \u2014 bounce has not travelled yet vs usual; first weak tick is not the sell"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.185978+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.019913454666666677,
+      "size_pct": null,
+      "why": "board-wide panic \u2014 do not sell first weak bounce; give it time"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.185991+00:00",
+      "manila": "13:19:38",
+      "action": "add-panic",
+      "name": "SYNUSDT",
+      "price": 0.019913454666666677,
+      "size_pct": 15.0,
+      "why": "board-wide panic \u2014 buy without red-habit wait"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186011+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.019913454666666677,
+      "size_pct": null,
+      "why": "board-wide panic \u2014 do not sell first weak bounce; give it time"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186039+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.01132488000000001,
+      "size_pct": null,
+      "why": "board-wide panic \u2014 do not sell first weak bounce; give it time"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186048+00:00",
+      "manila": "13:19:38",
+      "action": "add-panic",
+      "name": "SYNUSDT",
+      "price": 0.01132488000000001,
+      "size_pct": 25.0,
+      "why": "board-wide panic \u2014 buy without red-habit wait"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186062+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.01132488000000001,
+      "size_pct": null,
+      "why": "board-wide panic \u2014 do not sell first weak bounce; give it time"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186068+00:00",
+      "manila": "13:19:38",
+      "action": "board-panic",
+      "name": null,
+      "price": null,
+      "size_pct": null,
+      "why": "board-wide panic off"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186214+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.01132488000000001,
+      "size_pct": null,
+      "why": "defensive \u2014 drop past AD without board-wide panic; lower sell layers vs original, scaled to new bottom; weak bounce \u2014 pull remaining sell layers down"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186219+00:00",
+      "manila": "13:19:38",
+      "action": "sit-out",
+      "name": "SYNUSDT",
+      "price": 0.01132488000000001,
+      "size_pct": null,
+      "why": "habit_ready false \u2014 sit on red 0 of 4h"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186281+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.01671193894736843,
+      "size_pct": null,
+      "why": "defensive \u2014 drop past AD without board-wide panic; lower sell layers vs original, scaled to new bottom; weak bounce \u2014 pull remaining sell layers down"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186289+00:00",
+      "manila": "13:19:38",
+      "action": "paper-sell",
+      "name": "SYNUSDT",
+      "price": 0.012011966,
+      "size_pct": null,
+      "why": "usual_bounce"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186348+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.02209899789473685,
+      "size_pct": null,
+      "why": "defensive \u2014 drop past AD without board-wide panic; lower sell layers vs original, scaled to new bottom; weak bounce \u2014 pull remaining sell layers down"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186354+00:00",
+      "manila": "13:19:38",
+      "action": "paper-sell",
+      "name": "SYNUSDT",
+      "price": 0.012011966,
+      "size_pct": null,
+      "why": "usual_bounce"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186393+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.02748605684210527,
+      "size_pct": null,
+      "why": "into big base \u2014 sell invested bag (do not wait for bounce-length past base); defensive \u2014 drop past AD without board-wide panic; lower sell layers vs original, scaled to new bottom"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186397+00:00",
+      "manila": "13:19:38",
+      "action": "sit-out",
+      "name": "SYNUSDT",
+      "price": 0.02748605684210527,
+      "size_pct": null,
+      "why": "habit_ready false \u2014 sit on red 0 of 4h"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186428+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.03287311578947369,
+      "size_pct": null,
+      "why": "weak bounce \u2014 pull remaining sell layers down"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186434+00:00",
+      "manila": "13:19:38",
+      "action": "paper-sell",
+      "name": "SYNUSDT",
+      "price": 0.012011966,
+      "size_pct": null,
+      "why": "big_base"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186436+00:00",
+      "manila": "13:19:38",
+      "action": "paper-sell",
+      "name": "SYNUSDT",
+      "price": 0.0288455723,
+      "size_pct": null,
+      "why": "big_base"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186474+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.03826017473684211,
+      "size_pct": null,
+      "why": "defensive \u2014 drop past AD without board-wide panic; lower sell layers vs original, scaled to new bottom; weak bounce \u2014 pull remaining sell layers down"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186478+00:00",
+      "manila": "13:19:38",
+      "action": "sit-out",
+      "name": "SYNUSDT",
+      "price": 0.03826017473684211,
+      "size_pct": null,
+      "why": "habit_ready false \u2014 sit on red 0 of 4h"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186507+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.04364723368421053,
+      "size_pct": null,
+      "why": "defensive \u2014 drop past AD without board-wide panic; lower sell layers vs original, scaled to new bottom; weak bounce \u2014 pull remaining sell layers down"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186510+00:00",
+      "manila": "13:19:38",
+      "action": "sit-out",
+      "name": "SYNUSDT",
+      "price": 0.04364723368421053,
+      "size_pct": null,
+      "why": "habit_ready false \u2014 sit on red 0 of 4h"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186537+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.04903429263157895,
+      "size_pct": null,
+      "why": "defensive \u2014 drop past AD without board-wide panic; lower sell layers vs original, scaled to new bottom"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186681+00:00",
+      "manila": "13:19:38",
+      "action": "exit-live",
+      "name": "SYNUSDT",
+      "price": 0.07596958736842105,
+      "size_pct": null,
+      "why": "strong first bounce vs usual \u2014 sell matching amount on this move"
+    },
+    {
+      "ts": "2026-09-04T05:19:38.186689+00:00",
+      "manila": "13:19:38",
+      "action": "paper-sell",
+      "name": "SYNUSDT",
+      "price": 0.07596958736842105,
+      "size_pct": null,
+      "why": "usual_bounce"
+    }
+  ],
+  "trades": [
+    {
+      "side": "buy",
+      "name": "SYNUSDT",
+      "price": 0.048736,
+      "usd": 5.0,
+      "role": "AD",
+      "live_order": false
+    },
+    {
+      "side": "buy",
+      "name": "SYNUSDT",
+      "price": 0.046665,
+      "usd": 7.5,
+      "role": "AD",
+      "live_order": false
+    },
+    {
+      "side": "buy",
+      "name": "SYNUSDT",
+      "price": 0.044593,
+      "usd": 10.0,
+      "role": "AD",
+      "live_order": false
+    },
+    {
+      "side": "buy",
+      "name": "SYNUSDT",
+      "price": 0.042522,
+      "usd": 12.5,
+      "role": "AD",
+      "live_order": false
+    },
+    {
+      "side": "buy",
+      "name": "SYNUSDT",
+      "price": 0.04045,
+      "usd": 15.0,
+      "role": "AD",
+      "live_order": false
+    },
+    {
+      "side": "buy",
+      "name": "SYNUSDT",
+      "price": 0.030677,
+      "usd": 10.0,
+      "role": "panic",
+      "live_order": false
+    },
+    {
+      "side": "buy",
+      "name": "SYNUSDT",
+      "price": 0.021116,
+      "usd": 15.0,
+      "role": "panic",
+      "live_order": false
+    },
+    {
+      "side": "buy",
+      "name": "SYNUSDT",
+      "price": 0.011556,
+      "usd": 25.0,
+      "role": "panic",
+      "live_order": false
+    },
+    {
+      "side": "sell",
+      "name": "SYNUSDT",
+      "price": 0.012011966,
+      "usd": 10.0,
+      "why": "usual_bounce",
+      "live_order": false
+    },
+    {
+      "side": "sell",
+      "name": "SYNUSDT",
+      "price": 0.012011966,
+      "usd": 15.0,
+      "why": "usual_bounce",
+      "live_order": false
+    },
+    {
+      "side": "sell",
+      "name": "SYNUSDT",
+      "price": 0.012011966,
+      "usd": 30.0,
+      "why": "big_base",
+      "live_order": false
+    },
+    {
+      "side": "sell",
+      "name": "SYNUSDT",
+      "price": 0.0288455723,
+      "usd": 30.0,
+      "why": "big_base",
+      "live_order": false
+    },
+    {
+      "side": "sell",
+      "name": "SYNUSDT",
+      "price": 0.07596958736842105,
+      "usd": 15.0,
+      "why": "usual_bounce",
+      "live_order": false
+    }
+  ],
+  "closes": [
+    {
+      "name": "SYNUSDT",
+      "reason": "layers flat",
+      "pnl_usd": 16.007566
+    }
+  ],
+  "closes_exist": true,
+  "expectancy": 16.007566,
+  "payoff": null,
+  "tail": 16.007566,
+  "n_closes": 1,
+  "plain": "closes exist: 1; expectancy=16.007566; payoff=None; tail=16.007566"
+}

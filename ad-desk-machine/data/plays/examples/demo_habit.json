@@ -1,0 +1,22 @@
+{
+  "id": "DEMO",
+  "name": "DEMO",
+  "chosen_tf": "15m",
+  "faster_tfs": ["5m", "1m"],
+  "chosen_tf_reds_into_met": 3,
+  "faster_tf_reds_at_low": 2,
+  "vol_at_bottom_usd": 40000,
+  "habit_ready": true,
+  "example_hint": "faster 5m reds+volume at AD can buy on first 15m red",
+  "ad_top": 1.00,
+  "ad_bottom": 0.80,
+  "play_usd": 100,
+  "current_price": 0.92,
+  "copy_count": 1,
+  "high_magnet": false,
+  "sell_layers": [
+    {"idx": 1, "price": 0.88, "usd": 20, "why": "usual_bounce", "status": "remaining"},
+    {"idx": 2, "price": 0.92, "usd": 30, "why": "big_base", "status": "remaining"},
+    {"idx": 3, "price": 0.96, "usd": 50, "why": "usual_bounce", "status": "remaining"}
+  ]
+}

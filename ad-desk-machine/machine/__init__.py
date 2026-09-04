@@ -1,5 +1,5 @@
-"""AD Desk Machine — hung-plan live-read. Simulated fills only."""
+"""AD Desk Machine — simulated decision loop. live_orders_allowed is always false."""
 
-from .settings import LIVE_ORDERS_ALLOWED, live_orders_allowed
+LIVE_ORDERS_ALLOWED = False
 
-__all__ = ["LIVE_ORDERS_ALLOWED", "live_orders_allowed"]
+__all__ = ["LIVE_ORDERS_ALLOWED"]
