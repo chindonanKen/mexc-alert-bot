@@ -4,15 +4,21 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AD Desk Machine</title>
-  <link rel="stylesheet" href="/static/machine.css" />
+  <link rel="stylesheet" href="/static/machine.css?v=2" />
 </head>
 <body>
   <header>
     <h1>AD Desk Machine</h1>
     <p class="sub">Hung plans · simulated fills · live orders off</p>
   </header>
+  <form id="gate" class="gate" hidden>
+    <label for="tok">MACHINE_TOKEN</label>
+    <input id="tok" name="token" type="password" autocomplete="off" placeholder="paste token, then Enter" />
+    <button type="submit">Show hung plans</button>
+    <p class="hint">Saved in this browser only. Same value as MACHINE_TOKEN in ad-desk-machine/.env</p>
+  </form>
   <main id="board">Loading hung plans…</main>
   <section id="log"></section>
-  <script src="/static/machine.js"></script>
+  <script src="/static/machine.js?v=2"></script>
 </body>
 </html>

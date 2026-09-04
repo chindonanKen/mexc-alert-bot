@@ -35,3 +35,31 @@ h1 { margin: 0 0 0.2rem; font-size: 1.4rem; }
 .buy { border-color: #3d5a1f; }
 .sell { border-color: #5a3d1f; }
 .flag { color: var(--warn); }
+.gate {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 1rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.gate label { color: var(--muted); font-size: 0.85rem; }
+.gate input {
+  flex: 1 1 16rem;
+  min-width: 12rem;
+  background: #1a1d14;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+}
+.gate button {
+  background: #2a3318;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+}
+.gate .hint { flex: 1 1 100%; margin: 0; color: var(--muted); font-size: 0.82rem; }

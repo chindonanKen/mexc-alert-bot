@@ -1,5 +1,5 @@
 (function () {
-  const token = window.MACHINE_TOKEN || localStorage.getItem("MACHINE_TOKEN") || "";
+  let token = window.MACHINE_TOKEN || localStorage.getItem("MACHINE_TOKEN") || "";
 
   function headers() {
     return token ? { Authorization: "Bearer " + token } : {};
@@ -65,13 +65,50 @@
       .join("");
   }
 
-  fetch("/plays", { headers: headers() })
-    .then(function (r) {
-      if (r.status === 401) throw new Error("Set MACHINE_TOKEN in localStorage.");
-      return r.json();
-    })
-    .then(render)
-    .catch(function (err) {
-      document.getElementById("board").textContent = String(err.message || err);
+  function load() {
+    if (!token) {
+      showGate("Paste MACHINE_TOKEN to load hung plans.");
+      return;
+    }
+    document.getElementById("gate").hidden = true;
+    document.getElementById("board").textContent = "Loading hung plans…";
+    fetch("/plays", { headers: headers() })
+      .then(function (r) {
+        if (r.status === 401 || r.status === 503) {
+          localStorage.removeItem("MACHINE_TOKEN");
+          token = "";
+          throw new Error("Token rejected. Paste MACHINE_TOKEN from ad-desk-machine/.env");
+        }
+        return r.json();
+      })
+      .then(render)
+      .catch(function (err) {
+        showGate(String(err.message || err));
+      });
+  }
+
+  function showGate(msg) {
+    const gate = document.getElementById("gate");
+    const board = document.getElementById("board");
+    gate.hidden = false;
+    board.textContent = msg || "";
+    const inp = document.getElementById("tok");
+    if (inp) inp.focus();
+  }
+
+  const form = document.getElementById("gate");
+  if (form) {
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      const inp = document.getElementById("tok");
+      const v = (inp && inp.value ? inp.value : "").trim();
+      if (!v) return;
+      token = v;
+      localStorage.setItem("MACHINE_TOKEN", token);
+      if (inp) inp.value = "";
+      load();
     });
+  }
+
+  load();
 })();
