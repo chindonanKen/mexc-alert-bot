@@ -4,14 +4,25 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MACHINE</title>
-  <link rel="stylesheet" href="/machine/static/style.css?v=adb1" />
+  <link rel="stylesheet" href="/machine/static/style.css?v=adb2" />
 </head>
 <body>
   <div id="rail"></div>
+  <section id="gate" class="hidden">
+    <form id="gate-form" autocomplete="on">
+      <div class="gate-kicker">open machine</div>
+      <p class="gate-copy">Same token as the AD Desk. Typed here — never kept in the page.</p>
+      <label class="sr" for="gate-token">Desk token</label>
+      <input id="gate-token" name="token" type="password" autocomplete="current-password" required />
+      <button type="submit">Open</button>
+      <p id="gate-err" class="gate-err hidden"></p>
+    </form>
+  </section>
   <header id="head">
     <div class="brand">MACHINE</div>
     <div class="book">$<span id="book">200</span> book · <span id="liveN">0</span> of 2 live</div>
     <div class="badge">live orders off</div>
+    <button id="sign-out" type="button" class="hidden">sign out</button>
   </header>
 
   <section id="slots">
@@ -48,10 +59,6 @@
     <div id="sheet-foot"></div>
   </aside>
 
-  <script>
-    // Token from localStorage only — never ship a default string in the page.
-    window.MACHINE_TOKEN = localStorage.getItem("MACHINE_TOKEN") || "";
-  </script>
-  <script src="/machine/static/app.js?v=adb1"></script>
+  <script src="/machine/static/app.js?v=adb2"></script>
 </body>
 </html>
