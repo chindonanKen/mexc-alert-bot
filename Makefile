@@ -1,4 +1,4 @@
-.PHONY: run install test docker-build docker-up docker-down docker-logs docker-staging clean desk-qa db-safety pre-deploy smoke smoke-staging
+.PHONY: run install test docker-build docker-up docker-down docker-logs docker-staging clean desk-qa db-safety pre-deploy smoke smoke-staging machine-test
 
 install:
 	python -m venv .venv
@@ -6,6 +6,9 @@ install:
 
 run:
 	python -m mexc_bot.main
+
+machine-test:
+	cd ad-desk-machine && PYTHONPATH=. python3 -m pytest -q
 
 test:
 	@PY=$$(test -x .venv/bin/python3 && echo .venv/bin/python3 || echo python3); \

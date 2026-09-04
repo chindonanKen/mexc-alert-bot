@@ -1,0 +1,20 @@
+{
+  "id": "SYNUSDT_4h",
+  "symbol": "SYNUSDT",
+  "market": "spot",
+  "tf": "4h",
+  "ad_top": 0.14753,
+  "ad_bottom": 0.0413,
+  "watch_only": false,
+  "habit_ready": false,
+  "dump_depth": "high_magnet",
+  "chosen_tf_reds_into_met": null,
+  "vol_at_bottom_usd": null,
+  "sell_layers": [
+    {"idx": 1, "price": 0.06042, "pct": 10},
+    {"idx": 2, "price": 0.06786, "pct": 15},
+    {"idx": 3, "price": 0.08379, "pct": 30},
+    {"idx": 4, "price": 0.09866, "pct": 30},
+    {"idx": 5, "price": 0.11566, "pct": 15}
+  ]
+}

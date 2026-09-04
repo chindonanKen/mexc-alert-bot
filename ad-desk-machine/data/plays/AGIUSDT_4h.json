@@ -1,0 +1,20 @@
+{
+  "id": "AGIUSDT_4h",
+  "symbol": "AGIUSDT",
+  "market": "spot",
+  "tf": "4h",
+  "ad_top": 0.00748,
+  "ad_bottom": 0.004172,
+  "watch_only": false,
+  "habit_ready": true,
+  "dump_depth": "high_magnet",
+  "chosen_tf_reds_into_met": 1,
+  "vol_at_bottom_usd": 16623,
+  "sell_layers": [
+    {"idx": 1, "price": 0.00451, "pct": 10},
+    {"idx": 2, "price": 0.00476, "pct": 15},
+    {"idx": 3, "price": 0.00505, "pct": 30},
+    {"idx": 4, "price": 0.00575, "pct": 30},
+    {"idx": 5, "price": 0.005843, "pct": 15}
+  ]
+}

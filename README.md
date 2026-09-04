@@ -6,7 +6,8 @@ Telegram bot that watches MEXC exchange prices and sends you instant alerts when
 **Agents & safety:** **[AGENTS.md](AGENTS.md)**.  
 **How Kenneth trades (for coach agents):** [docs/TRADING_STRATEGY.md](docs/TRADING_STRATEGY.md).  
 **Latest build handoff:** [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md).  
-**Future strategy bots:** [docs/FUTURE_STRATEGY_BOTS.md](docs/FUTURE_STRATEGY_BOTS.md).
+**Future strategy bots:** [docs/FUTURE_STRATEGY_BOTS.md](docs/FUTURE_STRATEGY_BOTS.md).  
+**AD Desk Machine (paper week, live orders off):** [ad-desk-machine/README.md](ad-desk-machine/README.md) — standalone port 8787; desk `/api/machine` stays 404.
 
 Originally a single-file script running 24/7 on a Digital Ocean VPS. This is the restructured, production-ready version with proper architecture, configuration, and deployment tooling.
 
