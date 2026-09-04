@@ -2,8 +2,6 @@
 
 Kenneth said yes 2026-09-04 19:01 PHT. Port the proven here-build to the droplet. Live exchange orders stay OFF.
 
-## Why droplet now
-Kenneth’s Mac in the Philippines cannot reach api.mexc.com (DNS/filter returns a private blocker IP). The Machine must run on the droplet so live MEXC klines work. Confirm from the droplet: `curl -sS https://api.mexc.com/api/v3/ticker/price?symbol=AGIUSDT` returns a real price JSON.
 
 ## Source
 Here-build tree: ad-desk-machine (Machine engine, fills, path, size, chart, exit, feeds, loop, api, static /machine page, data/plays hung plans, tests).
