@@ -33,7 +33,7 @@ _FILL_NOTIFY_MIN_USD = 1.0
 def format_fill_notify_lines(
     rows: List[dict], *, min_usd: float = _FILL_NOTIFY_MIN_USD
 ) -> List[str]:
-    """Coalesce new fills → ``SYMBOL - Buy/Sell - price - $amount``."""
+    """Coalesce new fills → ``SYMBOL - Buy/Sold - price - $amount``."""
     buckets: dict = {}
     for r in rows or []:
         sym = str(r.get("symbol") or "").upper().strip()
@@ -59,7 +59,7 @@ def format_fill_notify_lines(
         if b["usd"] < min_usd:
             continue
         avg = b["px"] / b["qty"] if b["qty"] else 0.0
-        label = "Buy" if side == "buy" else "Sell"
+        label = "Buy" if side == "buy" else "Sold"
         if avg >= 1:
             px_s = f"{avg:.4f}".rstrip("0").rstrip(".")
         elif avg >= 0.01:

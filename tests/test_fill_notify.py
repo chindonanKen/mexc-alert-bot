@@ -19,6 +19,7 @@ def test_coalesce_same_symbol_side():
     lines = format_fill_notify_lines(rows)
     assert len(lines) == 1
     assert lines[0].startswith("TACUSDT - Buy - ")
+    assert " - $" in lines[0]
     assert lines[0].endswith("$10.50")
     assert "POSITION" not in lines[0].upper()
     assert "OPENED" not in lines[0].upper()
@@ -31,7 +32,7 @@ def test_buy_and_sell_separate():
     ]
     lines = format_fill_notify_lines(rows, min_usd=0.5)
     assert any(l.startswith("GUA_USDT - Buy -") for l in lines)
-    assert any(l.startswith("GUA_USDT - Sell -") for l in lines)
+    assert any(l.startswith("GUA_USDT - Sold -") for l in lines)
 
 
 def test_dust_skipped():
