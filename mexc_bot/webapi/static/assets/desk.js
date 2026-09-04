@@ -5092,8 +5092,6 @@
       st.className = "pill ok";
       const xb = $("#xaiBadge");
       if (xb) xb.textContent = h.xai_configured ? "XAI ready" : "set XAI_API_KEY";
-      const navM = $("#navMachine");
-      if (navM) navM.hidden = !h.feature_ad_machine;
     } catch (e) {
       $("#connStatus").textContent = "offline";
       $("#connStatus").className = "pill err";
@@ -5208,8 +5206,6 @@
       }
       const xb = $("#xaiBadge");
       if (xb) xb.textContent = h.xai_configured ? "XAI ready" : "set XAI_API_KEY";
-      const navM = $("#navMachine");
-      if (navM) navM.hidden = !h.feature_ad_machine;
     } catch (_) {
       const st = $("#connStatus");
       if (st) {

@@ -101,6 +101,7 @@ class TestWebApi(unittest.TestCase):
         self.assertIn("git_sha", body)
         self.assertIn("image_tag", body)
         self.assertIn("feature_ad_machine", body)
+        self.assertFalse(body["feature_ad_machine"])
 
     def test_overview(self):
         r = self.client.get("/api/overview")
@@ -221,6 +222,48 @@ class TestWebApi(unittest.TestCase):
             or any(t.get("money_truth") == "exchange" for t in all_trades)
             or isinstance(all_trades, list)
         )
+
+
+    def test_old_machine_is_gone(self):
+        self.assertEqual(self.client.get("/machine").status_code, 404)
+        self.assertEqual(self.client.get("/api/machine/plans").status_code, 404)
+        index = self.client.get("/")
+        self.assertEqual(index.status_code, 200)
+        self.assertNotIn("navMachine", index.text)
+        self.assertNotIn('href="/machine"', index.text)
+
+    def test_drop_machine_tables_leaves_alerts(self):
+        import importlib.util
+        import sqlite3
+        from mexc_bot.webapi import db as desk_db
+
+        spec = importlib.util.spec_from_file_location(
+            "drop_machine_tables", ROOT / "scripts" / "drop_machine_tables.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        dbp = desk_db.db_path()
+        con = sqlite3.connect(str(dbp))
+        con.execute("CREATE TABLE IF NOT EXISTS machine_plans (id INTEGER)")
+        con.execute("INSERT INTO machine_plans (id) VALUES (1)")
+        before = con.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
+        self.assertGreaterEqual(before, 1)
+        con.commit()
+        con.close()
+        out = mod.drop_machine_tables(dbp)
+        self.assertIn("machine_plans", out["dropped"])
+        con = sqlite3.connect(str(dbp))
+        names = {
+            r[0]
+            for r in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        self.assertNotIn("machine_plans", names)
+        self.assertEqual(
+            con.execute("SELECT COUNT(*) FROM alerts").fetchone()[0], before
+        )
+        con.close()
 
 
 if __name__ == "__main__":

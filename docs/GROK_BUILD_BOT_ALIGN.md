@@ -31,11 +31,10 @@ YOU MUST:
 - Branch + PR for anything that should exist tomorrow
 - PR description: what / why / files / “Build: tests + desk-qa + merge”
 - Read-first desk: DESK_BASE + X-Desk-Token. Never print the token.
-- Paper Machine only. FEATURE_AD_MACHINE may be on; DESK_ALLOW_LIVE_ORDERS stays false.
-- Poll GET /api/machine/feed about every minute. New paper rows → one bubble: name, TF, top then bottom, what happened, why. Chart only when need_chart is true. Never Telegram position pings.
+- Old Machine is deleted. Do not poll /api/machine/*. DESK_ALLOW_LIVE_ORDERS stays false.
+- Never Telegram position pings.
 
 PROCESS:
-- Trading rules: docs/AD_PROCESS.md (Machine)
 - Autonomy ladder: docs/AD_AGENT_PLAN.md (P0–P7). Do not skip to live.
 - Chart history on the working TF in this range is truth.
 - Movers: peak then step; bounce in the hole = silence. No POSITION OPENED.

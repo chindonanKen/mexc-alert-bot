@@ -208,16 +208,6 @@ class VisualAdBody(BaseModel):
     ts: Optional[float] = None
 
 
-def _feature_ad_machine() -> bool:
-    from ..machine.settings import feature_ad_machine
-
-    return feature_ad_machine()
-
-
-def _machine_not_found() -> None:
-    raise HTTPException(status_code=404, detail="Not found")
-
-
 def create_app() -> FastAPI:
     app = FastAPI(title="AD Desk", version="2.1.0-beta")
 
@@ -239,7 +229,7 @@ def create_app() -> FastAPI:
                 os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY")
             ),
             "live_orders_allowed": actions.live_orders_allowed(),
-            "feature_ad_machine": _feature_ad_machine(),
+            "feature_ad_machine": False,
             "ts": time.time(),
         }
 
@@ -268,7 +258,6 @@ def create_app() -> FastAPI:
                 {"id": "p5_paper", "title": "P5 Paper / replay + pass bar", "status": "planned"},
                 {"id": "p6_advise", "title": "P6 Advise / recs (owner re-open + P5 bar)", "status": "deferred"},
                 {"id": "p7_live", "title": "P7 Gated live AD (default off)", "status": "deferred"},
-                {"id": "ad_machine", "title": "AD Machine isolated paper book (FEATURE_AD_MACHINE, default off)", "status": "planned"},
                 {"id": "desk_small", "title": "Occasional small AD Desk UX fixes", "status": "planned"},
             ],
             "principles": [
@@ -1654,33 +1643,18 @@ def create_app() -> FastAPI:
             },
         }
 
-    if _feature_ad_machine():
-        from ..machine.api import router as machine_router
-        from ..machine.loop import ensure_tape_loop
+    @app.api_route("/api/machine", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+    @app.api_route(
+        "/api/machine/{full_path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    )
+    def machine_api_gone(full_path: str = ""):
+        raise HTTPException(status_code=404, detail="Not found")
 
-        app.include_router(machine_router)
-        ensure_tape_loop()
-
-        @app.get("/machine")
-        def machine_page():
-            path = STATIC_DIR / "machine.html"
-            if not path.is_file():
-                raise HTTPException(status_code=404, detail="Not found")
-            return FileResponse(path)
-    else:
-
-        @app.api_route("/api/machine", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
-        @app.api_route(
-            "/api/machine/{full_path:path}",
-            methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-        )
-        def machine_api_off(full_path: str = ""):
-            _machine_not_found()
-
-        @app.get("/machine")
-        @app.get("/machine.html")
-        def machine_page_off():
-            _machine_not_found()
+    @app.get("/machine")
+    @app.get("/machine.html")
+    def machine_page_gone():
+        raise HTTPException(status_code=404, detail="Not found")
 
     if STATIC_DIR.is_dir():
         app.mount(
@@ -1695,7 +1669,7 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}")
         def spa_fallback(full_path: str):
-            if full_path in {"machine", "machine.html"} and not _feature_ad_machine():
+            if full_path in {"machine", "machine.html"}:
                 raise HTTPException(status_code=404, detail="Not found")
             candidate = STATIC_DIR / full_path
             if candidate.is_file():

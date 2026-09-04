@@ -56,13 +56,6 @@ PROTECTED_TABLES: frozenset[str] = frozenset(
         "agent_cases",
         "chart_profiles",
         "target_fire_log",
-        "machine_plans",
-        "machine_orders",
-        "machine_closes",
-        "machine_kb",
-        "machine_needs_you",
-        "machine_log",
-        "machine_process_pack",
     }
 )
 
