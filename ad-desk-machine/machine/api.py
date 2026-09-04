@@ -1,17 +1,14 @@
-"""FastAPI surface. Bearer or HttpOnly cookie. live_orders_allowed always false."""
+"""FastAPI surface. Bearer MACHINE_TOKEN. live_orders_allowed always false."""
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import os
-import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -21,7 +18,6 @@ from .loop import DecisionLoop, build_default_loop
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static" / "machine"
 TOKEN = os.environ.get("MACHINE_TOKEN", "dev-token")
-SESSION_COOKIE = "machine_session"
 # Decision loop on by default while uvicorn runs. Tests set MACHINE_LOOP=0.
 LOOP_ENABLED = os.environ.get("MACHINE_LOOP", "1") != "0"
 FEED_INTERVAL = float(os.environ.get("MACHINE_FEED_INTERVAL", "10"))
@@ -59,74 +55,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AD Desk Machine", version="0.1.0", lifespan=lifespan)
 
 
-def _matches(candidate: str, expected: str) -> bool:
-    if not candidate or not expected:
-        return False
-    try:
-        return secrets.compare_digest(candidate, expected)
-    except (TypeError, ValueError):
-        return False
-
-
-def _login_tokens() -> list[str]:
-    """Browser may use the desk token; scripts keep MACHINE_TOKEN bearer."""
-    out: list[str] = []
-    for raw in (
-        os.environ.get("MACHINE_TOKEN") or TOKEN,
-        os.environ.get("DESK_API_TOKEN") or "",
-    ):
-        t = (raw or "").strip()
-        if t and t not in out:
-            out.append(t)
-    return out
-
-
-def _login_ok(candidate: str) -> bool:
-    return any(_matches(candidate, t) for t in _login_tokens())
-
-
-def session_cookie_value() -> str:
-    secret = (os.environ.get("MACHINE_TOKEN") or TOKEN or "dev-token").encode()
-    return hmac.new(secret, b"ad-desk-machine-browser", hashlib.sha256).hexdigest()
-
-
-def require_bearer(
-    authorization: str | None = Header(default=None),
-    machine_session: str | None = Cookie(default=None),
-) -> None:
-    if authorization:
-        parts = authorization.split(" ", 1)
-        if len(parts) == 2 and parts[0].lower() == "bearer" and _login_ok(parts[1]):
-            return
-    if machine_session and _matches(machine_session, session_cookie_value()):
-        return
-    # Never echo the token in responses
-    raise HTTPException(status_code=401, detail="missing Authorization")
-
-
-@app.post("/api/machine/login")
-def login(body: dict[str, Any], request: Request, response: Response) -> dict[str, Any]:
-    """Password form → HttpOnly cookie. Token is not stored in the page."""
-    token = str((body or {}).get("token") or "")
-    if not _login_ok(token):
+def require_bearer(authorization: str | None = Header(default=None)) -> None:
+    if authorization is None:
+        raise HTTPException(status_code=401, detail="missing Authorization")
+    parts = authorization.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(status_code=401, detail="expected Bearer token")
+    if parts[1] != TOKEN:
         raise HTTPException(status_code=401, detail="invalid token")
-    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "http").lower()
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=session_cookie_value(),
-        httponly=True,
-        secure=(proto == "https"),
-        samesite="lax",
-        path="/",
-        max_age=14 * 24 * 3600,
-    )
-    return {"ok": True, "live_orders_allowed": False}
-
-
-@app.post("/api/machine/logout")
-def logout(response: Response) -> dict[str, Any]:
-    response.delete_cookie(SESSION_COOKIE, path="/")
-    return {"ok": True, "live_orders_allowed": False}
+    # Never echo the token in responses
 
 
 @app.get("/api/machine/status")
