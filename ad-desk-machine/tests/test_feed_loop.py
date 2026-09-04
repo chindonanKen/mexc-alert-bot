@@ -16,7 +16,7 @@ from machine.feeds import (
     print_from_klines,
     trailing_red_count,
 )
-from machine.loop import DecisionLoop, feed_names_from_engine, sync_feed_names
+from machine.loop import DecisionLoop, feed_names_from_engine, feed_tfs_from_engine, sync_feed_names
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -189,6 +189,150 @@ def test_hang_play_sync_feed_adds_new_name():
     assert "BPUSDT" in names
     assert "BPUSDT" in list(loop.feed.names)
     assert isinstance(loop.feed.names, list)
+    # Hang also refreshes per-name TFs (4h / fallback 1h)
+    assert loop.feed.name_tfs["BPUSDT"] == ("4h", "1h")
+
+
+def test_feed_tfs_from_hung_plans_use_play_intervals():
+    """1d play maps to 1d/4h; 4h play stays 4h/1h; missing TFs fall back."""
+    eng = Engine()
+    eng.hang_play(
+        {
+            "id": "BPUSDT_1d",
+            "name": "BPUSDT",
+            "chosen_tf": "1d",
+            "faster_tfs": ["4h"],
+            "habit_ready": False,
+            "ad_top": 1.0,
+            "ad_bottom": 0.8,
+            "play_usd": 100,
+            "sell_layers": [],
+        }
+    )
+    eng.hang_play(
+        {
+            "id": "SYNUSDT_4h",
+            "name": "SYNUSDT",
+            "chosen_tf": "4h",
+            "faster_tfs": ["1h"],
+            "habit_ready": False,
+            "ad_top": 1.0,
+            "ad_bottom": 0.8,
+            "play_usd": 100,
+            "sell_layers": [],
+        }
+    )
+    eng.hang_play(
+        {
+            "id": "MISSING_TF",
+            "name": "MISSINGUSDT",
+            "habit_ready": False,
+            "ad_top": 1.0,
+            "ad_bottom": 0.8,
+            "play_usd": 100,
+            "sell_layers": [],
+        }
+    )
+    tfs = feed_tfs_from_engine(eng)
+    assert tfs["BPUSDT"] == ("1d", "4h")
+    assert tfs["SYNUSDT"] == ("4h", "1h")
+    assert tfs["MISSINGUSDT"] == ("4h", "1h")
+
+
+def test_poll_uses_plan_chosen_tf_not_global_4h():
+    """Hung 1d plan fetches 1d chosen reds; 4h plan still uses 4h. Not one global pair."""
+    seen: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        sym = params.get("symbol") or ""
+        interval = params.get("interval") or ""
+        seen.append((sym, interval))
+        if interval == "1m":
+            # Distinct fingerprints so both names emit a print
+            open_ms = 2000 if sym == "BPUSDT" else 1000
+            return httpx.Response(
+                200,
+                json=[_kline(open_ms, "0.09", "0.09", "0.088", "0.089", "10", "0.89")],
+            )
+        if interval == "1d":
+            # 3 trailing reds — must be BPUSDT chosen, never SYN
+            return httpx.Response(
+                200,
+                json=[
+                    _kline(1, "0.12", "0.12", "0.10", "0.11", "1", "1"),  # red
+                    _kline(2, "0.11", "0.11", "0.09", "0.10", "1", "1"),  # red
+                    _kline(3, "0.10", "0.10", "0.08", "0.09", "1", "1"),  # red
+                ],
+            )
+        if interval == "4h":
+            # 1 trailing red — SYN chosen; BP faster
+            return httpx.Response(
+                200,
+                json=[
+                    _kline(1, "0.10", "0.10", "0.09", "0.11", "1", "1"),  # green
+                    _kline(2, "0.11", "0.11", "0.09", "0.10", "1", "1"),  # red
+                ],
+            )
+        if interval == "1h":
+            # 2 trailing reds — SYN faster only
+            return httpx.Response(
+                200,
+                json=[
+                    _kline(1, "0.10", "0.10", "0.09", "0.09", "1", "1"),  # red
+                    _kline(2, "0.09", "0.09", "0.08", "0.08", "1", "1"),  # red
+                ],
+            )
+        return httpx.Response(200, json=[])
+
+    eng = Engine()
+    eng.hang_play(
+        {
+            "id": "BPUSDT_1d",
+            "name": "BPUSDT",
+            "chosen_tf": "1d",
+            "faster_tfs": ["4h"],
+            "habit_ready": False,
+            "ad_top": 1.0,
+            "ad_bottom": 0.8,
+            "play_usd": 100,
+            "sell_layers": [],
+        }
+    )
+    eng.hang_play(
+        {
+            "id": "SYNUSDT_4h",
+            "name": "SYNUSDT",
+            "chosen_tf": "4h",
+            "faster_tfs": ["1h"],
+            "habit_ready": False,
+            "ad_top": 1.0,
+            "ad_bottom": 0.8,
+            "play_usd": 100,
+            "sell_layers": [],
+        }
+    )
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    feed = MexcLiveFeed(names=["BPUSDT", "SYNUSDT"], client=client)
+    loop = DecisionLoop(engine=eng, feed=feed, interval_sec=99)
+    sync_feed_names(loop, eng)
+    prints = feed.poll_once()
+    by_name = {p.name: p for p in prints}
+    assert set(by_name) == {"BPUSDT", "SYNUSDT"}
+    # Intervals requested per play — not one global 4h/1h for both
+    assert ("BPUSDT", "1d") in seen
+    assert ("BPUSDT", "4h") in seen
+    assert ("SYNUSDT", "4h") in seen
+    assert ("SYNUSDT", "1h") in seen
+    assert ("BPUSDT", "1h") not in seen
+    assert ("SYNUSDT", "1d") not in seen
+    # 1d has 3 reds; if the bug still used global 4h, BP would be 1
+    assert by_name["BPUSDT"].chosen_tf_reds == 3
+    assert by_name["BPUSDT"].faster_tf_reds == {"4h": 1}
+    # 4h plan unchanged
+    assert by_name["SYNUSDT"].chosen_tf_reds == 1
+    assert by_name["SYNUSDT"].faster_tf_reds == {"1h": 2}
+    client.close()
 
 
 def test_load_plays_dir_hangs_syn_agi_us_not_only_examples():

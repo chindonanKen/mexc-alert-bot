@@ -238,11 +238,22 @@ class MexcLiveFeed:
     price_interval: str = "1m"
     chosen_tf: str = "4h"
     faster_tf: str = "1h"
+    # Per-name (chosen_tf, faster_tf) from hung plays. Missing name → class defaults.
+    name_tfs: dict[str, tuple[str, str]] = field(default_factory=dict)
     price_limit: int = 3
     tf_limit: int = 30
     base_url: str = MEXC_API
     client: httpx.Client | None = None
     _last_fingerprint: dict[str, tuple[int, float, float]] = field(default_factory=dict)
+
+    def tfs_for(self, name: str) -> tuple[str, str]:
+        """Resolve this name's chosen + faster intervals. Fallback 4h / 1h."""
+        pair = self.name_tfs.get(name)
+        if not pair:
+            return self.chosen_tf, self.faster_tf
+        chosen = (pair[0] or "").strip() or self.chosen_tf
+        faster = (pair[1] or "").strip() or self.faster_tf
+        return chosen, faster
 
     def poll_once(self) -> list[Print]:
         """Fetch each name once. Skip names with no API data. Dedupe identical bar fingerprint."""
@@ -253,6 +264,7 @@ class MexcLiveFeed:
             http = httpx.Client(timeout=15.0)
         try:
             for name in self.names:
+                chosen_tf, faster_tf = self.tfs_for(name)
                 px_rows = fetch_mexc_klines(
                     name,
                     self.price_interval,
@@ -262,14 +274,14 @@ class MexcLiveFeed:
                 )
                 chosen_rows = fetch_mexc_klines(
                     name,
-                    self.chosen_tf,
+                    chosen_tf,
                     self.tf_limit,
                     client=http,
                     base_url=self.base_url,
                 )
                 faster_rows = fetch_mexc_klines(
                     name,
-                    self.faster_tf,
+                    faster_tf,
                     self.tf_limit,
                     client=http,
                     base_url=self.base_url,
@@ -278,7 +290,7 @@ class MexcLiveFeed:
                     name,
                     px_rows,
                     chosen_tf_klines=chosen_rows,
-                    faster_tf=self.faster_tf,
+                    faster_tf=faster_tf,
                     faster_tf_klines=faster_rows,
                 )
                 if pr is None or pr.open_time_ms is None:
