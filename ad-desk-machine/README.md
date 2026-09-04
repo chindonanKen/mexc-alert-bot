@@ -13,8 +13,10 @@ One command from the project root (venv already created):
 cd /workspace/ad-desk-machine && source .venv/bin/activate && uvicorn machine.api:app --host 0.0.0.0 --port 8787
 ```
 
-Open `http://127.0.0.1:8787/machine`.  
-API calls need header: `Authorization: Bearer $MACHINE_TOKEN` (default `dev-token`; token is never printed in responses).
+On the droplet, open **`https://<droplet>/machine`** (same HTTPS as the AD Desk). Type the **desk token** in the password field — it is sent once, kept as an HttpOnly cookie, never stored in the page. Mac mini and MacBook use that same URL.
+
+Local loopback: `http://127.0.0.1:8787/machine`.  
+Scripts may still send `Authorization: Bearer $MACHINE_TOKEN` (token is never printed in responses).
 
 On boot the API:
 
@@ -30,7 +32,8 @@ On boot the API:
 
 Env knobs:
 
-- `MACHINE_TOKEN` — bearer token (default `dev-token`)
+- `MACHINE_TOKEN` — bearer token for scripts (default `dev-token`)
+- `DESK_API_TOKEN` — accepted by the `/machine` password form (same token as the AD Desk)
 - `MACHINE_FEED_INTERVAL` — poll seconds (default `10`)
 - `MACHINE_LOOP=0` — disable the background feed loop (tests do this)
 
@@ -54,7 +57,9 @@ pip install -r requirements.txt
 
 | Method | Path | Notes |
 |--------|------|--------|
-| GET | `/machine` | Static Machine page |
+| GET | `/machine` | Static Machine page (password form; desk token) |
+| POST | `/api/machine/login` | HttpOnly session cookie; never echoes the token |
+| POST | `/api/machine/logout` | Clear session cookie |
 | GET | `/api/machine/plans` | Ranked thin list + sheet fields |
 | GET | `/api/machine/plans/{id}` | One plan |
 | GET | `/api/machine/layers/{id}` | IN / OUT layers |

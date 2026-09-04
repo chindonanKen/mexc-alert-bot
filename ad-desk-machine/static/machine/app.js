@@ -1,18 +1,30 @@
 /* Machine page — SPEC-uncluster spirit. PRICE not last. Empty OUT allowed. */
 (function () {
-  const TOKEN = (window.MACHINE_TOKEN || "").trim();
-  const hdr = { Authorization: "Bearer " + TOKEN, Accept: "application/json" };
+  const hdr = { Accept: "application/json" };
+  let pollTimer = null;
 
-  function paintAuthLock(msg) {
-    const tape = document.getElementById("tape");
-    if (tape) tape.textContent = msg;
-    const ranked = document.getElementById("ranked");
-    if (ranked) ranked.innerHTML = '<div class="auth-lock">' + msg + "</div>";
+  function showGate(msg) {
+    const gate = document.getElementById("gate");
+    const err = document.getElementById("gate-err");
+    const out = document.getElementById("sign-out");
+    if (gate) gate.classList.remove("hidden");
+    if (out) out.classList.add("hidden");
+    if (err) {
+      if (msg) {
+        err.textContent = msg;
+        err.classList.remove("hidden");
+      } else {
+        err.textContent = "";
+        err.classList.add("hidden");
+      }
+    }
   }
 
-  if (!TOKEN) {
-    paintAuthLock("Auth lock: set MACHINE_TOKEN in localStorage, then reload.");
-    return;
+  function hideGate() {
+    const gate = document.getElementById("gate");
+    const out = document.getElementById("sign-out");
+    if (gate) gate.classList.add("hidden");
+    if (out) out.classList.remove("hidden");
   }
 
   // SPEC-uncluster decision list only — no enter/exit/miss or grind/panic aliases
@@ -24,8 +36,15 @@
   let plans = [];
   let selected = null;
 
-  async function api(path) {
-    const r = await fetch(path, { headers: hdr });
+  async function api(path, opts) {
+    const r = await fetch(path, Object.assign({
+      headers: hdr,
+      credentials: "same-origin",
+    }, opts || {}));
+    if (r.status === 401) {
+      showGate();
+      throw new Error(path + " 401");
+    }
     if (!r.ok) throw new Error(path + " " + r.status);
     return r.json();
   }
@@ -257,12 +276,64 @@
     }
   }
 
+  function startPoll() {
+    if (pollTimer) return;
+    // Slow poll — tape only changes on decisions; page does not spam
+    pollTimer = setInterval(refresh, 5000);
+  }
+
+  async function boot() {
+    hideGate();
+    await refresh();
+    startPoll();
+  }
+
   document.getElementById("sheet-close").addEventListener("click", () => {
     document.getElementById("sheet").classList.add("hidden");
     selected = null;
   });
 
-  refresh();
-  // Slow poll — tape only changes on decisions; page does not spam
-  setInterval(refresh, 5000);
+  document.getElementById("gate-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const input = document.getElementById("gate-token");
+    const token = (input && input.value) ? input.value : "";
+    try {
+      const r = await fetch("/api/machine/login", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ token: token }),
+      });
+      if (input) input.value = "";
+      if (!r.ok) {
+        showGate("That token was not accepted.");
+        return;
+      }
+      await boot();
+    } catch (e) {
+      if (input) input.value = "";
+      showGate("Could not reach the Machine.");
+    }
+  });
+
+  document.getElementById("sign-out").addEventListener("click", async () => {
+    try {
+      await fetch("/api/machine/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+    } catch (e) { /* still lock the page */ }
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    showGate();
+  });
+
+  api("/api/machine/status").then(function () {
+    return boot();
+  }).catch(function () {
+    showGate();
+  });
 })();
