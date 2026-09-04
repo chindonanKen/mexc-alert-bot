@@ -209,9 +209,10 @@ def test_hang_joins_live_feed_and_persists(client, tmp_path, monkeypatch):
     assert isinstance(feed.names, list)
 
     body = {
-        "id": "BPUSDT_4h",
+        "id": "BPUSDT_1d",
         "name": "BPUSDT",
-        "chosen_tf": "4h",
+        "chosen_tf": "1d",
+        "faster_tfs": ["4h"],
         "habit_ready": False,
         "ad_top": 1.0,
         "ad_bottom": 0.8,
@@ -224,10 +225,11 @@ def test_hang_joins_live_feed_and_persists(client, tmp_path, monkeypatch):
     names = list(api_mod.decision_loop.feed.names)
     assert "BPUSDT" in names
     assert isinstance(api_mod.decision_loop.feed.names, list)
-    saved = tmp_path / "BPUSDT_4h.json"
+    assert api_mod.decision_loop.feed.name_tfs["BPUSDT"] == ("1d", "4h")
+    saved = tmp_path / "BPUSDT_1d.json"
     assert saved.is_file()
     loaded = json.loads(saved.read_text())
-    assert loaded["id"] == "BPUSDT_4h"
+    assert loaded["id"] == "BPUSDT_1d"
     assert loaded["name"] == "BPUSDT"
     # Must not land under examples/
     assert "examples" not in saved.parts

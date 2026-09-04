@@ -91,15 +91,32 @@ def feed_names_from_engine(engine: Engine) -> list[str]:
     return hung if hung else list(DEFAULT_LIVE_NAMES)
 
 
+def feed_tfs_from_engine(engine: Engine) -> dict[str, tuple[str, str]]:
+    """Per-name (chosen_tf, first faster_tfs) from hung plays. Fallback 4h / 1h."""
+    out: dict[str, tuple[str, str]] = {}
+    for plan in engine.plans.values():
+        chosen = str(plan.play.get("chosen_tf") or plan.play.get("tf") or "").strip()
+        if not chosen or chosen == "?":
+            chosen = "4h"
+        fts = plan.play.get("faster_tfs") or []
+        faster = str(fts[0]).strip() if fts else ""
+        if not faster:
+            faster = "1h"
+        out[plan.name] = (chosen, faster)
+    return out
+
+
 def sync_feed_names(loop: DecisionLoop | None, engine: Engine) -> list[str]:
-    """Refresh live feed names from hung plans. Always a mutable list."""
+    """Refresh live feed names and per-name TFs from hung plans. Always a mutable list."""
     names = list(feed_names_from_engine(engine))
+    tfs = feed_tfs_from_engine(engine)
     if loop is not None:
         loop.feed.names = names
+        loop.feed.name_tfs = tfs
     return names
 
 
 def build_default_loop(engine: Engine, interval_sec: float = 10.0) -> DecisionLoop:
     names = list(feed_names_from_engine(engine))
-    feed = MexcLiveFeed(names=names)
+    feed = MexcLiveFeed(names=names, name_tfs=feed_tfs_from_engine(engine))
     return DecisionLoop(engine=engine, feed=feed, interval_sec=interval_sec)
