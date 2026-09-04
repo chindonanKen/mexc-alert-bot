@@ -91,7 +91,15 @@ def feed_names_from_engine(engine: Engine) -> list[str]:
     return hung if hung else list(DEFAULT_LIVE_NAMES)
 
 
+def sync_feed_names(loop: DecisionLoop | None, engine: Engine) -> list[str]:
+    """Refresh live feed names from hung plans. Always a mutable list."""
+    names = list(feed_names_from_engine(engine))
+    if loop is not None:
+        loop.feed.names = names
+    return names
+
+
 def build_default_loop(engine: Engine, interval_sec: float = 10.0) -> DecisionLoop:
-    names = feed_names_from_engine(engine)
+    names = list(feed_names_from_engine(engine))
     feed = MexcLiveFeed(names=names)
     return DecisionLoop(engine=engine, feed=feed, interval_sec=interval_sec)
