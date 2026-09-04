@@ -16,30 +16,10 @@
 		max_size 25MB
 	}
 
-	# Machine is host-only on 127.0.0.1:8787 (not on the public internet).
-	# Caddy uses host network so these loopback proxies work.
-	handle /machine* {
-		reverse_proxy 127.0.0.1:8787 {
-			header_up X-Forwarded-Proto https
-			header_up X-Forwarded-Host {host}
-			header_up Host {host}
-		}
-	}
-
-	handle /api/machine* {
-		reverse_proxy 127.0.0.1:8787 {
-			header_up X-Forwarded-Proto https
-			header_up X-Forwarded-Host {host}
-			header_up Host {host}
-		}
-	}
-
-	handle {
-		reverse_proxy 127.0.0.1:8080 {
-			header_up X-Forwarded-Proto https
-			header_up X-Forwarded-Host {host}
-			header_up Host {host}
-		}
+	reverse_proxy mexc-desk:8080 {
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Host {host}
+		header_up Host {host}
 	}
 
 	header {

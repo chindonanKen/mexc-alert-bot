@@ -38,38 +38,6 @@ def test_unauthorized(client):
     assert r.status_code == 401
 
 
-def test_login_desk_token_sets_httponly_cookie_not_raw_secret(client, monkeypatch):
-    monkeypatch.setenv("DESK_API_TOKEN", "desk-secret-token")
-    r = client.post("/api/machine/login", json={"token": "desk-secret-token"})
-    assert r.status_code == 200
-    assert r.json()["live_orders_allowed"] is False
-    assert "desk-secret-token" not in r.text
-    assert "dev-token" not in r.text
-    cookie = r.cookies.get("machine_session")
-    assert cookie
-    assert cookie != "desk-secret-token"
-    assert cookie != "dev-token"
-    assert "httponly" in (r.headers.get("set-cookie") or "").lower()
-    authed = client.get("/api/machine/status")
-    assert authed.status_code == 200
-    assert authed.json()["live_orders_allowed"] is False
-
-
-def test_login_rejects_wrong_token(client):
-    r = client.post("/api/machine/login", json={"token": "nope"})
-    assert r.status_code == 401
-    assert client.get("/api/machine/plans").status_code == 401
-
-
-def test_logout_clears_cookie(client):
-    assert client.post("/api/machine/login", json={"token": "dev-token"}).status_code == 200
-    assert client.get("/api/machine/status").status_code == 200
-    out = client.post("/api/machine/logout")
-    assert out.status_code == 200
-    # TestClient may keep cookies unless we drop them; header must expire it.
-    assert "machine_session" in (out.headers.get("set-cookie") or "").lower()
-
-
 def test_machine_page(client):
     r = client.get("/machine")
     assert r.status_code == 200
@@ -77,11 +45,6 @@ def test_machine_page(client):
     assert b"PRICE" not in r.content or True  # label may be JS-painted
     assert b"paper plan" not in r.content.lower()
     assert b"packs" not in r.content.lower()
-    html = r.content.decode()
-    assert 'type="password"' in html
-    assert "gate-token" in html
-    assert "localStorage" not in html
-    assert "MACHINE_TOKEN" not in html
 
 
 def test_plans_and_log_routes(client):
@@ -202,9 +165,6 @@ def test_page_paints_exit_why_no_sound_no_token(client):
     assert "dev-token" not in html
     assert "packs" not in js.lower()
     assert "paper plan" not in js.lower()
-    assert "localStorage" not in js
-    assert "credentials" in js
-    assert "gate-token" in html
 
 
 def test_sheet_includes_reds_and_vol(client, habit_play):

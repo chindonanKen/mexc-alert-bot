@@ -101,9 +101,8 @@ services:
     restart: unless-stopped
     depends_on:
       - mexc-desk
-    # Host network so /machine can reverse-proxy to 127.0.0.1:8787
-    # (Machine binds loopback only — not published on the WAN).
-    network_mode: host
+    ports:
+      - "443:443"
     volumes:
       - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./deploy/caddy/certs:/certs:ro

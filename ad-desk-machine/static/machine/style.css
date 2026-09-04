@@ -35,44 +35,6 @@ body { padding-left: 68px; padding-right: 24px; padding-bottom: 48px; }
   margin-left: auto; font-size: 11px; color: var(--mute);
   border: 1px solid var(--hair); padding: 4px 8px; border-radius: 3px;
 }
-#sign-out {
-  background: none; border: 0; color: var(--mute); font: inherit;
-  font-size: 11px; letter-spacing: 0.08em; cursor: pointer;
-}
-#sign-out.hidden { display: none; }
-
-#gate {
-  position: fixed; inset: 0; z-index: 40;
-  background: var(--bg);
-  display: flex; align-items: center; justify-content: center;
-  padding-left: 52px;
-}
-#gate.hidden { display: none; }
-#gate-form {
-  width: min(360px, calc(100vw - 96px));
-  background: var(--panel);
-  border: 1px solid var(--hair);
-  border-radius: 4px;
-  padding: 22px 20px;
-}
-.gate-kicker { color: var(--warm); letter-spacing: 0.16em; font-size: 12px; margin-bottom: 10px; }
-.gate-copy { color: var(--mute); margin: 0 0 16px; line-height: 1.45; }
-#gate-token {
-  width: 100%; background: #0c0b0a; color: var(--ink);
-  border: 1px solid var(--hair); border-radius: 3px;
-  padding: 10px 12px; font: inherit; margin-bottom: 12px;
-}
-#gate-form button {
-  background: var(--warm); color: #1a1410; border: 0;
-  padding: 8px 14px; border-radius: 3px; font: inherit; letter-spacing: 0.08em;
-  cursor: pointer;
-}
-.gate-err { color: var(--rose); font-size: 12px; margin: 12px 0 0; }
-.gate-err.hidden { display: none; }
-.sr {
-  position: absolute; width: 1px; height: 1px; overflow: hidden;
-  clip: rect(0 0 0 0);
-}
 
 #slots { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
 .slot {
