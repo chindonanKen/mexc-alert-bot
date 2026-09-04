@@ -1,20 +1,126 @@
 {
   "id": "SYNUSDT_4h",
-  "symbol": "SYNUSDT",
-  "market": "spot",
-  "tf": "4h",
+  "name": "SYNUSDT",
+  "chosen_tf": "4h",
+  "faster_tfs": [
+    "1h"
+  ],
+  "chosen_tf_reds_into_met": null,
+  "faster_tf_reds_at_low": null,
+  "vol_at_bottom_usd": null,
+  "habit_ready": false,
+  "example_hint": "habit_ready false after dig \u2014 sit first/second 4h red; board-wide panic still buys",
   "ad_top": 0.14753,
   "ad_bottom": 0.0413,
+  "play_usd": 100,
+  "current_price": 0.09288,
+  "copy_count": 2,
+  "high_magnet": true,
   "watch_only": false,
-  "habit_ready": false,
-  "dump_depth": "high_magnet",
-  "chosen_tf_reds_into_met": null,
-  "vol_at_bottom_usd": null,
+  "lock_pass": "2026-09-04 Size PASS buys; Exit PASS sells; panic PASS percent-of-B; 2026-09-04 Lock PASS Path: habit_ready false after dig (COPY 4h=3/1h=9 vs SOURCE 4h=2/1h=0); watch_only lifted",
   "sell_layers": [
-    {"idx": 1, "price": 0.06042, "pct": 10},
-    {"idx": 2, "price": 0.06786, "pct": 15},
-    {"idx": 3, "price": 0.08379, "pct": 30},
-    {"idx": 4, "price": 0.09866, "pct": 30},
-    {"idx": 5, "price": 0.11566, "pct": 15}
-  ]
+    {
+      "idx": 1,
+      "price": 0.05533,
+      "usd": 10.0,
+      "why": "usual_bounce",
+      "status": "remaining"
+    },
+    {
+      "idx": 2,
+      "price": 0.06585,
+      "usd": 15.0,
+      "why": "usual_bounce",
+      "status": "remaining"
+    },
+    {
+      "idx": 3,
+      "price": 0.0815,
+      "usd": 30.0,
+      "why": "big_base",
+      "status": "remaining"
+    },
+    {
+      "idx": 4,
+      "price": 0.1005,
+      "usd": 30.0,
+      "why": "big_base",
+      "status": "remaining"
+    },
+    {
+      "idx": 5,
+      "price": 0.11145,
+      "usd": 15.0,
+      "why": "usual_bounce",
+      "status": "remaining"
+    }
+  ],
+  "layers": [
+    {
+      "idx": 1,
+      "price": 0.048736,
+      "usd": 5.0,
+      "share_pct": 5,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 2,
+      "price": 0.046665,
+      "usd": 7.5,
+      "share_pct": 7.5,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 3,
+      "price": 0.044593,
+      "usd": 10.0,
+      "share_pct": 10,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 4,
+      "price": 0.042522,
+      "usd": 12.5,
+      "share_pct": 12.5,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 5,
+      "price": 0.04045,
+      "usd": 15.0,
+      "share_pct": 15,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 6,
+      "price": 0.03717,
+      "usd": 10.0,
+      "share_pct": 10,
+      "role": "panic",
+      "status": "empty"
+    },
+    {
+      "idx": 7,
+      "price": 0.033453,
+      "usd": 15.0,
+      "share_pct": 15,
+      "role": "panic",
+      "status": "empty"
+    },
+    {
+      "idx": 8,
+      "price": 0.029736,
+      "usd": 25.0,
+      "share_pct": 25,
+      "role": "panic",
+      "status": "empty"
+    }
+  ],
+  "exit_facts": "data/.grokbot/SYNUSDT_4h_exit_facts.json",
+  "panic_math": "Q_i = B - B * (0.10 + 0.18*(i-1)/2)"
 }

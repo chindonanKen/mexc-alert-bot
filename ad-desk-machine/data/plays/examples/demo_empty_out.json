@@ -1,0 +1,19 @@
+{
+  "id": "DEMO_EMPTY_OUT",
+  "name": "DEMO_EMPTY_OUT",
+  "chosen_tf": "1d",
+  "faster_tfs": ["4h"],
+  "chosen_tf_reds_into_met": 2,
+  "faster_tf_reds_at_low": 3,
+  "vol_at_bottom_usd": 250000,
+  "habit_ready": true,
+  "example_hint": "scaffold empty OUT demo only — not a live PRL hang; official PRL AD stays 0.47→0.2008",
+  "ad_top": 0.050,
+  "ad_bottom": 0.035,
+  "play_usd": 100,
+  "current_price": 0.042,
+  "copy_count": 2,
+  "high_magnet": true,
+  "sell_layers": [],
+  "scaffold_only": true
+}

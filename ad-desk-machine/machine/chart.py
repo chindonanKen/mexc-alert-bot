@@ -1,98 +1,52 @@
-"""Chart live-read. Met when low enters the last 5% of L above B through B."""
+"""Chart helpers: AD met band. Met stays met once entered."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Optional
-
-from .settings import MET_FRAC, THROUGH_FRAC
+from dataclasses import dataclass
 
 
-def _f(raw: Any) -> Optional[float]:
-    if raw is None or raw == "":
-        return None
-    try:
-        x = float(raw)
-    except (TypeError, ValueError):
-        return None
-    return x
+@dataclass
+class AD:
+    top: float
+    bottom: float
+
+    @property
+    def length(self) -> float:
+        return self.top - self.bottom
+
+    @property
+    def band_high(self) -> float:
+        """Top of met band: 5% of L above B."""
+        return self.bottom + 0.05 * self.length
+
+    @property
+    def band_low(self) -> float:
+        """Through B (include prints at/under B)."""
+        return self.bottom
 
 
-def ad_length(ad_top: Any, ad_bottom: Any) -> Optional[float]:
-    t, b = _f(ad_top), _f(ad_bottom)
-    if t is None or b is None or t <= b or b <= 0:
-        return None
-    return t - b
-
-
-def met_ceiling(ad_top: Any, ad_bottom: Any) -> Optional[float]:
-    """Top of the met band: B + 5% of L."""
-    length = ad_length(ad_top, ad_bottom)
-    b = _f(ad_bottom)
-    if length is None or b is None:
-        return None
-    return b + MET_FRAC * length
-
-
-def met_floor(ad_top: Any, ad_bottom: Any) -> Optional[float]:
-    """Through B: slightly under B is still the AD area, not panic Q."""
-    length = ad_length(ad_top, ad_bottom)
-    b = _f(ad_bottom)
-    if length is None or b is None:
-        return None
-    return b - THROUGH_FRAC * length
-
-
-def is_met(
-    *,
-    last: Any,
-    ad_top: Any,
-    ad_bottom: Any,
-    ad_known: bool = True,
-) -> bool:
-    """Low / last in the last 5% of L above B, through B. Not a buy by itself."""
-    if not ad_known:
+def is_in_met_band(low: float, ad: AD) -> bool:
+    """Low entered last 5% of AD length above B through B."""
+    if ad.length <= 0:
         return False
-    px = _f(last)
-    ceil = met_ceiling(ad_top, ad_bottom)
-    floor = met_floor(ad_top, ad_bottom)
-    if px is None or ceil is None or floor is None:
-        return False
-    return floor <= px <= ceil
+    # Met when low has reached into [band_low effectively through B, band_high]
+    # "through the bottom" — low at or below band_high and has touched the band
+    # (a 90% drop is met from about 85% down → low <= T - 0.85*L = B + 0.15*L... wait)
+    # SPEC: "band is 5% of that length above the bottom, through the bottom"
+    # so low <= band_high (B + 0.05*L) means entered the last 5% above B.
+    # Through B means lows at or below B also count as in band.
+    return low <= ad.band_high
 
 
-def bar_low(bar: Any) -> Optional[float]:
-    if not isinstance(bar, dict):
-        return None
-    return _f(bar.get("l") if bar.get("l") is not None else bar.get("low"))
-
-
-def bars_ever_met(
-    play: Dict[str, Any],
-    bars: Optional[Iterable[Any]] = None,
-    *,
-    last: Any = None,
-) -> bool:
-    """Sticky: once last or a bar low printed the met band, met stays met."""
-    if play.get("met"):
+def update_met(prev_met: bool, low: float, ad: AD) -> bool:
+    """Once met, stays met."""
+    if prev_met:
         return True
-    ad_top = play.get("ad_top")
-    ad_bottom = play.get("ad_bottom")
-    ad_known = ad_top is not None and ad_bottom is not None
-    if is_met(last=last, ad_top=ad_top, ad_bottom=ad_bottom, ad_known=ad_known):
-        return True
-    for bar in bars or []:
-        low = bar_low(bar)
-        if is_met(last=low, ad_top=ad_top, ad_bottom=ad_bottom, ad_known=ad_known):
-            return True
-    return False
+    return is_in_met_band(low, ad)
 
 
-def at_ad_now(
-    *,
-    last: Any,
-    ad_top: Any,
-    ad_bottom: Any,
-    ad_known: bool = True,
-) -> bool:
-    """Currently in the met band. Distinct from sticky met."""
-    return is_met(last=last, ad_top=ad_top, ad_bottom=ad_bottom, ad_known=ad_known)
+def at_ad(price: float, ad: AD, slack: float | None = None) -> bool:
+    """Current price is at the AD (in or through the met band)."""
+    if slack is None:
+        slack = 0.0
+    return price <= ad.band_high + slack

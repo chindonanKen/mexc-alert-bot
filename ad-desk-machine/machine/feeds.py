@@ -1,170 +1,294 @@
-"""Live MEXC public klines / last. Price, volume, reds. No private keys."""
+"""Print feed — synthetic helpers + live MEXC klines (no invented ticks)."""
 
 from __future__ import annotations
 
-import logging
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Iterator
 
-import requests
+import httpx
 
-from .settings import MEXC_SPOT_API
-
-logger = logging.getLogger(__name__)
-
-# interval key → MEXC spot interval
-_INTERVALS = {
-    "1m": "1m",
-    "5m": "5m",
-    "15m": "15m",
-    "1h": "60m",
-    "4h": "4h",
-    "8h": "8h",
-    "12h": "60m",  # spot has no 12h; callers should prefer a real TF
-    "1d": "1d",
-    "1D": "1d",
-    "1w": "1W",
-}
-
-CacheKey = Tuple[str, str]
+MEXC_API = "https://api.mexc.com"
+DEFAULT_LIVE_NAMES = ("SYNUSDT", "AGIUSDT", "USUSDT")
 
 
-def _spot_symbol(symbol: str) -> str:
-    s = str(symbol or "").upper().replace("_", "").replace("-", "")
-    if s.endswith("USDT") or s.endswith("USDC"):
-        return s
-    return f"{s}USDT" if s else s
+@dataclass
+class Print:
+    name: str
+    price: float
+    volume_usd: float = 0.0
+    ts: datetime | None = None
+    chosen_tf_reds: int = 0
+    faster_tf_reds: dict[str, int] = field(default_factory=dict)
+    low: float | None = None  # candle low for met checks
+    weak_bounce: bool = False  # optional override; prefer scored bounce kind when facts exist
+    candles_since_ad_tag: int | None = None  # TF candles since AD tag (Reed/tape)
+    source: str = "synthetic"  # synthetic | mexc
+    open_time_ms: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.ts is None:
+            self.ts = datetime.now(timezone.utc)
+        if self.low is None:
+            self.low = self.price
 
 
-def is_red_bar(bar: Optional[Dict[str, Any]]) -> bool:
-    if not bar:
-        return False
-    try:
-        o = float(bar.get("o") if bar.get("o") is not None else bar.get("open"))
-        c = float(bar.get("c") if bar.get("c") is not None else bar.get("close"))
-    except (TypeError, ValueError):
-        return False
-    return c < o
+def iter_prints(prints: list[Print]) -> Iterator[Print]:
+    yield from prints
 
 
-def consecutive_reds(bars: Sequence[Dict[str, Any]], *, include_forming: bool = False) -> int:
-    """Closed bars only. Newest → older. Forming candle dropped by default."""
-    seq = [b for b in bars or [] if isinstance(b, dict)]
-    if not seq:
-        return 0
-    if not include_forming and len(seq) >= 2:
-        seq = seq[:-1]
+def load_print_file(path: str) -> list[Print]:
+    import json
+    from pathlib import Path
+
+    data = json.loads(Path(path).read_text())
+    out: list[Print] = []
+    for row in data:
+        out.append(
+            Print(
+                name=row["name"],
+                price=float(row["price"]),
+                volume_usd=float(row.get("volume_usd", 0)),
+                chosen_tf_reds=int(row.get("chosen_tf_reds", 0)),
+                faster_tf_reds=dict(row.get("faster_tf_reds") or {}),
+                low=float(row["low"]) if "low" in row else None,
+                weak_bounce=bool(row.get("weak_bounce", False)),
+                candles_since_ad_tag=(
+                    int(row["candles_since_ad_tag"])
+                    if row.get("candles_since_ad_tag") is not None
+                    else None
+                ),
+                source=str(row.get("source") or "synthetic"),
+                open_time_ms=int(row["open_time_ms"]) if row.get("open_time_ms") is not None else None,
+            )
+        )
+    return out
+
+
+def descending_dump(
+    name: str,
+    start: float,
+    end: float,
+    steps: int = 10,
+    *,
+    volume_usd: float = 50_000,
+    reds_ramp: bool = True,
+    faster_tf: str | None = "5m",
+) -> list[Print]:
+    """Tiny synthetic dump for staff scoring."""
+    if steps < 2:
+        steps = 2
+    prints: list[Print] = []
+    for i in range(steps):
+        t = i / (steps - 1)
+        px = start + (end - start) * t
+        reds = i + 1 if reds_ramp else 0
+        faster = {faster_tf: max(1, i)} if faster_tf else {}
+        prints.append(
+            Print(
+                name=name,
+                price=px,
+                volume_usd=volume_usd if i >= steps // 2 else volume_usd * 0.2,
+                chosen_tf_reds=reds,
+                faster_tf_reds=faster,
+                low=px,
+                source="synthetic",
+            )
+        )
+    return prints
+
+
+def ascending_bounce(
+    name: str,
+    start: float,
+    end: float,
+    steps: int = 12,
+    *,
+    volume_usd: float = 80_000,
+    chosen_tf_reds: int = 0,
+    faster_tf: str | None = "1h",
+) -> list[Print]:
+    """Synthetic bounce prints (price rises). For money-sample sells — not live ticks."""
+    if steps < 2:
+        steps = 2
+    prints: list[Print] = []
+    for i in range(steps):
+        t = i / (steps - 1)
+        px = start + (end - start) * t
+        faster = {faster_tf: 0} if faster_tf else {}
+        prints.append(
+            Print(
+                name=name,
+                price=px,
+                volume_usd=volume_usd,
+                chosen_tf_reds=chosen_tf_reds,
+                faster_tf_reds=faster,
+                low=min(start, px),
+                source="synthetic",
+            )
+        )
+    return prints
+
+
+def print_to_dict(p: Print) -> dict[str, Any]:
+    return {
+        "name": p.name,
+        "price": p.price,
+        "volume_usd": p.volume_usd,
+        "ts": p.ts.isoformat() if p.ts else None,
+        "chosen_tf_reds": p.chosen_tf_reds,
+        "faster_tf_reds": p.faster_tf_reds,
+        "low": p.low,
+        "source": p.source,
+        "open_time_ms": p.open_time_ms,
+    }
+
+
+# --- MEXC live (klines only; never invent prices) ---
+
+
+def trailing_red_count(klines: list[list[Any]]) -> int:
+    """Count consecutive red candles from the newest bar backward (close < open)."""
     n = 0
-    for b in reversed(seq):
-        if is_red_bar(b):
+    for row in reversed(klines):
+        o = float(row[1])
+        c = float(row[4])
+        if c < o:
             n += 1
         else:
             break
     return n
 
 
-def dollar_volume(bars: Optional[Sequence[Dict[str, Any]]]) -> Optional[float]:
-    seq = [b for b in (bars or []) if isinstance(b, dict)]
-    for bar in reversed(seq):
-        for key in ("q", "quote_volume", "quoteVolume"):
-            try:
-                v = float(bar.get(key))
-                if v > 0:
-                    return v
-            except (TypeError, ValueError):
-                continue
-        try:
-            coin = float(bar.get("v") if bar.get("v") is not None else bar.get("volume") or 0)
-            close = float(bar.get("c") if bar.get("c") is not None else bar.get("close") or 0)
-            if coin > 0 and close > 0:
-                return coin * close
-        except (TypeError, ValueError):
-            continue
-    return None
-
-
-def parse_mexc_klines(raw: Any) -> List[Dict[str, Any]]:
-    """Spot kline row: [openTime, open, high, low, close, volume, ..., quoteVolume]."""
-    out: List[Dict[str, Any]] = []
-    if not isinstance(raw, list):
-        return out
-    for row in raw:
-        if not isinstance(row, (list, tuple)) or len(row) < 6:
-            continue
-        try:
-            out.append(
-                {
-                    "ts": float(row[0]) / 1000.0 if float(row[0]) > 1e12 else float(row[0]),
-                    "o": float(row[1]),
-                    "h": float(row[2]),
-                    "l": float(row[3]),
-                    "c": float(row[4]),
-                    "v": float(row[5]),
-                    "q": float(row[7]) if len(row) > 7 else None,
-                }
-            )
-        except (TypeError, ValueError, IndexError):
-            continue
-    return out
-
-
-class MexcPublicFeed:
-    """Public api.mexc.com only. Never signs. Never posts orders."""
-
-    def __init__(self, base: str = MEXC_SPOT_API, timeout: float = 6.0, session: Optional[requests.Session] = None):
-        self.base = base.rstrip("/")
-        self.timeout = timeout
-        self.session = session or requests.Session()
-        self.session.headers.update({"User-Agent": "ad-desk-machine/0.1"})
-        self._kline_cache: Dict[CacheKey, Tuple[float, List[Dict[str, Any]]]] = {}
-        self.cache_ttl = 8.0
-
-    def ticker_price(self, symbol: str) -> Optional[float]:
-        sym = _spot_symbol(symbol)
-        url = f"{self.base}/ticker/price"
-        try:
-            r = self.session.get(url, params={"symbol": sym}, timeout=self.timeout)
-            if r.status_code != 200:
-                return None
-            d = r.json()
-            px = float(d.get("price") or 0)
-            return px if px > 0 else None
-        except Exception:
-            logger.debug("ticker %s", symbol, exc_info=True)
-            return None
-
-    def klines(self, symbol: str, tf: str, limit: int = 100) -> List[Dict[str, Any]]:
-        interval = _INTERVALS.get(str(tf).strip(), "4h")
-        sym = _spot_symbol(symbol)
-        url = f"{self.base}/klines"
-        try:
-            r = self.session.get(
-                url,
-                params={"symbol": sym, "interval": interval, "limit": int(limit)},
-                timeout=self.timeout,
-            )
-            if r.status_code != 200:
-                return []
-            return parse_mexc_klines(r.json())
-        except Exception:
-            logger.debug("klines %s %s", symbol, tf, exc_info=True)
+def fetch_mexc_klines(
+    symbol: str,
+    interval: str = "1m",
+    limit: int = 5,
+    *,
+    client: httpx.Client | None = None,
+    base_url: str = MEXC_API,
+) -> list[list[Any]]:
+    """GET /api/v3/klines. Returns [] on failure — caller must not invent ticks."""
+    own = client is None
+    http = client or httpx.Client(timeout=15.0)
+    try:
+        r = http.get(
+            f"{base_url}/api/v3/klines",
+            params={"symbol": symbol, "interval": interval, "limit": limit},
+        )
+        if r.status_code != 200:
             return []
+        data = r.json()
+        if not isinstance(data, list):
+            return []
+        return data
+    except (httpx.HTTPError, ValueError, TypeError):
+        return []
+    finally:
+        if own:
+            http.close()
 
-    def snapshot(self, symbol: str, tf: str, faster_tf: str) -> Dict[str, Any]:
-        last = self.ticker_price(symbol)
-        bars = self.klines(symbol, tf)
-        fast = self.klines(symbol, faster_tf)
-        if last is None and bars:
-            try:
-                last = float(bars[-1].get("c") or 0) or None
-            except (TypeError, ValueError):
-                last = None
-        return {
-            "current_price": last,
-            "bars": bars,
-            "faster_bars": fast,
-            "chosen_tf_reds": consecutive_reds(bars),
-            "faster_tf_reds": consecutive_reds(fast),
-            "vol_usd": dollar_volume(bars),
-            "vol_usd_fast": dollar_volume(fast),
-            "source": "api.mexc.com",
-        }
+
+def print_from_klines(
+    name: str,
+    price_klines: list[list[Any]],
+    *,
+    chosen_tf_klines: list[list[Any]] | None = None,
+    faster_tf: str = "1h",
+    faster_tf_klines: list[list[Any]] | None = None,
+) -> Print | None:
+    """
+    Convert real MEXC kline rows into one engine Print.
+    Uses the newest price candle only. Returns None if no usable rows (no invent).
+    """
+    if not price_klines:
+        return None
+    row = price_klines[-1]
+    try:
+        open_ms = int(row[0])
+        price = float(row[4])  # close
+        low = float(row[3])
+        # Prefer chosen-TF bar quote volume for Path/Size; 1m forming bar can read $0.
+        vol_row = (chosen_tf_klines[-1] if chosen_tf_klines else row)
+        volume_usd = float(vol_row[7]) if len(vol_row) > 7 else float(vol_row[5]) * price
+    except (IndexError, TypeError, ValueError):
+        return None
+    if price <= 0:
+        return None
+    chosen_reds = trailing_red_count(chosen_tf_klines or [])
+    faster_reds = trailing_red_count(faster_tf_klines or [])
+    return Print(
+        name=name,
+        price=price,
+        volume_usd=volume_usd,
+        ts=datetime.fromtimestamp(open_ms / 1000.0, tz=timezone.utc),
+        chosen_tf_reds=chosen_reds,
+        faster_tf_reds={faster_tf: faster_reds} if faster_tf else {},
+        low=low,
+        source="mexc",
+        open_time_ms=open_ms,
+    )
+
+
+@dataclass
+class MexcLiveFeed:
+    """Poll api.mexc.com klines for hung names. Short interval; no invented ticks."""
+
+    names: tuple[str, ...] | list[str] = DEFAULT_LIVE_NAMES
+    price_interval: str = "1m"
+    chosen_tf: str = "4h"
+    faster_tf: str = "1h"
+    price_limit: int = 3
+    tf_limit: int = 30
+    base_url: str = MEXC_API
+    client: httpx.Client | None = None
+    _last_fingerprint: dict[str, tuple[int, float, float]] = field(default_factory=dict)
+
+    def poll_once(self) -> list[Print]:
+        """Fetch each name once. Skip names with no API data. Dedupe identical bar fingerprint."""
+        out: list[Print] = []
+        http = self.client
+        own = http is None
+        if own:
+            http = httpx.Client(timeout=15.0)
+        try:
+            for name in self.names:
+                px_rows = fetch_mexc_klines(
+                    name,
+                    self.price_interval,
+                    self.price_limit,
+                    client=http,
+                    base_url=self.base_url,
+                )
+                chosen_rows = fetch_mexc_klines(
+                    name,
+                    self.chosen_tf,
+                    self.tf_limit,
+                    client=http,
+                    base_url=self.base_url,
+                )
+                faster_rows = fetch_mexc_klines(
+                    name,
+                    self.faster_tf,
+                    self.tf_limit,
+                    client=http,
+                    base_url=self.base_url,
+                )
+                pr = print_from_klines(
+                    name,
+                    px_rows,
+                    chosen_tf_klines=chosen_rows,
+                    faster_tf=self.faster_tf,
+                    faster_tf_klines=faster_rows,
+                )
+                if pr is None or pr.open_time_ms is None:
+                    continue
+                fp = (pr.open_time_ms, pr.price, pr.volume_usd)
+                if self._last_fingerprint.get(name) == fp:
+                    continue
+                self._last_fingerprint[name] = fp
+                out.append(pr)
+        finally:
+            if own and http is not None:
+                http.close()
+        return out

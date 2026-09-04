@@ -1,101 +1,125 @@
-"""Path live-read. Sit / buy from habit_ready, watch_only, reds, board panic."""
+"""Path: red-habit sit / buy. No fixed red count for every name."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from dataclasses import dataclass, field
+from typing import Any
 
 
-def _int(raw: Any) -> Optional[int]:
-    if raw is None or raw == "":
-        return None
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return None
+@dataclass
+class PathHabit:
+    chosen_tf: str
+    faster_tfs: list[str] = field(default_factory=list)
+    chosen_tf_reds_into_met: int | None = None
+    faster_tf_reds_at_low: int | None = None
+    vol_at_bottom_usd: float | None = None
+    habit_ready: bool = False
+    example_hint: str | None = None
+
+    @classmethod
+    def from_play(cls, play: dict[str, Any]) -> "PathHabit":
+        return cls(
+            chosen_tf=str(play.get("chosen_tf") or play.get("tf") or "15m"),
+            faster_tfs=list(play.get("faster_tfs") or []),
+            chosen_tf_reds_into_met=play.get("chosen_tf_reds_into_met"),
+            faster_tf_reds_at_low=play.get("faster_tf_reds_at_low"),
+            vol_at_bottom_usd=play.get("vol_at_bottom_usd"),
+            habit_ready=bool(play.get("habit_ready", False)),
+            example_hint=play.get("example_hint"),
+        )
 
 
-def first_or_second_red(reds: Any) -> bool:
-    n = _int(reds)
-    return n in (1, 2)
+@dataclass
+class PathSnapshot:
+    """Live reds / volume for Path weigh."""
+
+    chosen_tf_reds: int = 0
+    faster_tf_reds: dict[str, int] = field(default_factory=dict)
+    volume_at_ad_usd: float = 0.0
+    at_ad: bool = False
+    ad_met: bool = False
+    board_panic: bool = False
 
 
-def path_decision(play: Dict[str, Any], tape: Dict[str, Any]) -> Dict[str, Any]:
-    """Hung Path lock.
+@dataclass
+class PathDecision:
+    action: str  # buy | sit | wait
+    why: str
+    habit_match: bool = False
 
-    - watch_only blocks all buys until lifted.
-    - habit_ready false → sit first/second chosen TF red.
-      Board-wide panic still buys.
-    - habit_ready true + AD met + at AD → BUY on chosen TF reds ≥ habit
-      OR faster TF reds + volume match — even on the first chosen red.
+
+def evaluate_path(habit: PathHabit, snap: PathSnapshot) -> PathDecision:
     """
-    if play.get("watch_only"):
-        return {
-            "action": "sit",
-            "buy": False,
-            "reason": "watch_only",
-            "decision": "Watch only. Buys blocked until lifted.",
-        }
+    habit_ready false → sit on first/second red of chosen TF
+    (board-wide panic still buys).
 
-    reds = _int(tape.get("chosen_tf_reds") if tape.get("chosen_tf_reds") is not None else tape.get("reds"))
-    faster = _int(tape.get("faster_tf_reds"))
-    board_panic = bool(tape.get("board_panic") or tape.get("panic_board"))
-    met = bool(tape.get("met") or play.get("met"))
-    at_ad = bool(tape.get("at_ad") or tape.get("met_now"))
-    vol_match = bool(tape.get("volume_match") or tape.get("vol_spike"))
-    habit_ready = bool(play.get("habit_ready"))
-    habit = _int(play.get("chosen_tf_reds_into_met")) or 1
+    When AD met + at AD + habit_ready true → BUY if chosen TF habit OR
+    faster TF reds+volume match — even on first red of chosen TF.
+    No fixed 15m≥3 for every name.
+    """
+    if snap.board_panic:
+        return PathDecision(
+            action="buy",
+            why="board-wide panic — buy without red-habit wait",
+            habit_match=True,
+        )
 
-    if habit_ready and met and at_ad:
-        if reds is not None and reds >= habit:
-            word = "First" if reds == 1 else f"{reds}"
-            return {
-                "action": "buy",
-                "buy": True,
-                "reason": "habit_ready_chosen_reds",
-                "decision": f"{word} chosen TF red, habit ready, AD met, taking it.",
-            }
-        if faster is not None and faster >= 1 and vol_match:
-            return {
-                "action": "buy",
-                "buy": True,
-                "reason": "faster_tf_reds_volume",
-                "decision": "Faster TF reds and volume match at the AD, taking it.",
-            }
-        return {
-            "action": "wait",
-            "buy": False,
-            "reason": "habit_ready_waiting_reds",
-            "decision": "Habit ready and at the AD, waiting for the red / volume tell.",
-        }
+    if not snap.ad_met or not snap.at_ad:
+        return PathDecision(
+            action="wait",
+            why="AD not met or current price not at AD",
+        )
 
-    if first_or_second_red(reds) and not board_panic:
-        word = "Second" if reds == 2 else "First"
-        return {
-            "action": "sit",
-            "buy": False,
-            "reason": "sit_first_second_red",
-            "decision": f"{word} red on the chosen TF, sit.",
-        }
+    # At AD + met
+    if not habit.habit_ready:
+        # Sit on first or second red of chosen TF
+        if snap.chosen_tf_reds <= 2:
+            return PathDecision(
+                action="sit",
+                why=(
+                    f"habit_ready false — sit on red {snap.chosen_tf_reds} "
+                    f"of {habit.chosen_tf}"
+                ),
+            )
+        # Past second red without habit: still no fixed template buy —
+        # sit / wait for human weigh unless panic
+        return PathDecision(
+            action="sit",
+            why="habit_ready false — no chart habit to match; sit",
+        )
 
-    if board_panic and met and at_ad:
-        return {
-            "action": "buy",
-            "buy": True,
-            "reason": "board_panic",
-            "decision": "Board-wide panic at the AD, taking it.",
-        }
+    # habit_ready true: check chosen TF match OR faster TF hint
+    chosen_match = (
+        habit.chosen_tf_reds_into_met is not None
+        and snap.chosen_tf_reds >= habit.chosen_tf_reds_into_met
+    )
 
-    if reds is not None and reds >= 3 and met and at_ad:
-        return {
-            "action": "buy",
-            "buy": True,
-            "reason": "chosen_reds_past_sit",
-            "decision": f"{reds} red on the chosen TF at the AD, taking it.",
-        }
+    faster_match = False
+    if habit.faster_tfs and habit.faster_tf_reds_at_low is not None:
+        need_vol = habit.vol_at_bottom_usd or 0.0
+        for tf in habit.faster_tfs:
+            reds = snap.faster_tf_reds.get(tf, 0)
+            if reds >= habit.faster_tf_reds_at_low and snap.volume_at_ad_usd >= need_vol:
+                faster_match = True
+                break
 
-    return {
-        "action": "wait",
-        "buy": False,
-        "reason": "wait",
-        "decision": "Hung plan written, waiting for the line.",
-    }
+    if chosen_match or faster_match:
+        parts = []
+        if chosen_match:
+            parts.append(
+                f"{habit.chosen_tf} reds {snap.chosen_tf_reds} "
+                f"match habit {habit.chosen_tf_reds_into_met}"
+            )
+        if faster_match:
+            parts.append("faster TF reds+volume at the line")
+        return PathDecision(
+            action="buy",
+            why="habit match — " + "; ".join(parts),
+            habit_match=True,
+        )
+
+    # At AD, habit ready, but no match yet — sit (no smaller-TF bottom hint)
+    return PathDecision(
+        action="sit",
+        why="at AD but no chosen-TF or faster-TF habit match yet",
+    )

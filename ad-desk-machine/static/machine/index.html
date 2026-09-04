@@ -3,22 +3,55 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AD Desk Machine</title>
-  <link rel="stylesheet" href="/static/machine.css?v=2" />
+  <title>MACHINE</title>
+  <link rel="stylesheet" href="/machine/static/style.css?v=adb1" />
 </head>
 <body>
-  <header>
-    <h1>AD Desk Machine</h1>
-    <p class="sub">Hung plans · simulated fills · live orders off</p>
+  <div id="rail"></div>
+  <header id="head">
+    <div class="brand">MACHINE</div>
+    <div class="book">$<span id="book">200</span> book · <span id="liveN">0</span> of 2 live</div>
+    <div class="badge">live orders off</div>
   </header>
-  <form id="gate" class="gate" hidden>
-    <label for="tok">MACHINE_TOKEN</label>
-    <input id="tok" name="token" type="password" autocomplete="off" placeholder="paste token, then Enter" />
-    <button type="submit">Show hung plans</button>
-    <p class="hint">Saved in this browser only. Same value as MACHINE_TOKEN in ad-desk-machine/.env</p>
-  </form>
-  <main id="board">Loading hung plans…</main>
-  <section id="log"></section>
-  <script src="/static/machine.js?v=2"></script>
+
+  <section id="slots">
+    <div class="slot ghost" id="slot0"><div class="slot-label">SLOT 1</div><div class="open">open book</div></div>
+    <div class="slot ghost" id="slot1"><div class="slot-label">SLOT 2</div><div class="open">open book</div></div>
+  </section>
+
+  <section id="needs" class="hidden">
+    <div class="needs-kicker">needs-you</div>
+    <div id="needs-body"></div>
+  </section>
+
+  <section id="tape">
+    <div class="tape-kicker">tape · decisions only</div>
+    <div id="tape-rows"></div>
+  </section>
+
+  <section id="ranked">
+    <div class="ranked-kicker">ranked</div>
+    <div id="ranked-rows"></div>
+  </section>
+
+  <aside id="sheet" class="hidden">
+    <button id="sheet-close" type="button">×</button>
+    <div id="sheet-head"></div>
+    <div class="block">
+      <div class="kicker">IN</div>
+      <div id="sheet-in"></div>
+    </div>
+    <div class="block">
+      <div class="kicker">OUT</div>
+      <div id="sheet-out"></div>
+    </div>
+    <div id="sheet-foot"></div>
+  </aside>
+
+  <script>
+    // Token from localStorage only — never ship a default string in the page.
+    window.MACHINE_TOKEN = localStorage.getItem("MACHINE_TOKEN") || "";
+  </script>
+  <script src="/machine/static/app.js?v=adb1"></script>
 </body>
 </html>

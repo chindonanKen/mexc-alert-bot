@@ -1,0 +1,159 @@
+{
+  "when": "2026-09-04 10:55 PHT",
+  "note": "Money sample local engine run. habit_ready false \u2192 sit without panic; board panic allows buys.",
+  "sit_test": "at AD without panic \u2192 sit",
+  "panic_test": "board panic on \u2192 paper-buy fills",
+  "log": [
+    {
+      "ts": "2026-09-04T02:55:26.549965+00:00",
+      "manila": "10:55:26",
+      "action": "met",
+      "name": "SYNUSDT",
+      "price": 0.045,
+      "size_pct": null,
+      "why": "low entered AD met band \u2014 met stays met"
+    },
+    {
+      "ts": "2026-09-04T02:55:26.549983+00:00",
+      "manila": "10:55:26",
+      "action": "sit-out",
+      "name": "SYNUSDT",
+      "price": 0.045,
+      "size_pct": null,
+      "why": "habit_ready false \u2014 sit on red 2 of 4h"
+    },
+    {
+      "ts": "2026-09-04T02:55:26.550020+00:00",
+      "manila": "10:55:26",
+      "action": "board-panic",
+      "name": null,
+      "price": null,
+      "size_pct": null,
+      "why": "board-wide panic on"
+    },
+    {
+      "ts": "2026-09-04T02:55:26.550054+00:00",
+      "manila": "10:55:26",
+      "action": "paper-buy",
+      "name": "SYNUSDT",
+      "price": 0.048736,
+      "size_pct": 5.0,
+      "why": "board-wide panic \u2014 buy without red-habit wait"
+    },
+    {
+      "ts": "2026-09-04T02:55:26.550097+00:00",
+      "manila": "10:55:26",
+      "action": "paper-buy",
+      "name": "SYNUSDT",
+      "price": 0.044593,
+      "size_pct": 17.5,
+      "why": "board-wide panic \u2014 buy without red-habit wait"
+    }
+  ],
+  "trades": [
+    {
+      "side": "buy",
+      "name": "SYNUSDT",
+      "price": 0.048736,
+      "usd": 5.0,
+      "role": "AD",
+      "live_order": false
+    },
+    {
+      "side": "buy",
+      "name": "SYNUSDT",
+      "price": 0.046665,
+      "usd": 7.5,
+      "role": "AD",
+      "live_order": false
+    },
+    {
+      "side": "buy",
+      "name": "SYNUSDT",
+      "price": 0.044593,
+      "usd": 10.0,
+      "role": "AD",
+      "live_order": false
+    }
+  ],
+  "closes": [
+    {
+      "side": "sell",
+      "name": "SYNUSDT",
+      "price": 0.05533,
+      "usd": 2.25,
+      "layer": 1,
+      "live_order": false
+    },
+    {
+      "side": "sell",
+      "name": "SYNUSDT",
+      "price": 0.06585,
+      "usd": 3.375,
+      "layer": 2,
+      "live_order": false
+    },
+    {
+      "side": "sell",
+      "name": "SYNUSDT",
+      "price": 0.0815,
+      "usd": 6.75,
+      "layer": 3,
+      "live_order": false
+    }
+  ],
+  "exit_mark_sample": {
+    "when": "2026-09-04 13:19 PHT",
+    "by": "Gauge",
+    "current_price": 0.09193,
+    "avg_entry": 0.046148,
+    "open_usd": 22.5,
+    "sells_filled": [
+      {
+        "idx": 1,
+        "price": 0.05533,
+        "pct": 10,
+        "usd_share_of_22_5": 2.25,
+        "status": "filled"
+      },
+      {
+        "idx": 2,
+        "price": 0.06585,
+        "pct": 15,
+        "usd_share_of_22_5": 3.375,
+        "status": "filled"
+      },
+      {
+        "idx": 3,
+        "price": 0.0815,
+        "pct": 30,
+        "usd_share_of_22_5": 6.75,
+        "status": "filled",
+        "why": "big base 0.081\u20130.086"
+      }
+    ],
+    "sells_remaining": [
+      {
+        "idx": 4,
+        "price": 0.1005,
+        "pct": 30,
+        "usd_share_of_22_5": 6.75,
+        "status": "remaining",
+        "why": "next big base ~0.100\u20130.101"
+      },
+      {
+        "idx": 5,
+        "price": 0.11145,
+        "pct": 15,
+        "usd_share_of_22_5": 3.375,
+        "status": "remaining",
+        "why": "usual bounce map high"
+      }
+    ],
+    "realized_pnl_usd": 7.06,
+    "unrealized_pnl_usd": 10.04,
+    "total_pnl_at_mark_usd": 17.1,
+    "remaining_cost_usd": 10.125,
+    "note": "Mark sample parked. Write S4/S5 fill facts when those resolve. Process not money."
+  }
+}

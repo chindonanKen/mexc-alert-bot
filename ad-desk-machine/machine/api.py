@@ -1,144 +1,193 @@
-"""Standalone Machine HTTP. Bearer MACHINE_TOKEN. Live orders stay OFF."""
+"""FastAPI surface. Bearer MACHINE_TOKEN. live_orders_allowed always false."""
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Dict, Optional
-
+import asyncio
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
-from .engine import (
-    LOG,
-    NEEDS,
-    evaluate_id,
-    hung_board,
-    public_play,
-    reset_runtime,
-)
-from .loop import ensure_loop, last_snaps, loop_wanted, tick
-from .plays import HUNG_IDS, load_play
-from .settings import LIVE_ORDERS_ALLOWED, live_orders_allowed, machine_token
+from .engine import Engine
+from .loop import DecisionLoop, build_default_loop
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static" / "machine"
+TOKEN = os.environ.get("MACHINE_TOKEN", "dev-token")
+# Decision loop on by default while uvicorn runs. Tests set MACHINE_LOOP=0.
+LOOP_ENABLED = os.environ.get("MACHINE_LOOP", "1") != "0"
+FEED_INTERVAL = float(os.environ.get("MACHINE_FEED_INTERVAL", "10"))
+
+engine = Engine()
+decision_loop: DecisionLoop | None = None
+_loop_task: asyncio.Task | None = None
+
+# Load all data/plays/*.json at import (SYN/AGI/US hang on boot). Not examples/.
+if (ROOT / "data" / "plays").exists():
+    engine.load_plays_dir()
+
 
 @asynccontextmanager
-async def _lifespan(app: FastAPI):
-    if loop_wanted():
-        ensure_loop()
+async def lifespan(app: FastAPI):
+    global decision_loop, _loop_task
+    # Re-hang plays if this engine was replaced empty (e.g. after tests)
+    if not engine.plans and (ROOT / "data" / "plays").exists():
+        engine.load_plays_dir()
+    decision_loop = None
+    _loop_task = None
+    if LOOP_ENABLED:
+        decision_loop = build_default_loop(engine, interval_sec=FEED_INTERVAL)
+        _loop_task = asyncio.create_task(decision_loop.run_forever())
     yield
+    if decision_loop is not None:
+        decision_loop.stop()
+    if _loop_task is not None:
+        try:
+            await asyncio.wait_for(_loop_task, timeout=FEED_INTERVAL + 2)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            _loop_task.cancel()
 
 
-app = FastAPI(title="AD Desk Machine", version="0.1.0", lifespan=_lifespan)
-if STATIC.is_dir():
-    app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+app = FastAPI(title="AD Desk Machine", version="0.1.0", lifespan=lifespan)
 
 
-class EvaluateBody(BaseModel):
-    snapshot: Optional[Dict[str, Any]] = None
-    now: Optional[float] = None
+def require_bearer(authorization: str | None = Header(default=None)) -> None:
+    if authorization is None:
+        raise HTTPException(status_code=401, detail="missing Authorization")
+    parts = authorization.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(status_code=401, detail="expected Bearer token")
+    if parts[1] != TOKEN:
+        raise HTTPException(status_code=401, detail="invalid token")
+    # Never echo the token in responses
 
 
-def _auth(authorization: Optional[str]) -> None:
-    token = machine_token()
-    if not token:
-        raise HTTPException(503, "MACHINE_TOKEN is not set")
-    got = (authorization or "").strip()
-    if got != f"Bearer {token}":
-        raise HTTPException(401, "unauthorized")
+@app.get("/api/machine/status")
+def status(_: None = Depends(require_bearer)) -> dict[str, Any]:
+    s = engine.status()
+    s["live_orders_allowed"] = False
+    if decision_loop is not None:
+        s["loop"] = decision_loop.status()
+    else:
+        s["loop"] = {"running": False, "live_orders_allowed": False}
+    return s
 
 
-@app.get("/health")
-def health():
+@app.get("/api/machine/plans")
+def plans(_: None = Depends(require_bearer)) -> dict[str, Any]:
+    return {"plans": engine.ranked(), "live_orders_allowed": False}
+
+
+@app.get("/api/machine/plans/{plan_id}")
+def plan_one(plan_id: str, _: None = Depends(require_bearer)) -> dict[str, Any]:
+    plan = engine.plans.get(plan_id)
+    if plan is None:
+        # try by name
+        for p in engine.plans.values():
+            if p.name == plan_id or p.id == plan_id:
+                plan = p
+                break
+    if plan is None:
+        raise HTTPException(status_code=404, detail="plan not found")
+    row = engine.plan_row(plan)
+    row["live_orders_allowed"] = False
+    return row
+
+
+@app.get("/api/machine/layers/{plan_id}")
+def layers(plan_id: str, _: None = Depends(require_bearer)) -> dict[str, Any]:
+    plan = engine.plans.get(plan_id)
+    if plan is None:
+        for p in engine.plans.values():
+            if p.name == plan_id or p.id == plan_id:
+                plan = p
+                break
+    if plan is None:
+        raise HTTPException(status_code=404, detail="plan not found")
     return {
-        "ok": True,
-        "product": "AD Desk Machine",
-        "live_orders_allowed": live_orders_allowed(),
-        "live_orders_sent": False,
-        "hung": list(HUNG_IDS),
-    }
-
-
-@app.get("/machine")
-def machine_page():
-    index = STATIC / "index.html"
-    if not index.is_file():
-        raise HTTPException(404, "Machine page missing")
-    return FileResponse(index)
-
-
-@app.get("/plays")
-def list_plays(authorization: Optional[str] = Header(default=None)):
-    _auth(authorization)
-    snaps = last_snaps()
-    return {
-        "ok": True,
-        "hung_plans": hung_board(snaps),
-        "live_orders_allowed": LIVE_ORDERS_ALLOWED,
-        "live_orders_sent": False,
-    }
-
-
-@app.get("/plays/{play_id}")
-def get_play(play_id: str, authorization: Optional[str] = Header(default=None)):
-    _auth(authorization)
-    try:
-        play = load_play(play_id)
-    except FileNotFoundError:
-        raise HTTPException(404, "hung plan not found")
-    return {
-        "ok": True,
-        "hung_plan": public_play(play, last_snaps().get(play_id)),
+        "id": plan.id,
+        "layers": [b.to_dict() for b in plan.fills.buy_layers],
+        "sell_layers": [s.to_dict() for s in plan.fills.remaining_sells()],
         "live_orders_allowed": False,
     }
 
 
-@app.post("/plays/{play_id}/evaluate")
-def post_evaluate(
-    play_id: str,
-    body: EvaluateBody,
-    authorization: Optional[str] = Header(default=None),
-):
-    _auth(authorization)
-    snap = dict(body.snapshot or {})
-    if body.now is not None:
-        snap["now"] = body.now
-    try:
-        result = evaluate_id(play_id, snap)
-    except FileNotFoundError:
-        raise HTTPException(404, "hung plan not found")
+@app.get("/api/machine/trades")
+def trades(_: None = Depends(require_bearer)) -> dict[str, Any]:
+    return {"trades": engine.trades, "live_orders_allowed": False}
+
+
+@app.get("/api/machine/feed")
+def feed(_: None = Depends(require_bearer)) -> dict[str, Any]:
+    return {"feed": engine.feed[-200:], "live_orders_allowed": False}
+
+
+@app.get("/api/machine/log")
+def log(_: None = Depends(require_bearer)) -> dict[str, Any]:
+    return {"log": engine.log.as_list(), "live_orders_allowed": False}
+
+
+@app.get("/api/machine/closes")
+def closes(_: None = Depends(require_bearer)) -> dict[str, Any]:
+    return {"closes": engine.closes, "live_orders_allowed": False}
+
+
+@app.get("/api/machine/needs-you")
+def needs_you(_: None = Depends(require_bearer)) -> dict[str, Any]:
+    return {"needs_you": engine.needs_you, "live_orders_allowed": False}
+
+
+@app.post("/api/machine/hang")
+def hang(body: dict[str, Any], _: None = Depends(require_bearer)) -> dict[str, Any]:
+    """Hang a written plan (watch). Never places live orders."""
+    plan = engine.hang_play(body)
+    rows = {p["id"]: p for p in engine.ranked()}
+    row = rows.get(plan.id) or {"id": plan.id, "name": plan.name, "state": plan.state}
+    row["live_orders_allowed"] = False
+    return row
+
+
+@app.post("/api/machine/simulate")
+def simulate(body: dict[str, Any], _: None = Depends(require_bearer)) -> dict[str, Any]:
+    """Staff scoring: push a synthetic print. Never places live orders."""
+    from .feeds import Print
+
+    pr = Print(
+        name=str(body["name"]),
+        price=float(body["price"]),
+        volume_usd=float(body.get("volume_usd") or 0),
+        chosen_tf_reds=int(body.get("chosen_tf_reds") or 0),
+        faster_tf_reds=dict(body.get("faster_tf_reds") or {}),
+        low=float(body["low"]) if "low" in body else None,
+    )
+    result = engine.on_print(pr)
+    result["live_orders_allowed"] = False
     return result
 
 
-@app.post("/tick")
-def post_tick(authorization: Optional[str] = Header(default=None)):
-    _auth(authorization)
-    return tick()
+@app.get("/machine")
+@app.get("/machine/")
+def machine_page() -> FileResponse:
+    index = STATIC / "index.html"
+    if not index.exists():
+        raise HTTPException(status_code=404, detail="machine page missing")
+    return FileResponse(index)
 
 
-@app.get("/log")
-def get_log(play_id: Optional[str] = None, authorization: Optional[str] = Header(default=None)):
-    _auth(authorization)
-    return {"ok": True, "log": LOG.rows(play_id)}
+if STATIC.exists():
+    app.mount("/machine/static", StaticFiles(directory=str(STATIC)), name="machine-static")
 
 
-@app.get("/needs-you")
-def get_needs(authorization: Optional[str] = Header(default=None)):
-    _auth(authorization)
-    return {"ok": True, "needs_you": list(NEEDS)}
-
-
-@app.post("/reset")
-def post_reset(authorization: Optional[str] = Header(default=None)):
-    _auth(authorization)
-    reset_runtime()
-    return {"ok": True, "live_orders_allowed": False}
-
-
-def create_app() -> FastAPI:
-    return app
+@app.get("/")
+def root() -> JSONResponse:
+    return JSONResponse(
+        {
+            "service": "ad-desk-machine",
+            "machine": "/machine",
+            "live_orders_allowed": False,
+        }
+    )

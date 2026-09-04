@@ -1,0 +1,123 @@
+{
+  "kind": "reed_exit_facts",
+  "symbol": "USUSDT",
+  "tf": "4h",
+  "market": "spot",
+  "venue": "api.mexc.com",
+  "measured_at_pht": "2026-09-04 13:19 PHT",
+  "ad": {
+    "T": 0.02475,
+    "B": 0.0115,
+    "L": 0.01325
+  },
+  "history_window": {
+    "first_bar": "2026-06-13 08:00 PHT",
+    "last_bar": "2026-09-04 12:00 PHT",
+    "n_bars": 500
+  },
+  "note": "Facts from ONE unique finished met dump of the short AD L in the official 4h window. Live copy T 0.02475\u2192B 0.0115 is not met yet. Long 0.047\u21920.021 family is spent \u2014 not used. Aug 14 08:00 H 0.0273 is mid-dump on the same Aug 13\u201315 dump (Kenneth 0.02729\u21920.01393 class), same low \u2014 not a second bounce event. Single-event map. Not sell layers. Gauge owns OUT.",
+  "finished_met_bounce_events": [
+    {
+      "role": "COPY",
+      "T": 0.03242,
+      "B": 0.01917,
+      "L": 0.01325,
+      "top_bar": "2026-08-13 16:00 PHT",
+      "mid_dump_high_note": "2026-08-14 08:00 PHT 4h H 0.0273 (same dump; Kenneth short print class)",
+      "low_bar": "2026-08-15 00:00 PHT",
+      "low": 0.01388,
+      "bounce_high_bar": "2026-08-22 08:00 PHT",
+      "bounce_high": 0.02466,
+      "bounce_abs": 0.01078,
+      "bounce_pct_of_low": 77.67,
+      "bounce_frac_of_L": 0.814,
+      "vol_at_low_4h_usd": 1517398.24,
+      "vol_bounce_high_bar_4h_usd": 4778.87,
+      "vol_max_on_bounce_path_4h_usd": {
+        "bar": "2026-08-15 12:00 PHT",
+        "H": 0.01802,
+        "usd": 245950.36
+      },
+      "candles_4h_to_bounce_start": 3
+    }
+  ],
+  "usual_bounce": {
+    "n": 1,
+    "frac_of_L": {
+      "min": 0.814,
+      "max": 0.814,
+      "mid": 0.814
+    },
+    "abs_price": {
+      "min": 0.01078,
+      "max": 0.01078,
+      "mid": 0.01078
+    },
+    "pct_of_low": {
+      "min": 77.67,
+      "max": 77.67,
+      "mid": 77.67
+    },
+    "usual_bounce_height_abs_mid": 0.01078,
+    "usual_bounce_frac_of_L_mid": 0.814,
+    "live_map_note": "If live tags near B 0.0115, single-event bounce abs 0.01078 maps bounce high near 0.02228. Map only \u2014 n=1. Kenneth recut wins.",
+    "repeat_warning": "n=1 \u2014 not a multi-copy usual-bounce mid yet on short L."
+  },
+  "candles_to_bounce_after_ad_tag": {
+    "copy_met": {
+      "low_bar": "2026-08-15 00:00 PHT",
+      "candles_4h": 3,
+      "bounce_high_bar": "2026-08-22 08:00 PHT",
+      "note": "first green+5% start; full bounce high later at Aug 22"
+    },
+    "repeating_start": "Only sample: real bounce start within about 3\u00d74h bars after the AD tag. Not Path candle law."
+  },
+  "volume": {
+    "at_low_bar_4h_usd": {
+      "events": [
+        1517398.24
+      ],
+      "mid": 1517398.0
+    },
+    "at_bounce_high_bar_4h_usd": {
+      "events": [
+        4778.87
+      ],
+      "mid": 4779.0
+    },
+    "max_on_bounce_path_4h_usd": {
+      "bar": "2026-08-15 12:00 PHT",
+      "usd": 245950.36
+    },
+    "panic_like_on_way_up": "Low bar was panic-class (~1.52M USD). Quiet peak bar (~4.8k at Aug 22 08:00). Highest post-low bounce-path bar ~246k USD (2026-08-15 12:00 PHT). Use path max for panic-like-up, not the quiet peak bar."
+  },
+  "big_bases_4h": [
+    {
+      "zone": "~0.0138\u20130.0140",
+      "role": "short-L met low / live printed low shelf",
+      "examples": [
+        "2026-08-15 00:00 PHT L 0.01388",
+        "2026-08-26 16:00 PHT L 0.01384",
+        "2026-06-24 16:00 PHT L 0.0138"
+      ]
+    },
+    {
+      "zone": "~0.0167",
+      "role": "post-dump shelf under bounce",
+      "examples": [
+        "2026-08-20 12:00 PHT L 0.01667",
+        "2026-08-20 16:00 PHT L 0.01667"
+      ]
+    },
+    {
+      "zone": "~0.0114\u20130.0117",
+      "role": "near Kenneth-typed live B 0.0115",
+      "examples": [
+        "2026-06-29 00:00 PHT L 0.01139",
+        "2026-06-16 20:00 PHT L 0.01166"
+      ]
+    }
+  ],
+  "habit_repeat": false,
+  "no_layers": true
+}

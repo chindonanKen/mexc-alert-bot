@@ -1,20 +1,127 @@
 {
   "id": "AGIUSDT_4h",
-  "symbol": "AGIUSDT",
-  "market": "spot",
-  "tf": "4h",
+  "name": "AGIUSDT",
+  "chosen_tf": "4h",
+  "faster_tfs": [
+    "1h"
+  ],
+  "chosen_tf_reds_into_met": 1,
+  "faster_tf_reds_at_low": null,
+  "vol_at_bottom_usd": 16623,
+  "habit_ready": true,
+  "example_hint": "thin Path: 4h reds_into_met=1 (wick+1 prior); no faster-TF habit; Path \u22651 at AD",
   "ad_top": 0.00748,
   "ad_bottom": 0.004172,
+  "play_usd": 100,
+  "current_price": 0.00583,
+  "copy_count": 2,
+  "high_magnet": true,
   "watch_only": false,
-  "habit_ready": true,
-  "dump_depth": "high_magnet",
-  "chosen_tf_reds_into_met": 1,
-  "vol_at_bottom_usd": 16623,
+  "lock_pass": "2026-09-04 Size PASS hang-ready; 2026-09-04 Lock PASS: habit_ready false (n=1); watch_only lifted for board-wide panic; empty OUT until fill; 2026-09-04 Lock PASS Path habit_ready true chosen_tf_reds_into_met=1 vol_at_bottom_usd=16623 faster null; 2026-09-04 Lock PASS Exit sells n=2 bounce (0.00451/0.00476/0.00505/0.00575/0.005843 @ 10/15/30/30/15)",
   "sell_layers": [
-    {"idx": 1, "price": 0.00451, "pct": 10},
-    {"idx": 2, "price": 0.00476, "pct": 15},
-    {"idx": 3, "price": 0.00505, "pct": 30},
-    {"idx": 4, "price": 0.00575, "pct": 30},
-    {"idx": 5, "price": 0.005843, "pct": 15}
-  ]
+    {
+      "idx": 1,
+      "price": 0.00451,
+      "usd": 10.0,
+      "why": "usual_bounce",
+      "status": "remaining"
+    },
+    {
+      "idx": 2,
+      "price": 0.00476,
+      "usd": 15.0,
+      "why": "usual_bounce",
+      "status": "remaining"
+    },
+    {
+      "idx": 3,
+      "price": 0.00505,
+      "usd": 30.0,
+      "why": "big_base",
+      "status": "remaining"
+    },
+    {
+      "idx": 4,
+      "price": 0.00575,
+      "usd": 30.0,
+      "why": "big_base",
+      "status": "remaining"
+    },
+    {
+      "idx": 5,
+      "price": 0.005843,
+      "usd": 15.0,
+      "why": "usual_bounce",
+      "status": "remaining"
+    }
+  ],
+  "layers": [
+    {
+      "idx": 1,
+      "price": 0.004404,
+      "usd": 5.0,
+      "share_pct": 5,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 2,
+      "price": 0.004342,
+      "usd": 7.5,
+      "share_pct": 7.5,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 3,
+      "price": 0.004281,
+      "usd": 10.0,
+      "share_pct": 10,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 4,
+      "price": 0.00422,
+      "usd": 12.5,
+      "share_pct": 12.5,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 5,
+      "price": 0.004159,
+      "usd": 15.0,
+      "share_pct": 15,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 6,
+      "price": 0.003755,
+      "usd": 10.0,
+      "share_pct": 10,
+      "role": "panic",
+      "status": "empty"
+    },
+    {
+      "idx": 7,
+      "price": 0.003379,
+      "usd": 15.0,
+      "share_pct": 15,
+      "role": "panic",
+      "status": "empty"
+    },
+    {
+      "idx": 8,
+      "price": 0.003004,
+      "usd": 25.0,
+      "share_pct": 25,
+      "role": "panic",
+      "status": "empty"
+    }
+  ],
+  "panic_math": "Q_i = B - B * (0.10 + 0.18*(i-1)/2)",
+  "path_habit_source": "data/.grokbot/path_habit/PATH_HABIT_REPORT.json",
+  "exit_facts": "data/.grokbot/AGIUSDT_4h_exit_facts.json"
 }

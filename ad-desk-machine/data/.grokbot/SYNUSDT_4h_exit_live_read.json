@@ -1,0 +1,15 @@
+{
+  "kind": "gauge_exit_live_read",
+  "symbol": "SYNUSDT",
+  "tf": "4h",
+  "when": "2026-09-04 13:26 PHT",
+  "note": "Master: money sample close already has all five sells filled in data/money_sample_m2_closed.json. Remaining sells = 0. No AGI/US drafts.",
+  "closed_file": "data/money_sample_m2_closed.json",
+  "sells_filled": 5,
+  "sells_remaining": 0,
+  "plan_state": "out",
+  "close_pnl_usd": 16.007566,
+  "expectancy_sample": 16.007566,
+  "tail_sample": 16.007566,
+  "judgment": "Seat closed on remaining sells for this money sample. Defensive pull-down then late bounce sold remaining. Process not money."
+}

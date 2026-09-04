@@ -1,80 +1,97 @@
-"""Poll hung plays against live MEXC klines. Simulated fills only."""
+"""Always-on decision loop: live feed → engine.on_print → Machine log / fills.
+
+Runs while uvicorn is up. live_orders_allowed stays false — simulated fills only.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import os
-import threading
-import time
-from typing import Any, Dict, Optional
+from dataclasses import dataclass, field
+from typing import Any
 
-from .engine import evaluate, hung_board
-from .feeds import MexcPublicFeed
-from .plays import load_hung_plays
-from .settings import faster_tf_for, live_orders_allowed
+from .engine import Engine
+from .feeds import DEFAULT_LIVE_NAMES, MexcLiveFeed, Print
 
-logger = logging.getLogger(__name__)
-
-POLL_SECONDS = 8.0
-
-_lock = threading.Lock()
-_thread: Optional[threading.Thread] = None
-_stop = threading.Event()
-_feed = MexcPublicFeed()
-_last_snaps: Dict[str, Dict[str, Any]] = {}
+log = logging.getLogger("machine.loop")
 
 
-def loop_wanted() -> bool:
-    raw = os.getenv("MACHINE_LOOP")
-    if raw is None:
-        return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+@dataclass
+class DecisionLoop:
+    engine: Engine
+    feed: MexcLiveFeed
+    interval_sec: float = 10.0
+    running: bool = False
+    last_error: str | None = None
+    polls: int = 0
+    prints_seen: int = 0
+    _stop: asyncio.Event = field(default_factory=asyncio.Event)
 
+    def stop(self) -> None:
+        self._stop.set()
 
-def last_snaps() -> Dict[str, Dict[str, Any]]:
-    return dict(_last_snaps)
+    def status(self) -> dict[str, Any]:
+        return {
+            "running": self.running,
+            "interval_sec": self.interval_sec,
+            "polls": self.polls,
+            "prints_seen": self.prints_seen,
+            "feed_names": list(self.feed.names),
+            "last_error": self.last_error,
+            "live_orders_allowed": False,
+        }
 
-
-def tick(feed: Optional[MexcPublicFeed] = None) -> Dict[str, Any]:
-    """One pass. Never places a live order."""
-    if live_orders_allowed():
-        raise RuntimeError("live orders are hard-off")
-    client = feed or _feed
-    results = []
-    for play in load_hung_plays():
-        tf = str(play.get("tf") or "4h")
-        snap = client.snapshot(str(play.get("symbol") or ""), tf, faster_tf_for(tf))
-        _last_snaps[str(play.get("id"))] = snap
-        results.append(evaluate(play, snap))
-    return {
-        "ok": True,
-        "plays": hung_board(_last_snaps),
-        "results": results,
-        "live_orders_allowed": False,
-        "live_orders_sent": False,
-    }
-
-
-def _run() -> None:
-    while not _stop.is_set():
+    def step_once(self) -> list[dict[str, Any]]:
+        """One poll → evaluate. Sync helper for tests / scripts."""
+        results: list[dict[str, Any]] = []
         try:
-            tick()
-        except Exception:
-            logger.exception("machine loop")
-        _stop.wait(POLL_SECONDS)
+            prints = self.feed.poll_once()
+        except Exception as e:  # noqa: BLE001 — keep loop alive
+            self.last_error = str(e)
+            log.warning("feed poll failed: %s", e)
+            return results
+        self.polls += 1
+        self.last_error = None
+        for pr in prints:
+            self.prints_seen += 1
+            results.append(self.engine.on_print(pr))
+        return results
+
+    async def run_forever(self) -> None:
+        """Background task body. Never places live exchange orders."""
+        self.running = True
+        self._stop.clear()
+        log.info(
+            "decision loop on; names=%s interval=%ss live_orders_allowed=false",
+            list(self.feed.names),
+            self.interval_sec,
+        )
+        try:
+            while not self._stop.is_set():
+                await asyncio.to_thread(self.step_once)
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=self.interval_sec)
+                except asyncio.TimeoutError:
+                    pass
+        finally:
+            self.running = False
+            log.info("decision loop stopped")
 
 
-def ensure_loop() -> None:
-    if not loop_wanted():
-        return
-    global _thread
-    with _lock:
-        if _thread is not None and _thread.is_alive():
-            return
-        _stop.clear()
-        _thread = threading.Thread(target=_run, name="ad-desk-machine", daemon=True)
-        _thread.start()
+def feed_names_from_engine(engine: Engine) -> list[str]:
+    """Prefer hung plan names; fall back to SYN/AGI/US."""
+    names = [p.name for p in engine.plans.values()]
+    # Keep stable order; ensure defaults present when hung
+    ordered: list[str] = []
+    for n in list(DEFAULT_LIVE_NAMES) + names:
+        if n not in ordered:
+            ordered.append(n)
+    # If we have hung plans, only poll those that look like MEXC symbols
+    hung = [p.name for p in engine.plans.values() if p.name.endswith("USDT")]
+    return hung if hung else list(DEFAULT_LIVE_NAMES)
 
 
-def stop_loop() -> None:
-    _stop.set()
+def build_default_loop(engine: Engine, interval_sec: float = 10.0) -> DecisionLoop:
+    names = feed_names_from_engine(engine)
+    feed = MexcLiveFeed(names=names)
+    return DecisionLoop(engine=engine, feed=feed, interval_sec=interval_sec)

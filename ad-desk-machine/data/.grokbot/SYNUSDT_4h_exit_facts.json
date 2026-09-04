@@ -1,0 +1,137 @@
+{
+  "kind": "reed_exit_facts",
+  "symbol": "SYNUSDT",
+  "tf": "4h",
+  "market": "spot",
+  "venue": "api.mexc.com",
+  "measured_at_pht": "2026-09-04 11:09 PHT",
+  "ad": {
+    "T": 0.14753,
+    "B": 0.0413,
+    "L": 0.10623
+  },
+  "note": "Facts from the two finished met dumps of this AD L only. Not sell layers. Gauge owns OUT.",
+  "finished_met_bounce_events": [
+    {
+      "role": "COPY",
+      "T": 0.15797,
+      "B": 0.05174,
+      "L": 0.10623,
+      "top_bar": "2025-08-14 12:00 PHT",
+      "low_bar": "2025-10-11 04:00 PHT",
+      "low": 0.04078,
+      "bounce_high_bar": "2025-10-24 00:00 PHT",
+      "bounce_high": 0.1149,
+      "bounce_abs": 0.07412,
+      "bounce_pct_of_low": 181.76,
+      "bounce_frac_of_L": 0.698,
+      "vol_at_low_4h_usd": 555092.73063,
+      "vol_at_low_1h_usd": 225636.99807,
+      "vol_bounce_high_bar_4h_usd": 1951914.3165
+    },
+    {
+      "role": "SOURCE",
+      "T": 0.18758,
+      "B": 0.08135,
+      "L": 0.10623,
+      "top_bar": "2026-07-26 00:00 PHT",
+      "low_bar": "2026-08-03 12:00 PHT",
+      "low": 0.08135,
+      "bounce_high_bar": "2026-08-06 04:00 PHT",
+      "bounce_high": 0.14753,
+      "bounce_abs": 0.06618,
+      "bounce_pct_of_low": 81.35,
+      "bounce_frac_of_L": 0.623,
+      "vol_at_low_4h_usd": 64679.11941,
+      "vol_at_low_1h_usd": 18657.49567,
+      "vol_bounce_high_bar_4h_usd": 208752.68866
+    }
+  ],
+  "usual_bounce": {
+    "n": 2,
+    "frac_of_L": {
+      "min": 0.623,
+      "max": 0.698,
+      "mid": 0.66
+    },
+    "abs_price": {
+      "min": 0.06618,
+      "max": 0.07412,
+      "mid": 0.07015
+    },
+    "pct_of_low": {
+      "min": 81.35,
+      "max": 181.76,
+      "mid": 131.56
+    },
+    "usual_bounce_height_abs_mid": 0.07015,
+    "usual_bounce_frac_of_L_mid": 0.66,
+    "live_map_note": "If live tags near B 0.04130, mid bounce abs ~0.0701 maps bounce high near ~0.1114. Map only, not a freeze."
+  },
+  "candles_to_bounce_after_ad_tag": {
+    "source_met": {
+      "low_bar": "2026-08-03 12:00 PHT",
+      "candles_4h": 3,
+      "bounce_high_bar": "2026-08-06 04:00 PHT"
+    },
+    "copy_met": {
+      "low_bar": "2025-10-11 04:00 PHT",
+      "candles_4h": 3,
+      "bounce_high_bar": "2025-10-24 00:00 PHT",
+      "note": "first green+5% start within 3\u00d74h; full bounce high later"
+    },
+    "repeating_start": "Both finished mets start a real bounce within about 3\u00d74h bars after the AD tag. Not a fixed Path candle law."
+  },
+  "volume": {
+    "at_low_bar_4h_usd": {
+      "events": [
+        555092.73063,
+        64679.11941
+      ],
+      "mid": 309886.0
+    },
+    "at_bounce_high_bar_4h_usd": {
+      "events": [
+        1951914.3165,
+        208752.68866
+      ],
+      "mid": 1080334.0
+    },
+    "source": {
+      "low_bar_usd": 64679.12,
+      "bounce_high_bar_usd": 208752.69,
+      "ratio": 3.23
+    },
+    "copy": {
+      "low_bar_usd": 555092.73,
+      "bounce_high_bar_usd": 1951914.32,
+      "ratio": 3.52
+    },
+    "panic_like_on_way_up": "Bounce-high bar quote vol ~3.2\u20133.5\u00d7 the low-bar vol on both finished mets."
+  },
+  "big_bases_4h": [
+    {
+      "zone": "0.081\u20130.086",
+      "examples": [
+        "2026-08-03 12:00 PHT L 0.08135",
+        "2026-09-03 00:00 PHT L 0.08585"
+      ],
+      "role": "source low / live shelf"
+    },
+    {
+      "zone": "~0.100\u20130.101",
+      "examples": [
+        "2026-08-12 16:00 PHT L 0.10059"
+      ],
+      "role": "post-source shelf"
+    },
+    {
+      "zone": "~0.041",
+      "examples": [
+        "2025-10-11 04:00 PHT L 0.04078"
+      ],
+      "role": "prior finished met low / deep AD area near live B"
+    }
+  ],
+  "no_layers": true
+}
