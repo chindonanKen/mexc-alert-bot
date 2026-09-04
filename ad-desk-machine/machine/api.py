@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,8 +13,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .engine import Engine
-from .loop import DecisionLoop, build_default_loop
+from .engine import PLAYS_DIR, Engine
+from .loop import DecisionLoop, build_default_loop, feed_names_from_engine
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static" / "machine"
@@ -141,10 +142,23 @@ def needs_you(_: None = Depends(require_bearer)) -> dict[str, Any]:
     return {"needs_you": engine.needs_you, "live_orders_allowed": False}
 
 
+def persist_hung_play(play: dict[str, Any], play_id: str, plays_dir: Path | None = None) -> Path:
+    """Write hung play JSON under data/plays/{id}.json (not examples/). Overwrite same id is OK."""
+    dest = Path(plays_dir) if plays_dir is not None else PLAYS_DIR
+    dest.mkdir(parents=True, exist_ok=True)
+    path = dest / f"{play_id}.json"
+    path.write_text(json.dumps(play, indent=2) + "\n")
+    return path
+
+
 @app.post("/api/machine/hang")
 def hang(body: dict[str, Any], _: None = Depends(require_bearer)) -> dict[str, Any]:
     """Hang a written plan (watch). Never places live orders."""
     plan = engine.hang_play(body)
+    persist_hung_play(body, plan.id)
+    # Join live MEXC feed immediately — do not leave names frozen from boot.
+    if decision_loop is not None:
+        decision_loop.feed.names = list(feed_names_from_engine(engine))
     rows = {p["id"]: p for p in engine.ranked()}
     row = rows.get(plan.id) or {"id": plan.id, "name": plan.name, "state": plan.state}
     row["live_orders_allowed"] = False

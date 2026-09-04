@@ -16,7 +16,7 @@ from machine.feeds import (
     print_from_klines,
     trailing_red_count,
 )
-from machine.loop import DecisionLoop, feed_names_from_engine
+from machine.loop import DecisionLoop, feed_names_from_engine, sync_feed_names
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -161,6 +161,34 @@ def test_feed_names_from_hung_plans():
     assert "SYNUSDT" in names
     assert "AGIUSDT" in names
     assert "USUSDT" in names
+
+
+def test_hang_play_sync_feed_adds_new_name():
+    """API hang hole: hung USDT name must join live feed without restart."""
+    from machine.feeds import MexcLiveFeed
+
+    eng = Engine()
+    feed = MexcLiveFeed(names=["SYNUSDT", "AGIUSDT", "USUSDT"])
+    loop = DecisionLoop(engine=eng, feed=feed, interval_sec=99)
+    assert "BPUSDT" not in list(loop.feed.names)
+    eng.hang_play(
+        {
+            "id": "BPUSDT_4h",
+            "name": "BPUSDT",
+            "chosen_tf": "4h",
+            "habit_ready": False,
+            "ad_top": 1.0,
+            "ad_bottom": 0.8,
+            "play_usd": 100,
+            "sell_layers": [],
+        }
+    )
+    # hang_play alone leaves feed frozen — sync is required
+    assert "BPUSDT" not in list(loop.feed.names)
+    names = sync_feed_names(loop, eng)
+    assert "BPUSDT" in names
+    assert "BPUSDT" in list(loop.feed.names)
+    assert isinstance(loop.feed.names, list)
 
 
 def test_load_plays_dir_hangs_syn_agi_us_not_only_examples():

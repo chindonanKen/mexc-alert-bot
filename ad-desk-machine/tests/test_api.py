@@ -1,5 +1,6 @@
 """API smoke: live_orders_allowed false; auth; routes exist."""
 
+import json
 import os
 
 import pytest
@@ -195,3 +196,38 @@ def test_sheet_includes_reds_and_vol(client, habit_play):
     assert row.get("chosen_tf_reds") == 2
     assert row.get("vol_usd") == 41200
     assert "bounce_kind" not in row
+
+
+def test_hang_joins_live_feed_and_persists(client, tmp_path, monkeypatch):
+    """POST /hang refreshes feed.names and writes data/plays/{id}.json (not examples/)."""
+    from machine.feeds import MexcLiveFeed
+    from machine.loop import DecisionLoop
+
+    monkeypatch.setattr(api_mod, "PLAYS_DIR", tmp_path)
+    feed = MexcLiveFeed(names=["SYNUSDT", "AGIUSDT", "USUSDT"])
+    api_mod.decision_loop = DecisionLoop(engine=api_mod.engine, feed=feed, interval_sec=99)
+    assert isinstance(feed.names, list)
+
+    body = {
+        "id": "BPUSDT_4h",
+        "name": "BPUSDT",
+        "chosen_tf": "4h",
+        "habit_ready": False,
+        "ad_top": 1.0,
+        "ad_bottom": 0.8,
+        "play_usd": 100,
+        "sell_layers": [],
+    }
+    r = client.post("/api/machine/hang", headers=auth(), json=body)
+    assert r.status_code == 200
+    assert r.json()["live_orders_allowed"] is False
+    names = list(api_mod.decision_loop.feed.names)
+    assert "BPUSDT" in names
+    assert isinstance(api_mod.decision_loop.feed.names, list)
+    saved = tmp_path / "BPUSDT_4h.json"
+    assert saved.is_file()
+    loaded = json.loads(saved.read_text())
+    assert loaded["id"] == "BPUSDT_4h"
+    assert loaded["name"] == "BPUSDT"
+    # Must not land under examples/
+    assert "examples" not in saved.parts
