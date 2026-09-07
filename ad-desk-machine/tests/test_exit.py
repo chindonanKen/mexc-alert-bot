@@ -6,6 +6,7 @@ from machine.exit import (
     ExitFacts,
     ExitLiveState,
     RemainingCost,
+    clip_map_high_to_nearest_unmet_base,
     load_exit_facts,
     live_read_exit,
     parse_base_zone,
@@ -824,3 +825,101 @@ def test_engine_auto_weak_from_tape_no_flag(engine):
     rem = plan.fills.remaining_sells()
     assert rem
     assert max(s.price for s in rem) < max(prices_mid)
+
+
+def test_load_exit_facts_unmet_bases_above_B():
+    """Prefer unmet_bases_above_B; skip must_use_for_sells=false / above_live_B=false."""
+    facts = load_exit_facts(
+        {
+            "usual_bounce": {"n": 2, "usual_bounce_height_abs_mid": 0.07},
+            "unmet_bases_above_B": [
+                {
+                    "zone": "0.081–0.086",
+                    "role": "source low / live shelf",
+                    "must_use_for_sells": True,
+                    "above_live_B": True,
+                },
+                {
+                    "zone": "~0.041",
+                    "role": "near live B",
+                    "must_use_for_sells": False,
+                    "above_live_B": False,
+                },
+            ],
+            "big_bases_4h": [{"zone": "0.50–0.51"}],
+        }
+    )
+    assert facts.bases == [(0.081, 0.086)]
+    # Fallback when unmet missing
+    old = load_exit_facts({"big_bases_4h": [{"zone": "0.081–0.086"}]})
+    assert old.bases == [(0.081, 0.086)]
+
+
+def test_hang_accepts_reed_exit_facts(engine):
+    play = {
+        "id": "REED1",
+        "name": "REED1",
+        "chosen_tf": "4h",
+        "ad_top": 1.0,
+        "ad_bottom": 0.8,
+        "play_usd": 100,
+        "layers": [{"idx": 1, "price": 0.86, "usd": 5, "share_pct": 5, "role": "AD"}],
+        "sell_layers": [{"idx": 1, "price": 0.88, "usd": 20, "why": "usual_bounce"}],
+        "reed_exit_facts": {
+            "usual_bounce": {"n": 2, "usual_bounce_height_abs_mid": 0.12},
+            "unmet_bases_above_B": [{"zone": "0.90–0.93", "must_use_for_sells": True}],
+        },
+    }
+    plan = engine.hang_play(play)
+    assert plan.exit_facts.bases == [(0.90, 0.93)]
+    assert engine.live_orders_allowed is False
+
+
+def test_into_unmet_base_force_fills_remaining_sells(engine):
+    """Current price into a named unmet base → sell invested bag; do not wait bounce length."""
+    facts = {
+        "usual_bounce": {"n": 2, "usual_bounce_height_abs_mid": 0.12},
+        "unmet_bases_above_B": [
+            {"zone": "0.90–0.93", "must_use_for_sells": True, "above_live_B": True}
+        ],
+        "volume": {"source": {"low_bar_usd": 10_000, "ratio": 3.2}},
+    }
+    plan = _live_plan(engine, exit_facts=facts)
+    assert plan.fills.remaining_sells()
+    r = engine.on_print(
+        Print(name="EXIT1", price=0.91, low=0.90, volume_usd=5_000, chosen_tf_reds=0)
+    )
+    assert any("big base" in x for x in r.get("exit_live", []))
+    sells = [t for t in engine.trades if t["side"] == "sell"]
+    assert sells, "into unmet named base must force sell fills"
+    assert engine.live_orders_allowed is False
+
+
+def test_clip_map_high_to_nearest_unmet_base():
+    B = 0.0413
+    map_high = 0.1114
+    bases = [(0.081, 0.086), (0.100, 0.101)]
+    capped = clip_map_high_to_nearest_unmet_base(map_high, bases, B)
+    assert capped == 0.081
+    assert clip_map_high_to_nearest_unmet_base(map_high, [], B) is None
+    assert clip_map_high_to_nearest_unmet_base(None, bases, B) is None
+    assert clip_map_high_to_nearest_unmet_base(map_high, bases, None) is None
+    # Base entirely above the map — do not invent a cap
+    assert clip_map_high_to_nearest_unmet_base(0.07, [(0.081, 0.086)], B) is None
+    # Base at/below B skipped
+    assert clip_map_high_to_nearest_unmet_base(map_high, [(0.040, 0.041)], B) is None
+
+
+def test_empty_out_still_invents_nothing_with_unmet_facts(engine):
+    plan = _live_plan(
+        engine,
+        sells=[],
+        exit_facts={
+            "usual_bounce": {"n": 2, "usual_bounce_height_abs_mid": 0.12},
+            "unmet_bases_above_B": [{"zone": "0.90–0.93"}],
+        },
+    )
+    assert plan.fills.sell_layers == []
+    engine.on_print(Print(name="EXIT1", price=0.91, low=0.90, volume_usd=99_000, chosen_tf_reds=0))
+    assert plan.fills.sell_layers == []
+    assert not any(t["side"] == "sell" for t in engine.trades)

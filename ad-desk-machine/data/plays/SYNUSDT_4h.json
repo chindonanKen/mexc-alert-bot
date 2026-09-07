@@ -122,5 +122,6 @@
     }
   ],
   "exit_facts": "data/.grokbot/SYNUSDT_4h_exit_facts.json",
+  "reed_exit_facts": "data/.grokbot/SYNUSDT_4h_exit_facts.json",
   "panic_math": "Q_i = B - B * (0.10 + 0.18*(i-1)/2)"
 }

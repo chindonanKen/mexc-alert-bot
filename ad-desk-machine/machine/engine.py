@@ -125,8 +125,12 @@ class Engine:
             )
         sells = load_sell_layers(play.get("sell_layers"))
         fills = FillState(buy_layers=buys, sell_layers=sells, buy_set_id="1")
-        # Reed exit facts (bounce / base / volume). Missing → blank; do not invent.
-        facts_src = play.get("exit_facts") or play.get("exit_facts_path")
+        # Reed exit facts (bounce / unmet bases / volume). Missing → blank; do not invent.
+        facts_src = (
+            play.get("reed_exit_facts")
+            or play.get("exit_facts")
+            or play.get("exit_facts_path")
+        )
         exit_facts = load_exit_facts(facts_src, play_path=play_path)
         exit_live = ExitLiveState(original_sells=snapshot_sells(sells) if sells else [])
         plan = PlanState(

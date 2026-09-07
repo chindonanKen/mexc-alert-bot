@@ -123,5 +123,6 @@
   ],
   "panic_math": "Q_i = B - B * (0.10 + 0.18*(i-1)/2)",
   "path_habit_source": "data/.grokbot/path_habit/PATH_HABIT_REPORT.json",
-  "exit_facts": "data/.grokbot/AGIUSDT_4h_exit_facts.json"
+  "exit_facts": "data/.grokbot/AGIUSDT_4h_exit_facts.json",
+  "reed_exit_facts": "data/.grokbot/AGIUSDT_4h_exit_facts.json"
 }

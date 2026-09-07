@@ -122,5 +122,6 @@
     }
   ],
   "panic_math": "Q_i = B - B * (0.10 + 0.18*(i-1)/2)",
-  "exit_facts": "data/.grokbot/USUSDT_4h_exit_facts.json"
+  "exit_facts": "data/.grokbot/USUSDT_4h_exit_facts.json",
+  "reed_exit_facts": "data/.grokbot/USUSDT_4h_exit_facts.json"
 }
