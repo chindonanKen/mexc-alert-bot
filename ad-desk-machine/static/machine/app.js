@@ -24,10 +24,31 @@
   let plans = [];
   let selected = null;
 
-  async function api(path) {
-    const r = await fetch(path, { headers: hdr });
+  async function api(path, opts) {
+    const extra = opts || {};
+    const headers = Object.assign({}, hdr, extra.headers || {});
+    if (extra.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+    const r = await fetch(path, Object.assign({ headers: headers }, extra));
     if (!r.ok) throw new Error(path + " " + r.status);
     return r.json();
+  }
+
+  function isFinished(p) {
+    return !p || p.state === "out" || p.killed;
+  }
+
+  async function killPlan(id) {
+    if (!id) return;
+    if (!window.confirm("Kill " + id + "?")) return;
+    await api("/api/machine/kill", {
+      method: "POST",
+      body: JSON.stringify({ id: id, why: "Kenneth marked done" }),
+    });
+    if (selected === id) {
+      selected = null;
+      document.getElementById("sheet").classList.add("hidden");
+    }
+    await refresh();
   }
 
   function fmtPx(p) {
@@ -107,7 +128,7 @@
         '<div class="ad">' + fmtPx(p.ad_top) + '<br>' + fmtPx(p.ad_bottom) + '</div>' +
         '<div class="meta">' + inLine + ' · ' + outLine + '</div>' +
         '<div class="recut"><span class="line">LINE</span><span>' + buys.length + ' in</span><span>' +
-        (sells ? sells + " out" : "—") + '</span><span class="kill">KILL</span></div>';
+        (sells ? sells + " out" : "—") + '</span><span class="kill" data-id="' + p.id + '">KILL</span></div>';
     }
   }
 
@@ -123,7 +144,7 @@
   function paintRanked(rows) {
     const box = document.getElementById("ranked-rows");
     box.innerHTML = "";
-    rows.forEach((p, i) => {
+    rows.filter(p => !isFinished(p)).forEach((p, i) => {
       const rank = String(p.rank || i + 1).padStart(2, "0");
       const row = document.createElement("div");
       row.className = "rank-row";
@@ -199,7 +220,7 @@
     const remBuys = showIn.length;
     document.getElementById("sheet-foot").innerHTML =
       '<span class="line">LINE</span><span>' + remBuys + ' in</span><span>' +
-      (sells.length ? sells.length + " out" : "—") + '</span><span class="kill">KILL</span>';
+      (sells.length ? sells.length + " out" : "—") + '</span><span class="kill" data-id="' + p.id + '">KILL</span>';
   }
 
   function paintTape(log) {
@@ -246,10 +267,19 @@
       if (selected) {
         try {
           const detail = await api("/api/machine/plans/" + encodeURIComponent(selected));
-          openSheet(detail);
+          if (isFinished(detail)) {
+            selected = null;
+            document.getElementById("sheet").classList.add("hidden");
+          } else {
+            openSheet(detail);
+          }
         } catch (err) {
           const p = plans.find(x => x.id === selected);
-          if (p) openSheet(p);
+          if (p && !isFinished(p)) openSheet(p);
+          else {
+            selected = null;
+            document.getElementById("sheet").classList.add("hidden");
+          }
         }
       }
     } catch (e) {
@@ -260,6 +290,15 @@
   document.getElementById("sheet-close").addEventListener("click", () => {
     document.getElementById("sheet").classList.add("hidden");
     selected = null;
+  });
+
+  document.addEventListener("click", (ev) => {
+    const el = ev.target && ev.target.closest ? ev.target.closest(".kill") : null;
+    if (!el) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const id = el.getAttribute("data-id") || selected;
+    killPlan(id);
   });
 
   refresh();

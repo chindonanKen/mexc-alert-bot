@@ -151,6 +151,28 @@ def persist_hung_play(play: dict[str, Any], play_id: str, plays_dir: Path | None
     return path
 
 
+@app.post("/api/machine/kill")
+def kill(body: dict[str, Any], _: None = Depends(require_bearer)) -> dict[str, Any]:
+    """Mark a hung plan out/killed. Never places live orders. Does not invent prices."""
+    plan_id = body.get("id") or body.get("plan_id")
+    if not plan_id:
+        raise HTTPException(status_code=400, detail="id or plan_id required")
+    why = str(body.get("why") or "kill")
+    plan = engine.plans.get(str(plan_id))
+    if plan is None:
+        for p in engine.plans.values():
+            if p.name == plan_id or p.id == plan_id:
+                plan = p
+                break
+    if plan is None:
+        raise HTTPException(status_code=404, detail="plan not found")
+    engine.kill(plan.id, why=why)
+    sync_feed_names(decision_loop, engine)
+    row = engine.plan_row(plan)
+    row["live_orders_allowed"] = False
+    return row
+
+
 @app.post("/api/machine/hang")
 def hang(body: dict[str, Any], _: None = Depends(require_bearer)) -> dict[str, Any]:
     """Hang a written plan (watch). Never places live orders."""

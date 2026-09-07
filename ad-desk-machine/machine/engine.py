@@ -557,7 +557,7 @@ class Engine:
             self.closes.append({"name": plan.name, "reason": "layers flat"})
 
     def kill(self, plan_id: str, why: str = "kill") -> None:
-        plan = self.plans.get(plan_id)
+        plan = self.plans.get(plan_id) or self._find_plan(plan_id)
         if not plan:
             return
         plan.killed = True
@@ -607,6 +607,7 @@ class Engine:
             "why": plan.last_why,
             "habit_ready": plan.habit.habit_ready,
             "watch_only": plan.watch_only,
+            "killed": bool(plan.killed),
             "layers": [b.to_dict() for b in plan.fills.buy_layers],
             "sell_layers": [s.to_dict() for s in sells],
         }
@@ -626,7 +627,12 @@ class Engine:
 
     def ranked(self) -> list[dict[str, Any]]:
         # Ranked includes reds+$vol; bounce_kind / last_sell_why stay off this list.
-        rows = [self.plan_row(p, sheet=False) for p in self.plans.values()]
+        # Hide finished plays (out / killed) — sheet/ranked paint contract.
+        rows = [
+            self.plan_row(p, sheet=False)
+            for p in self.plans.values()
+            if p.state != "out" and not p.killed
+        ]
         order = {"live": 0, "met": 1, "watch": 2, "out": 3}
         rows.sort(key=lambda r: (order.get(r["state"], 9), r["name"]))
         for i, r in enumerate(rows, start=1):
