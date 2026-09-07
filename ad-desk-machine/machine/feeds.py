@@ -21,6 +21,7 @@ class Print:
     chosen_tf_reds: int = 0
     faster_tf_reds: dict[str, int] = field(default_factory=dict)
     low: float | None = None  # candle low for met checks
+    high: float | None = None  # candle high for sell travel (bar wick)
     weak_bounce: bool = False  # optional override; prefer scored bounce kind when facts exist
     candles_since_ad_tag: int | None = None  # TF candles since AD tag (Reed/tape)
     source: str = "synthetic"  # synthetic | mexc
@@ -33,6 +34,8 @@ class Print:
             self.ts = datetime.now(timezone.utc)
         if self.low is None:
             self.low = self.price
+        if self.high is None:
+            self.high = self.price
 
 
 def iter_prints(prints: list[Print]) -> Iterator[Print]:
@@ -54,6 +57,7 @@ def load_print_file(path: str) -> list[Print]:
                 chosen_tf_reds=int(row.get("chosen_tf_reds", 0)),
                 faster_tf_reds=dict(row.get("faster_tf_reds") or {}),
                 low=float(row["low"]) if "low" in row else None,
+                high=float(row["high"]) if "high" in row else None,
                 weak_bounce=bool(row.get("weak_bounce", False)),
                 candles_since_ad_tag=(
                     int(row["candles_since_ad_tag"])
@@ -143,6 +147,7 @@ def print_to_dict(p: Print) -> dict[str, Any]:
         "chosen_tf_reds": p.chosen_tf_reds,
         "faster_tf_reds": p.faster_tf_reds,
         "low": p.low,
+        "high": p.high,
         "source": p.source,
         "open_time_ms": p.open_time_ms,
         "reds_5m": p.reds_5m,
@@ -224,6 +229,7 @@ def print_from_klines(
     try:
         open_ms = int(row[0])
         price = float(row[4])  # close
+        high = float(row[2])  # newest 1m candle high — sell travel
         low = float(row[3])
         # Prefer chosen-TF bar quote volume for Path/Size; 1m forming bar can read $0.
         vol_row = (chosen_tf_klines[-1] if chosen_tf_klines else row)
@@ -253,6 +259,7 @@ def print_from_klines(
         chosen_tf_reds=chosen_reds,
         faster_tf_reds=faster_map,
         low=low,
+        high=high,
         source="mexc",
         open_time_ms=open_ms,
         reds_5m=reds_5m,
@@ -274,7 +281,7 @@ class MexcLiveFeed:
     tf_limit: int = 30
     base_url: str = MEXC_API
     client: httpx.Client | None = None
-    _last_fingerprint: dict[str, tuple[int, float, float, float, int]] = field(default_factory=dict)
+    _last_fingerprint: dict[str, tuple[Any, ...]] = field(default_factory=dict)
 
     def tfs_for(self, name: str) -> tuple[str, str]:
         """Resolve this name's chosen + faster intervals. Fallback 4h / 1h."""
@@ -337,7 +344,14 @@ class MexcLiveFeed:
                 )
                 if pr is None or pr.open_time_ms is None:
                     continue
-                fp = (pr.open_time_ms, pr.price, pr.volume_usd, pr.volume_usd_5m, pr.reds_5m)
+                fp = (
+                    pr.open_time_ms,
+                    pr.price,
+                    pr.volume_usd,
+                    pr.volume_usd_5m,
+                    pr.reds_5m,
+                    float(pr.high if pr.high is not None else pr.price),
+                )
                 if self._last_fingerprint.get(name) == fp:
                     continue
                 self._last_fingerprint[name] = fp

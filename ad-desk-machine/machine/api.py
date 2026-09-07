@@ -176,6 +176,7 @@ def simulate(body: dict[str, Any], _: None = Depends(require_bearer)) -> dict[st
         chosen_tf_reds=int(body.get("chosen_tf_reds") or 0),
         faster_tf_reds=dict(body.get("faster_tf_reds") or {}),
         low=float(body["low"]) if "low" in body else None,
+        high=float(body["high"]) if "high" in body else None,
         reds_5m=int(body.get("reds_5m") or 0),
         volume_usd_5m=float(body.get("volume_usd_5m") or 0),
     )

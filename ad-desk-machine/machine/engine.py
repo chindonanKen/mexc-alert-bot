@@ -207,6 +207,8 @@ class Engine:
             plan.live_faster_tf = str(fts[0]) if fts else None
             plan.live_faster_tf_reds = None
         low = pr.low if pr.low is not None else pr.price
+        # Sell on full candle travel (bar high). Buys keep low/price.
+        sell_price = pr.high if getattr(pr, "high", None) is not None else pr.price
         was_met = plan.met
         plan.met = update_met(plan.met, low, plan.ad)
         if plan.met and not was_met:
@@ -271,7 +273,7 @@ class Engine:
                 plan.fills.sell_layers,
                 plan.exit_facts,
                 plan.exit_live,
-                current_price=pr.price,
+                current_price=sell_price,
                 low=low,
                 volume_usd=pr.volume_usd,
                 ad_bottom=plan.ad.bottom,
@@ -292,7 +294,7 @@ class Engine:
                     price=pr.price,
                     force=True,
                 )
-            sell_events = try_fill_sells(plan.fills, pr.price)
+            sell_events = try_fill_sells(plan.fills, sell_price)
             if sell_events:
                 self._record_sells(plan, sell_events)
                 result["fills"].extend(
@@ -422,7 +424,7 @@ class Engine:
                 if plan.exit_live.bounce_low is None:
                     plan.exit_live.bounce_low = low
                 if plan.exit_live.bounce_high is None:
-                    plan.exit_live.bounce_high = pr.price
+                    plan.exit_live.bounce_high = sell_price
                 if plan.exit_live.session_low is None:
                     plan.exit_live.session_low = low
                 if not plan.exit_live.original_sells and plan.fills.sell_layers:
@@ -478,7 +480,7 @@ class Engine:
                         plan.fills.sell_layers,
                         plan.exit_facts,
                         plan.exit_live,
-                        current_price=pr.price,
+                        current_price=sell_price,
                         low=low,
                         volume_usd=pr.volume_usd,
                         ad_bottom=plan.ad.bottom,
@@ -499,7 +501,11 @@ class Engine:
                             price=pr.price,
                             force=True,
                         )
-                sell_events = try_fill_sells(plan.fills, pr.price)
+                # PARKED live unlock (do not turn on): when buys fill live, place
+                # resting sell limit orders on the exchange so a fast spike sells
+                # while it happens, not after the next 1m poll.
+                # live_orders_allowed stays false.
+                sell_events = try_fill_sells(plan.fills, sell_price)
                 if sell_events:
                     self._record_sells(plan, sell_events)
                     result["fills"].extend(

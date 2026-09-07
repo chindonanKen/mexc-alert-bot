@@ -59,6 +59,7 @@ def test_print_from_klines_uses_real_close_low_quote():
     assert pr.name == "SYNUSDT"
     assert pr.price == 0.095
     assert pr.low == 0.09
+    assert pr.high == 0.11  # 1m candle high (row index 2)
     # Dollar volume prefers chosen-TF newest bar quote (not the 1m forming bar).
     assert pr.volume_usd == 1.0
     assert pr.chosen_tf_reds == 2
