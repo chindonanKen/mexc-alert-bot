@@ -37,6 +37,8 @@ class PlanState:
     live_faster_tf: str | None = None
     live_faster_tf_reds: int | None = None
     live_vol_usd: float | None = None
+    live_reds_5m: int | None = None
+    live_vol_usd_5m: float | None = None
     play_usd: float = 100.0
     exit_facts: ExitFacts = field(default_factory=ExitFacts)
     exit_live: ExitLiveState = field(default_factory=ExitLiveState)
@@ -178,6 +180,8 @@ class Engine:
                 "name": pr.name,
                 "price": pr.price,
                 "volume_usd": pr.volume_usd,
+                "volume_usd_5m": float(getattr(pr, "volume_usd_5m", 0) or 0),
+                "reds_5m": int(getattr(pr, "reds_5m", 0) or 0),
                 "ts": pr.ts.isoformat() if pr.ts else None,
             }
         )
@@ -190,6 +194,8 @@ class Engine:
         plan.current_price = pr.price
         plan.live_chosen_tf_reds = int(pr.chosen_tf_reds)
         plan.live_vol_usd = float(pr.volume_usd) if pr.volume_usd is not None else None
+        plan.live_reds_5m = int(getattr(pr, "reds_5m", 0) or 0)
+        plan.live_vol_usd_5m = float(getattr(pr, "volume_usd_5m", 0) or 0)
         if pr.faster_tf_reds:
             # one faster TF id from the print map
             ft = next(iter(pr.faster_tf_reds.items()))
@@ -218,6 +224,8 @@ class Engine:
             chosen_tf_reds=pr.chosen_tf_reds,
             faster_tf_reds=dict(pr.faster_tf_reds),
             volume_at_ad_usd=pr.volume_usd,
+            volume_usd_5m=float(getattr(pr, "volume_usd_5m", 0) or 0),
+            reds_5m=int(getattr(pr, "reds_5m", 0) or 0),
             at_ad=price_at,
             ad_met=plan.met,
             board_panic=self.board_panic,
@@ -345,10 +353,13 @@ class Engine:
             path_take_at_ad = bool(path_dec.habit_match) and price_at
             if self.board_panic and price_at:
                 path_take_at_ad = True
+            size_vol = float(pr.volume_usd or 0)
+            if plan.habit.require_5m_volume_spike:
+                size_vol = float(getattr(pr, "volume_usd_5m", 0) or 0)
             gate = gate_buy_layers(
                 plan.fills.buy_layers,
                 print_price=pr.price,
-                volume_usd=float(pr.volume_usd or 0),
+                volume_usd=size_vol,
                 vol_at_bottom_usd=plan.habit.vol_at_bottom_usd,
                 at_ad=price_at,
                 path_take_at_ad=path_take_at_ad,
@@ -590,6 +601,8 @@ class Engine:
         row["faster_tf"] = plan.live_faster_tf or (str(fts[0]) if fts else None)
         row["faster_tf_reds"] = plan.live_faster_tf_reds
         row["vol_usd"] = plan.live_vol_usd
+        row["reds_5m"] = plan.live_reds_5m
+        row["vol_usd_5m"] = plan.live_vol_usd_5m
         if sheet:
             # Exit-why thin paint fields — sheet only. Do not invent sell why.
             row["bounce_kind"] = plan.exit_live.last_bounce_kind

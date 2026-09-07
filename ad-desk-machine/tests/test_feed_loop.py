@@ -13,7 +13,9 @@ from machine.feeds import (
     MexcLiveFeed,
     ascending_bounce,
     descending_dump,
+    load_print_file,
     print_from_klines,
+    print_to_dict,
     trailing_red_count,
 )
 from machine.loop import DecisionLoop, feed_names_from_engine, feed_tfs_from_engine, sync_feed_names
@@ -328,10 +330,150 @@ def test_poll_uses_plan_chosen_tf_not_global_4h():
     assert ("SYNUSDT", "1d") not in seen
     # 1d has 3 reds; if the bug still used global 4h, BP would be 1
     assert by_name["BPUSDT"].chosen_tf_reds == 3
-    assert by_name["BPUSDT"].faster_tf_reds == {"4h": 1}
-    # 4h plan unchanged
+    assert by_name["BPUSDT"].faster_tf_reds["4h"] == 1
+    assert by_name["BPUSDT"].faster_tf_reds["5m"] == 0
+    # 4h plan unchanged primary; 5m attached after
     assert by_name["SYNUSDT"].chosen_tf_reds == 1
-    assert by_name["SYNUSDT"].faster_tf_reds == {"1h": 2}
+    assert by_name["SYNUSDT"].faster_tf_reds["1h"] == 2
+    assert by_name["SYNUSDT"].faster_tf_reds["5m"] == 0
+    assert ("BPUSDT", "5m") in seen
+    assert ("SYNUSDT", "5m") in seen
+    client.close()
+
+
+def test_print_from_klines_attaches_5m_reds_and_quote_vol():
+    rows = [_kline(1_700_000_000_000, "0.10", "0.11", "0.09", "0.095", "100", "9.5")]
+    chosen = [_kline(1, "1", "1", "0.9", "0.9", "1", "1")]
+    faster = [_kline(1, "1", "1", "0.9", "0.95", "1", "1")]
+    k5 = [
+        _kline(1, "0.10", "0.10", "0.09", "0.09", "10", "100"),  # red
+        _kline(2, "0.09", "0.09", "0.08", "0.08", "20", "226.5"),  # red
+    ]
+    pr = print_from_klines(
+        "SYNUSDT",
+        rows,
+        chosen_tf_klines=chosen,
+        faster_tf="1h",
+        faster_tf_klines=faster,
+        klines_5m=k5,
+    )
+    assert pr is not None
+    assert pr.reds_5m == 2
+    assert pr.volume_usd_5m == 226.5
+    assert list(pr.faster_tf_reds.items()) == [("1h", 1), ("5m", 2)]
+    roundtrip = print_to_dict(pr)
+    assert roundtrip["reds_5m"] == 2
+    assert roundtrip["volume_usd_5m"] == 226.5
+
+
+def test_print_to_dict_load_print_file_roundtrip_5m(tmp_path):
+    pr = print_from_klines(
+        "AGIUSDT",
+        [_kline(9, "1", "1", "0.9", "0.95", "1", "2")],
+        klines_5m=[_kline(1, "1", "1", "0.9", "0.8", "5", "40")],
+        faster_tf="1h",
+        faster_tf_klines=[_kline(1, "1", "1", "0.9", "0.95", "1", "1")],
+    )
+    assert pr is not None
+    path = tmp_path / "prints.json"
+    path.write_text(json.dumps([print_to_dict(pr)]))
+    loaded = load_print_file(str(path))
+    assert len(loaded) == 1
+    assert loaded[0].reds_5m == pr.reds_5m == 1
+    assert loaded[0].volume_usd_5m == pr.volume_usd_5m == 40.0
+
+
+def test_mexc_live_feed_always_polls_5m():
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        interval = dict(request.url.params).get("interval") or ""
+        seen.append(interval)
+        if interval == "1m":
+            return httpx.Response(
+                200,
+                json=[_kline(1000, "0.09", "0.09", "0.088", "0.089", "10", "0.89")],
+            )
+        if interval == "5m":
+            return httpx.Response(
+                200,
+                json=[_kline(1, "0.10", "0.10", "0.09", "0.09", "8", "80")],
+            )
+        return httpx.Response(200, json=[_kline(1, "0.10", "0.10", "0.09", "0.11", "1", "1")])
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    feed = MexcLiveFeed(names=["SYNUSDT"], client=client, faster_tf="1h")
+    prints = feed.poll_once()
+    assert seen.count("5m") == 1
+    assert seen.count("1h") == 1
+    assert seen.count("1m") == 1
+    assert len(prints) == 1
+    assert prints[0].reds_5m == 1
+    assert prints[0].volume_usd_5m == 80.0
+    assert prints[0].faster_tf_reds["1h"] == 0
+    assert prints[0].faster_tf_reds["5m"] == 1
+    client.close()
+
+
+def test_mexc_live_feed_reuses_5m_when_faster_tf_is_5m():
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        interval = dict(request.url.params).get("interval") or ""
+        seen.append(interval)
+        if interval == "1m":
+            return httpx.Response(
+                200,
+                json=[_kline(1000, "0.09", "0.09", "0.088", "0.089", "10", "0.89")],
+            )
+        if interval == "5m":
+            return httpx.Response(
+                200,
+                json=[
+                    _kline(1, "0.10", "0.10", "0.09", "0.09", "8", "80"),
+                    _kline(2, "0.09", "0.09", "0.08", "0.08", "9", "90"),
+                ],
+            )
+        return httpx.Response(200, json=[])
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    feed = MexcLiveFeed(names=["SYNUSDT"], client=client, faster_tf="5m")
+    prints = feed.poll_once()
+    assert seen.count("5m") == 1
+    assert len(prints) == 1
+    assert prints[0].faster_tf_reds == {"5m": 2}
+    assert prints[0].reds_5m == 2
+    assert prints[0].volume_usd_5m == 90.0
+    client.close()
+
+
+def test_fingerprint_includes_5m_so_spike_emits():
+    n5 = {"quote": "10"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        interval = dict(request.url.params).get("interval") or ""
+        if interval == "1m":
+            return httpx.Response(
+                200,
+                json=[_kline(1000, "0.09", "0.09", "0.088", "0.089", "10", "0.89")],
+            )
+        if interval == "5m":
+            return httpx.Response(
+                200,
+                json=[_kline(1, "0.10", "0.10", "0.09", "0.09", "8", n5["quote"])],
+            )
+        return httpx.Response(200, json=[_kline(1, "1", "1", "0.9", "1.1", "1", "1")])
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    feed = MexcLiveFeed(names=["SYNUSDT"], client=client)
+    first = feed.poll_once()
+    assert len(first) == 1
+    second = feed.poll_once()
+    assert second == []
+    n5["quote"] = "999"
+    third = feed.poll_once()
+    assert len(third) == 1
+    assert third[0].volume_usd_5m == 999.0
     client.close()
 
 

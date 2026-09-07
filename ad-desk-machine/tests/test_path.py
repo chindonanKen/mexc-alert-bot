@@ -96,3 +96,150 @@ def test_engine_habit_false_sits(engine, sit_play):
     )
     assert r["action"] == "sit"
     assert "habit_ready false" in r["why"]
+
+
+def test_require_5m_volume_spike_sits_on_weak_vol():
+    habit = PathHabit(
+        chosen_tf="15m",
+        chosen_tf_reds_into_met=2,
+        habit_ready=True,
+        require_5m_volume_spike=True,
+        vol_5m_usual_usd=40_000,
+    )
+    snap = PathSnapshot(
+        chosen_tf_reds=2,
+        at_ad=True,
+        ad_met=True,
+        volume_usd_5m=1_000,
+    )
+    d = evaluate_path(habit, snap)
+    assert d.action == "sit"
+    assert d.why == "missing 5m volume spike — sit"
+
+
+def test_require_5m_volume_spike_buys_on_spike():
+    habit = PathHabit(
+        chosen_tf="15m",
+        chosen_tf_reds_into_met=2,
+        habit_ready=True,
+        require_5m_volume_spike=True,
+        vol_5m_usual_usd=40_000,
+    )
+    snap = PathSnapshot(
+        chosen_tf_reds=2,
+        at_ad=True,
+        ad_met=True,
+        volume_usd_5m=50_000,
+    )
+    d = evaluate_path(habit, snap)
+    assert d.action == "buy"
+    assert d.habit_match
+
+
+def test_unset_5m_habit_unchanged():
+    habit = PathHabit(
+        chosen_tf="15m",
+        chosen_tf_reds_into_met=2,
+        habit_ready=True,
+    )
+    snap = PathSnapshot(
+        chosen_tf_reds=2,
+        at_ad=True,
+        ad_met=True,
+        volume_usd_5m=0,
+    )
+    d = evaluate_path(habit, snap)
+    assert d.action == "buy"
+    assert "5m volume spike" not in d.why
+
+
+def test_require_5m_none_usual_needs_positive():
+    habit = PathHabit(
+        chosen_tf="15m",
+        chosen_tf_reds_into_met=2,
+        habit_ready=True,
+        require_5m_volume_spike=True,
+        vol_5m_usual_usd=None,
+    )
+    weak = PathSnapshot(chosen_tf_reds=2, at_ad=True, ad_met=True, volume_usd_5m=0)
+    assert evaluate_path(habit, weak).action == "sit"
+    assert evaluate_path(habit, weak).why == "missing 5m volume spike — sit"
+    ok = PathSnapshot(chosen_tf_reds=2, at_ad=True, ad_met=True, volume_usd_5m=1)
+    assert evaluate_path(habit, ok).action == "buy"
+
+
+def test_path_habit_loads_nested_path_block():
+    h = PathHabit.from_play(
+        {
+            "chosen_tf": "4h",
+            "habit_ready": True,
+            "path": {
+                "require_5m_volume_spike": True,
+                "vol_5m_usual_usd": 12_000,
+            },
+        }
+    )
+    assert h.require_5m_volume_spike is True
+    assert h.vol_5m_usual_usd == 12_000
+    unset = PathHabit.from_play({"chosen_tf": "4h"})
+    assert unset.require_5m_volume_spike is False
+    assert unset.vol_5m_usual_usd is None
+
+
+def test_board_panic_skips_5m_volume_gate():
+    habit = PathHabit(
+        chosen_tf="15m",
+        habit_ready=True,
+        chosen_tf_reds_into_met=3,
+        require_5m_volume_spike=True,
+        vol_5m_usual_usd=40_000,
+    )
+    snap = PathSnapshot(
+        chosen_tf_reds=1,
+        at_ad=True,
+        ad_met=True,
+        board_panic=True,
+        volume_usd_5m=0,
+    )
+    d = evaluate_path(habit, snap)
+    assert d.action == "buy"
+    assert "panic" in d.why.lower()
+
+
+def test_engine_sit_then_buy_on_5m_spike(engine, habit_play):
+    play = dict(habit_play)
+    play["require_5m_volume_spike"] = True
+    play["vol_5m_usual_usd"] = 40_000
+    engine.hang_play(play)
+    weak = engine.on_print(
+        Print(
+            name="DEMO",
+            price=0.805,
+            low=0.80,
+            chosen_tf_reds=3,
+            faster_tf_reds={"5m": 2},
+            volume_usd=50_000,
+            volume_usd_5m=100,
+            reds_5m=2,
+        )
+    )
+    assert weak["action"] == "sit"
+    assert weak["why"] == "missing 5m volume spike — sit"
+    strong = engine.on_print(
+        Print(
+            name="DEMO",
+            price=0.805,
+            low=0.80,
+            chosen_tf_reds=3,
+            faster_tf_reds={"5m": 2},
+            volume_usd=50_000,
+            volume_usd_5m=50_000,
+            reds_5m=2,
+        )
+    )
+    assert strong["action"] == "buy"
+    row = engine.plan_row(engine.plans["DEMO"])
+    assert row["reds_5m"] == 2
+    assert row["vol_usd_5m"] == 50_000
+    assert engine.feed[-1]["reds_5m"] == 2
+    assert engine.feed[-1]["volume_usd_5m"] == 50_000

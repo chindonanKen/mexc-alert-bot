@@ -25,6 +25,8 @@ class Print:
     candles_since_ad_tag: int | None = None  # TF candles since AD tag (Reed/tape)
     source: str = "synthetic"  # synthetic | mexc
     open_time_ms: int | None = None
+    reds_5m: int = 0
+    volume_usd_5m: float = 0.0
 
     def __post_init__(self) -> None:
         if self.ts is None:
@@ -60,6 +62,8 @@ def load_print_file(path: str) -> list[Print]:
                 ),
                 source=str(row.get("source") or "synthetic"),
                 open_time_ms=int(row["open_time_ms"]) if row.get("open_time_ms") is not None else None,
+                reds_5m=int(row.get("reds_5m") or 0),
+                volume_usd_5m=float(row.get("volume_usd_5m") or 0),
             )
         )
     return out
@@ -141,6 +145,8 @@ def print_to_dict(p: Print) -> dict[str, Any]:
         "low": p.low,
         "source": p.source,
         "open_time_ms": p.open_time_ms,
+        "reds_5m": p.reds_5m,
+        "volume_usd_5m": p.volume_usd_5m,
     }
 
 
@@ -189,6 +195,16 @@ def fetch_mexc_klines(
             http.close()
 
 
+def _bar_quote_usd(row: list[Any], price: float) -> float:
+    """Newest-bar dollar volume: quote index 7, else base×price."""
+    try:
+        if len(row) > 7:
+            return float(row[7])
+        return float(row[5]) * price
+    except (IndexError, TypeError, ValueError):
+        return 0.0
+
+
 def print_from_klines(
     name: str,
     price_klines: list[list[Any]],
@@ -196,6 +212,7 @@ def print_from_klines(
     chosen_tf_klines: list[list[Any]] | None = None,
     faster_tf: str = "1h",
     faster_tf_klines: list[list[Any]] | None = None,
+    klines_5m: list[list[Any]] | None = None,
 ) -> Print | None:
     """
     Convert real MEXC kline rows into one engine Print.
@@ -210,23 +227,36 @@ def print_from_klines(
         low = float(row[3])
         # Prefer chosen-TF bar quote volume for Path/Size; 1m forming bar can read $0.
         vol_row = (chosen_tf_klines[-1] if chosen_tf_klines else row)
-        volume_usd = float(vol_row[7]) if len(vol_row) > 7 else float(vol_row[5]) * price
+        volume_usd = _bar_quote_usd(vol_row, price)
     except (IndexError, TypeError, ValueError):
         return None
     if price <= 0:
         return None
     chosen_reds = trailing_red_count(chosen_tf_klines or [])
     faster_reds = trailing_red_count(faster_tf_klines or [])
+    faster_map: dict[str, int] = {}
+    if faster_tf:
+        faster_map[faster_tf] = faster_reds
+    reds_5m = 0
+    volume_usd_5m = 0.0
+    if klines_5m is not None:
+        reds_5m = trailing_red_count(klines_5m)
+        if klines_5m:
+            volume_usd_5m = _bar_quote_usd(klines_5m[-1], price)
+        if "5m" not in faster_map:
+            faster_map["5m"] = reds_5m
     return Print(
         name=name,
         price=price,
         volume_usd=volume_usd,
         ts=datetime.fromtimestamp(open_ms / 1000.0, tz=timezone.utc),
         chosen_tf_reds=chosen_reds,
-        faster_tf_reds={faster_tf: faster_reds} if faster_tf else {},
+        faster_tf_reds=faster_map,
         low=low,
         source="mexc",
         open_time_ms=open_ms,
+        reds_5m=reds_5m,
+        volume_usd_5m=volume_usd_5m,
     )
 
 
@@ -244,7 +274,7 @@ class MexcLiveFeed:
     tf_limit: int = 30
     base_url: str = MEXC_API
     client: httpx.Client | None = None
-    _last_fingerprint: dict[str, tuple[int, float, float]] = field(default_factory=dict)
+    _last_fingerprint: dict[str, tuple[int, float, float, float, int]] = field(default_factory=dict)
 
     def tfs_for(self, name: str) -> tuple[str, str]:
         """Resolve this name's chosen + faster intervals. Fallback 4h / 1h."""
@@ -286,16 +316,28 @@ class MexcLiveFeed:
                     client=http,
                     base_url=self.base_url,
                 )
+                # Always poll 5m for Path/Size spike confirm. Reuse when faster_tf is already 5m.
+                if faster_tf == "5m":
+                    rows_5m = faster_rows
+                else:
+                    rows_5m = fetch_mexc_klines(
+                        name,
+                        "5m",
+                        self.tf_limit,
+                        client=http,
+                        base_url=self.base_url,
+                    )
                 pr = print_from_klines(
                     name,
                     px_rows,
                     chosen_tf_klines=chosen_rows,
                     faster_tf=faster_tf,
                     faster_tf_klines=faster_rows,
+                    klines_5m=rows_5m,
                 )
                 if pr is None or pr.open_time_ms is None:
                     continue
-                fp = (pr.open_time_ms, pr.price, pr.volume_usd)
+                fp = (pr.open_time_ms, pr.price, pr.volume_usd, pr.volume_usd_5m, pr.reds_5m)
                 if self._last_fingerprint.get(name) == fp:
                     continue
                 self._last_fingerprint[name] = fp
