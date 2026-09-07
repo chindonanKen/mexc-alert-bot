@@ -124,7 +124,7 @@ def test_watch_only_on_plan_row(engine, habit_play):
 
 
 def test_fail_add_panic_under_B_without_path_habit(engine):
-    """Fail: break AD adds panic half even when habit_ready false (no board panic)."""
+    """Fail: break AD adds panic half (no board panic). Met via low without tagging AD layers."""
     play = {
         "id": "FAIL1",
         "name": "FAIL1",
@@ -146,11 +146,12 @@ def test_fail_add_panic_under_B_without_path_habit(engine):
         "sell_layers": [],
     }
     plan = engine.hang_play(play)
-    # Enter met first at band
-    engine.on_print(Print(name="FAIL1", price=0.80, low=0.80, chosen_tf_reds=1, volume_usd=50_000))
+    # Met via low; current price stays above hung AD layers so Path does not buy yet
+    engine.on_print(Print(name="FAIL1", price=0.90, low=0.80, chosen_tf_reds=0, volume_usd=50_000))
     assert plan.met
+    assert not any(b.status == "filled" for b in plan.fills.buy_layers)
     # Break under B with volume — Fail add panic
-    r = engine.on_print(Print(name="FAIL1", price=0.70, low=0.70, chosen_tf_reds=3, volume_usd=50_000))
+    r = engine.on_print(Print(name="FAIL1", price=0.70, low=0.70, chosen_tf_reds=0, volume_usd=50_000))
     assert r["action"] == "buy"
     assert "Fail" in r["why"]
     filled = [b for b in plan.fills.buy_layers if b.status == "filled"]

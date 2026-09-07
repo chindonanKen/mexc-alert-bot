@@ -1,171 +1,81 @@
-"""Path prove tests: habit_ready sit; habit match buy on first chosen red; no fixed count."""
+"""Path recut 2026-09-07: tag hung AD buy layer → Path may buy. Not habit sit."""
 
 from machine.feeds import Print
 from machine.path import PathHabit, PathSnapshot, evaluate_path
 
 
-def test_habit_ready_false_sits_on_first_and_second_red():
+def test_tagged_ad_layer_buys_when_habit_ready_false():
     habit = PathHabit(chosen_tf="15m", habit_ready=False)
-    for reds in (1, 2):
-        snap = PathSnapshot(
-            chosen_tf_reds=reds,
-            at_ad=True,
-            ad_met=True,
-            board_panic=False,
-        )
-        d = evaluate_path(habit, snap)
-        assert d.action == "sit", f"red {reds} should sit when habit_ready false"
-        assert "habit_ready false" in d.why
+    snap = PathSnapshot(chosen_tf_reds=0, tagged_ad_layer=True, ad_met=True)
+    d = evaluate_path(habit, snap)
+    assert d.action == "buy"
+    assert "tagged hung AD buy layer" in d.why
+    assert "habit_ready" not in d.why
 
 
-def test_board_panic_buys_even_when_habit_not_ready():
-    habit = PathHabit(chosen_tf="15m", habit_ready=False)
-    snap = PathSnapshot(
-        chosen_tf_reds=1,
-        at_ad=True,
-        ad_met=True,
-        board_panic=True,
+def test_tagged_ad_layer_buys_with_zero_reds():
+    habit = PathHabit(
+        chosen_tf="4h",
+        habit_ready=True,
+        chosen_tf_reds_into_met=3,
+        faster_tfs=["1h"],
+        faster_tf_reds_at_low=2,
     )
+    snap = PathSnapshot(chosen_tf_reds=0, faster_tf_reds={"1h": 0}, tagged_ad_layer=True)
+    d = evaluate_path(habit, snap)
+    assert d.action == "buy"
+    assert d.habit_match
+
+
+def test_untagged_price_waits():
+    habit = PathHabit(chosen_tf="15m", habit_ready=True, chosen_tf_reds_into_met=1)
+    snap = PathSnapshot(chosen_tf_reds=9, at_ad=True, ad_met=True, tagged_ad_layer=False)
+    d = evaluate_path(habit, snap)
+    assert d.action == "wait"
+    assert "has not tagged" in d.why
+
+
+def test_board_panic_still_buys():
+    habit = PathHabit(chosen_tf="15m", habit_ready=False)
+    snap = PathSnapshot(tagged_ad_layer=False, board_panic=True)
     d = evaluate_path(habit, snap)
     assert d.action == "buy"
     assert "panic" in d.why.lower()
 
 
-def test_habit_match_buys_on_first_chosen_red_via_faster_tf():
-    """No fixed 15m≥3 — faster TF reds+volume can buy on first chosen red."""
+def test_red_count_is_not_a_buy_gate():
+    habit = PathHabit(chosen_tf="15m", habit_ready=False)
+    for reds in (0, 1, 2, 9):
+        d = evaluate_path(habit, PathSnapshot(chosen_tf_reds=reds, tagged_ad_layer=True))
+        assert d.action == "buy", f"reds={reds} must not sit"
+
+
+def test_faster_tf_habit_match_is_not_a_buy_gate():
     habit = PathHabit(
         chosen_tf="15m",
         faster_tfs=["5m"],
-        chosen_tf_reds_into_met=3,
         faster_tf_reds_at_low=2,
         vol_at_bottom_usd=40_000,
         habit_ready=True,
     )
-    snap = PathSnapshot(
-        chosen_tf_reds=1,  # first red of chosen TF
-        faster_tf_reds={"5m": 2},
-        volume_at_ad_usd=50_000,
-        at_ad=True,
-        ad_met=True,
-    )
-    d = evaluate_path(habit, snap)
-    assert d.action == "buy"
-    assert d.habit_match
-    assert "faster" in d.why.lower() or "habit" in d.why.lower()
+    no_faster = PathSnapshot(tagged_ad_layer=True, faster_tf_reds={"5m": 0}, volume_at_ad_usd=0)
+    assert evaluate_path(habit, no_faster).action == "buy"
+    untagged = PathSnapshot(tagged_ad_layer=False, faster_tf_reds={"5m": 9}, volume_at_ad_usd=99_000)
+    assert evaluate_path(habit, untagged).action == "wait"
 
 
-def test_no_fixed_count_required_chosen_tf_habit():
-    """Play with chosen_tf_reds_into_met=2 buys at 2 — not a global 15m≥3 rule."""
+def test_require_5m_is_not_a_path_sit_gate():
     habit = PathHabit(
         chosen_tf="15m",
-        chosen_tf_reds_into_met=2,
         habit_ready=True,
-        faster_tfs=[],
-    )
-    snap = PathSnapshot(
-        chosen_tf_reds=2,
-        at_ad=True,
-        ad_met=True,
-    )
-    d = evaluate_path(habit, snap)
-    assert d.action == "buy"
-
-
-def test_at_ad_alone_not_enough_without_habit_match(engine, habit_play):
-    engine.hang_play(habit_play)
-    # At AD, habit ready, but only 1 chosen red and no faster match
-    r = engine.on_print(
-        Print(
-            name="DEMO",
-            price=0.805,  # in met band (B=0.8, band high=0.81)
-            low=0.805,
-            chosen_tf_reds=1,
-            faster_tf_reds={"5m": 1},
-            volume_usd=10_000,
-        )
-    )
-    assert r["action"] == "sit"
-    assert r["met"] is True
-
-
-def test_engine_habit_false_sits(engine, sit_play):
-    engine.hang_play(sit_play)
-    # Met band for 2.0/1.6: band_high = 1.6 + 0.05*0.4 = 1.62
-    r = engine.on_print(
-        Print(name="SIT1", price=1.61, low=1.61, chosen_tf_reds=1, volume_usd=99_000)
-    )
-    assert r["action"] == "sit"
-    assert "habit_ready false" in r["why"]
-
-
-def test_require_5m_volume_spike_sits_on_weak_vol():
-    habit = PathHabit(
-        chosen_tf="15m",
         chosen_tf_reds_into_met=2,
-        habit_ready=True,
         require_5m_volume_spike=True,
         vol_5m_usual_usd=40_000,
     )
-    snap = PathSnapshot(
-        chosen_tf_reds=2,
-        at_ad=True,
-        ad_met=True,
-        volume_usd_5m=1_000,
-    )
-    d = evaluate_path(habit, snap)
-    assert d.action == "sit"
-    assert d.why == "missing 5m volume spike — sit"
-
-
-def test_require_5m_volume_spike_buys_on_spike():
-    habit = PathHabit(
-        chosen_tf="15m",
-        chosen_tf_reds_into_met=2,
-        habit_ready=True,
-        require_5m_volume_spike=True,
-        vol_5m_usual_usd=40_000,
-    )
-    snap = PathSnapshot(
-        chosen_tf_reds=2,
-        at_ad=True,
-        ad_met=True,
-        volume_usd_5m=50_000,
-    )
-    d = evaluate_path(habit, snap)
-    assert d.action == "buy"
-    assert d.habit_match
-
-
-def test_unset_5m_habit_unchanged():
-    habit = PathHabit(
-        chosen_tf="15m",
-        chosen_tf_reds_into_met=2,
-        habit_ready=True,
-    )
-    snap = PathSnapshot(
-        chosen_tf_reds=2,
-        at_ad=True,
-        ad_met=True,
-        volume_usd_5m=0,
-    )
+    snap = PathSnapshot(tagged_ad_layer=True, volume_usd_5m=0, chosen_tf_reds=2)
     d = evaluate_path(habit, snap)
     assert d.action == "buy"
     assert "5m volume spike" not in d.why
-
-
-def test_require_5m_none_usual_needs_positive():
-    habit = PathHabit(
-        chosen_tf="15m",
-        chosen_tf_reds_into_met=2,
-        habit_ready=True,
-        require_5m_volume_spike=True,
-        vol_5m_usual_usd=None,
-    )
-    weak = PathSnapshot(chosen_tf_reds=2, at_ad=True, ad_met=True, volume_usd_5m=0)
-    assert evaluate_path(habit, weak).action == "sit"
-    assert evaluate_path(habit, weak).why == "missing 5m volume spike — sit"
-    ok = PathSnapshot(chosen_tf_reds=2, at_ad=True, ad_met=True, volume_usd_5m=1)
-    assert evaluate_path(habit, ok).action == "buy"
 
 
 def test_path_habit_loads_nested_path_block():
@@ -186,60 +96,79 @@ def test_path_habit_loads_nested_path_block():
     assert unset.vol_5m_usual_usd is None
 
 
-def test_board_panic_skips_5m_volume_gate():
-    habit = PathHabit(
-        chosen_tf="15m",
-        habit_ready=True,
-        chosen_tf_reds_into_met=3,
-        require_5m_volume_spike=True,
-        vol_5m_usual_usd=40_000,
+def test_engine_habit_false_paper_buy_on_tagged_layer(engine, sit_play):
+    """habit_ready false + tagged AD layer + Size real volume → paper-buy, not habit sit."""
+    plan = engine.hang_play(sit_play)
+    r = engine.on_print(
+        Print(name="SIT1", price=1.61, low=1.61, chosen_tf_reds=0, volume_usd=99_000)
     )
-    snap = PathSnapshot(
-        chosen_tf_reds=1,
-        at_ad=True,
-        ad_met=True,
-        board_panic=True,
-        volume_usd_5m=0,
-    )
-    d = evaluate_path(habit, snap)
-    assert d.action == "buy"
-    assert "panic" in d.why.lower()
+    assert r["action"] == "buy"
+    assert "habit_ready" not in r["why"]
+    assert any(b.status == "filled" for b in plan.fills.buy_layers)
+    assert engine.live_orders_allowed is False
 
 
-def test_engine_sit_then_buy_on_5m_spike(engine, habit_play):
+def test_engine_quiet_volume_size_wait_not_habit_sit(engine, habit_play):
+    """Tag layer 1 off-band (0.86 > band 0.81): quiet → Size wait, not habit sit."""
+    play = dict(habit_play)
+    play["habit_ready"] = False
+    plan = engine.hang_play(play)
+    r = engine.on_print(
+        Print(name="DEMO", price=0.86, low=0.86, chosen_tf_reds=0, volume_usd=0)
+    )
+    assert r["action"] == "wait"
+    assert "Size grind wait" in r["why"]
+    assert "habit_ready" not in r["why"]
+    assert not any(b.status == "filled" for b in plan.fills.buy_layers)
+
+
+def test_engine_untagged_price_waits(engine, habit_play):
+    engine.hang_play(habit_play)
+    r = engine.on_print(
+        Print(name="DEMO", price=0.95, low=0.95, chosen_tf_reds=9, volume_usd=50_000)
+    )
+    assert r["action"] == "wait"
+    assert "has not tagged" in r["why"]
+
+
+def test_engine_5m_weak_is_size_wait_not_path_sit(engine, habit_play):
     play = dict(habit_play)
     play["require_5m_volume_spike"] = True
     play["vol_5m_usual_usd"] = 40_000
-    engine.hang_play(play)
+    plan = engine.hang_play(play)
+    # Tag layer 1 (0.86) off-band so path_take_at_ad does not fill quiet 5m.
     weak = engine.on_print(
         Print(
             name="DEMO",
-            price=0.805,
-            low=0.80,
-            chosen_tf_reds=3,
-            faster_tf_reds={"5m": 2},
+            price=0.86,
+            low=0.86,
+            chosen_tf_reds=0,
             volume_usd=50_000,
             volume_usd_5m=100,
-            reds_5m=2,
+            reds_5m=1,
         )
     )
-    assert weak["action"] == "sit"
-    assert weak["why"] == "missing 5m volume spike — sit"
-    strong = engine.on_print(
+    assert weak["action"] == "wait"
+    assert "Size grind wait" in weak["why"]
+    assert "missing 5m volume spike" not in weak["why"]
+    assert not any(b.status == "filled" for b in plan.fills.buy_layers)
+
+
+def test_engine_5m_spike_paper_buy_off_band(engine, habit_play):
+    play = dict(habit_play)
+    play["require_5m_volume_spike"] = True
+    play["vol_5m_usual_usd"] = 40_000
+    plan = engine.hang_play(play)
+    r = engine.on_print(
         Print(
             name="DEMO",
-            price=0.805,
-            low=0.80,
-            chosen_tf_reds=3,
-            faster_tf_reds={"5m": 2},
+            price=0.86,
+            low=0.86,
+            chosen_tf_reds=0,
             volume_usd=50_000,
             volume_usd_5m=50_000,
-            reds_5m=2,
+            reds_5m=1,
         )
     )
-    assert strong["action"] == "buy"
-    row = engine.plan_row(engine.plans["DEMO"])
-    assert row["reds_5m"] == 2
-    assert row["vol_usd_5m"] == 50_000
-    assert engine.feed[-1]["reds_5m"] == 2
-    assert engine.feed[-1]["volume_usd_5m"] == 50_000
+    assert r["action"] == "buy"
+    assert any(b.status == "filled" for b in plan.fills.buy_layers)

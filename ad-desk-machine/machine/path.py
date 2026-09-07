@@ -1,4 +1,8 @@
-"""Path: red-habit sit / buy. No fixed red count for every name."""
+"""Path: buy when current price tags a hung AD buy layer.
+
+habit_ready and red-count / faster-TF habit match are not buy gates.
+Size owns live volume and grind wait.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +23,8 @@ def _pick(play: dict[str, Any], key: str, default: Any = None) -> Any:
 
 @dataclass
 class PathHabit:
+    """Hung-plan Path facts. Not used as buy gates (Size owns volume)."""
+
     chosen_tf: str
     faster_tfs: list[str] = field(default_factory=list)
     chosen_tf_reds_into_met: int | None = None
@@ -51,7 +57,7 @@ class PathHabit:
 
 @dataclass
 class PathSnapshot:
-    """Live reds / volume for Path weigh."""
+    """Live reds / volume / layer tag for Path weigh."""
 
     chosen_tf_reds: int = 0
     faster_tf_reds: dict[str, int] = field(default_factory=dict)
@@ -61,6 +67,7 @@ class PathSnapshot:
     at_ad: bool = False
     ad_met: bool = False
     board_panic: bool = False
+    tagged_ad_layer: bool = False
 
 
 @dataclass
@@ -72,85 +79,26 @@ class PathDecision:
 
 def evaluate_path(habit: PathHabit, snap: PathSnapshot) -> PathDecision:
     """
-    habit_ready false → sit on first/second red of chosen TF
-    (board-wide panic still buys).
-
-    When AD met + at AD + habit_ready true → BUY if chosen TF habit OR
-    faster TF reds+volume match — even on first red of chosen TF.
-    No fixed 15m≥3 for every name.
+    Path may buy when current price tags a hung AD buy layer.
+    Board-wide panic still buys. habit_ready / red-count / faster-TF
+    match are not buy gates — Size owns live volume and grind wait.
     """
+    _ = habit  # facts stay on the plan for Size; not Path buy gates
     if snap.board_panic:
         return PathDecision(
             action="buy",
-            why="board-wide panic — buy without red-habit wait",
+            why="board-wide panic — buy",
             habit_match=True,
         )
 
-    if not snap.ad_met or not snap.at_ad:
-        return PathDecision(
-            action="wait",
-            why="AD not met or current price not at AD",
-        )
-
-    # At AD + met
-    if not habit.habit_ready:
-        # Sit on first or second red of chosen TF
-        if snap.chosen_tf_reds <= 2:
-            return PathDecision(
-                action="sit",
-                why=(
-                    f"habit_ready false — sit on red {snap.chosen_tf_reds} "
-                    f"of {habit.chosen_tf}"
-                ),
-            )
-        # Past second red without habit: still no fixed template buy —
-        # sit / wait for human weigh unless panic
-        return PathDecision(
-            action="sit",
-            why="habit_ready false — no chart habit to match; sit",
-        )
-
-    # habit_ready true: check chosen TF match OR faster TF hint
-    chosen_match = (
-        habit.chosen_tf_reds_into_met is not None
-        and snap.chosen_tf_reds >= habit.chosen_tf_reds_into_met
-    )
-
-    faster_match = False
-    if habit.faster_tfs and habit.faster_tf_reds_at_low is not None:
-        need_vol = habit.vol_at_bottom_usd or 0.0
-        for tf in habit.faster_tfs:
-            reds = snap.faster_tf_reds.get(tf, 0)
-            if reds >= habit.faster_tf_reds_at_low and snap.volume_at_ad_usd >= need_vol:
-                faster_match = True
-                break
-
-    if chosen_match or faster_match:
-        if habit.require_5m_volume_spike:
-            vol5 = float(snap.volume_usd_5m or 0.0)
-            usual = habit.vol_5m_usual_usd
-            ok = vol5 >= float(usual) if usual is not None else vol5 > 0
-            if not ok:
-                return PathDecision(
-                    action="sit",
-                    why="missing 5m volume spike — sit",
-                )
-        parts = []
-        if chosen_match:
-            parts.append(
-                f"{habit.chosen_tf} reds {snap.chosen_tf_reds} "
-                f"match habit {habit.chosen_tf_reds_into_met}"
-            )
-        if faster_match:
-            parts.append("faster TF reds+volume at the line")
+    if snap.tagged_ad_layer:
         return PathDecision(
             action="buy",
-            why="habit match — " + "; ".join(parts),
+            why="current price tagged hung AD buy layer",
             habit_match=True,
         )
 
-    # At AD, habit ready, but no match yet — sit (no smaller-TF bottom hint)
     return PathDecision(
-        action="sit",
-        why="at AD but no chosen-TF or faster-TF habit match yet",
+        action="wait",
+        why="current price has not tagged a hung AD buy layer",
     )

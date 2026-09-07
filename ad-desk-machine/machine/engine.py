@@ -220,6 +220,12 @@ class Engine:
             )
 
         price_at = at_ad(pr.price, plan.ad)
+        tagged_ad = any(
+            ly.role == "AD"
+            and ly.status in ("empty", "next")
+            and pr.price <= ly.price
+            for ly in plan.fills.buy_layers
+        )
         snap = PathSnapshot(
             chosen_tf_reds=pr.chosen_tf_reds,
             faster_tf_reds=dict(pr.faster_tf_reds),
@@ -229,18 +235,17 @@ class Engine:
             at_ad=price_at,
             ad_met=plan.met,
             board_panic=self.board_panic,
+            tagged_ad_layer=tagged_ad,
         )
         path_dec = evaluate_path(plan.habit, snap)
 
-        # Fail: break of AD = add panic half (not flatten). Path sit must not block under-B panic adds.
-        fail_add_panic = False
-        if (
+        # Fail: break of AD = add panic half (not flatten). Path wait must not block under-B panic adds.
+        fail_add_panic = (
             not plan.watch_only
             and plan.met
             and pr.price < plan.ad.bottom
-            and path_dec.action in ("sit", "wait")
-        ):
-            fail_add_panic = True
+        )
+        if fail_add_panic:
             path_dec = type(path_dec)(
                 action="buy",
                 why="Fail — current price broke AD; add panic half",
@@ -350,8 +355,8 @@ class Engine:
                 return result
 
             # Size owns volume at fill: grind-wait / skip no-volume / 0.5× late volume
-            path_take_at_ad = bool(path_dec.habit_match) and price_at
-            if self.board_panic and price_at:
+            path_take_at_ad = bool(path_dec.habit_match) and price_at and not fail_add_panic
+            if self.board_panic and price_at and not fail_add_panic:
                 path_take_at_ad = True
             size_vol = float(pr.volume_usd or 0)
             if plan.habit.require_5m_volume_spike:
