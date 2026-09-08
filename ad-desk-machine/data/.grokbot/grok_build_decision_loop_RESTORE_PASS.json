@@ -1,0 +1,28 @@
+{
+  "at_pht": "2026-09-08 13:34 PHT",
+  "status": "PASS",
+  "broken_item_before": "DecisionLoop crashed: PathSnapshot missing tagged_hung_ad_buy (engine shipped without path.py)",
+  "fix": [
+    "scp path.py size.py exit.py feeds.py loop.py from here-build",
+    "wrap run_forever step exceptions",
+    "api _ensure_loop_task self-heal",
+    "restart mexc-ad-machine",
+    "POST /api/machine/kill id=ANSEMUSDT_1h"
+  ],
+  "prove": {
+    "MACHINE_LOOP": "1",
+    "loop.running": true,
+    "polls_A_to_B": "1 \u2192 2 over ~25s",
+    "prints_seen_A_to_B": "8 \u2192 11",
+    "last_error": null,
+    "live_orders_allowed": false,
+    "brain_map": "200 /brain-map/",
+    "ANSEMUSDT_1h": {
+      "state": "out",
+      "killed": true,
+      "price": 0.1772
+    }
+  },
+  "droplet": "/root/mexc-alert-bot/ad-desk-machine",
+  "git_base": "6ed9485 + SCP machine modules/api beyond origin"
+}
