@@ -20,14 +20,14 @@ class Print:
     ts: datetime | None = None
     chosen_tf_reds: int = 0
     faster_tf_reds: dict[str, int] = field(default_factory=dict)
+    reds_5m: int = 0  # trailing reds on 5m (same convention as chosen_tf_reds)
+    volume_usd_5m: float = 0.0  # newest 5m bar dollar volume (quote, else base*price)
     low: float | None = None  # candle low for met checks
-    high: float | None = None  # candle high for sell travel (bar wick)
+    high: float | None = None  # candle high for sell fills (wick through)
     weak_bounce: bool = False  # optional override; prefer scored bounce kind when facts exist
     candles_since_ad_tag: int | None = None  # TF candles since AD tag (Reed/tape)
     source: str = "synthetic"  # synthetic | mexc
     open_time_ms: int | None = None
-    reds_5m: int = 0
-    volume_usd_5m: float = 0.0
 
     def __post_init__(self) -> None:
         if self.ts is None:
@@ -66,8 +66,8 @@ def load_print_file(path: str) -> list[Print]:
                 ),
                 source=str(row.get("source") or "synthetic"),
                 open_time_ms=int(row["open_time_ms"]) if row.get("open_time_ms") is not None else None,
-                reds_5m=int(row.get("reds_5m") or 0),
-                volume_usd_5m=float(row.get("volume_usd_5m") or 0),
+                reds_5m=int(row.get("reds_5m", 0)),
+                volume_usd_5m=float(row.get("volume_usd_5m", 0)),
             )
         )
     return out
@@ -146,12 +146,12 @@ def print_to_dict(p: Print) -> dict[str, Any]:
         "ts": p.ts.isoformat() if p.ts else None,
         "chosen_tf_reds": p.chosen_tf_reds,
         "faster_tf_reds": p.faster_tf_reds,
+        "reds_5m": p.reds_5m,
+        "volume_usd_5m": p.volume_usd_5m,
         "low": p.low,
         "high": p.high,
         "source": p.source,
         "open_time_ms": p.open_time_ms,
-        "reds_5m": p.reds_5m,
-        "volume_usd_5m": p.volume_usd_5m,
     }
 
 
@@ -200,14 +200,11 @@ def fetch_mexc_klines(
             http.close()
 
 
-def _bar_quote_usd(row: list[Any], price: float) -> float:
-    """Newest-bar dollar volume: quote index 7, else base×price."""
-    try:
-        if len(row) > 7:
-            return float(row[7])
-        return float(row[5]) * price
-    except (IndexError, TypeError, ValueError):
-        return 0.0
+def _quote_volume_usd(vol_row: list[Any], price: float) -> float:
+    """MEXC kline quote volume (index 7) or base*price fallback — same as chosen-TF volume."""
+    if len(vol_row) > 7:
+        return float(vol_row[7])
+    return float(vol_row[5]) * price
 
 
 def print_from_klines(
@@ -222,6 +219,7 @@ def print_from_klines(
     """
     Convert real MEXC kline rows into one engine Print.
     Uses the newest price candle only. Returns None if no usable rows (no invent).
+    Always attaches reds_5m / volume_usd_5m when 5m rows are provided (volume-spike confirm).
     """
     if not price_klines:
         return None
@@ -229,28 +227,26 @@ def print_from_klines(
     try:
         open_ms = int(row[0])
         price = float(row[4])  # close
-        high = float(row[2])  # newest 1m candle high — sell travel
+        high = float(row[2])
         low = float(row[3])
         # Prefer chosen-TF bar quote volume for Path/Size; 1m forming bar can read $0.
         vol_row = (chosen_tf_klines[-1] if chosen_tf_klines else row)
-        volume_usd = _bar_quote_usd(vol_row, price)
+        volume_usd = _quote_volume_usd(vol_row, price)
+        volume_usd_5m = 0.0
+        if klines_5m:
+            volume_usd_5m = _quote_volume_usd(klines_5m[-1], price)
     except (IndexError, TypeError, ValueError):
         return None
     if price <= 0:
         return None
     chosen_reds = trailing_red_count(chosen_tf_klines or [])
     faster_reds = trailing_red_count(faster_tf_klines or [])
-    faster_map: dict[str, int] = {}
-    if faster_tf:
-        faster_map[faster_tf] = faster_reds
     reds_5m = 0
-    volume_usd_5m = 0.0
+    faster_map: dict[str, int] = {faster_tf: faster_reds} if faster_tf else {}
     if klines_5m is not None:
         reds_5m = trailing_red_count(klines_5m)
-        if klines_5m:
-            volume_usd_5m = _bar_quote_usd(klines_5m[-1], price)
-        if "5m" not in faster_map:
-            faster_map["5m"] = reds_5m
+        # After primary faster TF so insertion order keeps that TF first.
+        faster_map["5m"] = reds_5m
     return Print(
         name=name,
         price=price,
@@ -258,39 +254,34 @@ def print_from_klines(
         ts=datetime.fromtimestamp(open_ms / 1000.0, tz=timezone.utc),
         chosen_tf_reds=chosen_reds,
         faster_tf_reds=faster_map,
+        reds_5m=reds_5m,
+        volume_usd_5m=volume_usd_5m,
         low=low,
         high=high,
         source="mexc",
         open_time_ms=open_ms,
-        reds_5m=reds_5m,
-        volume_usd_5m=volume_usd_5m,
     )
 
 
 @dataclass
 class MexcLiveFeed:
-    """Poll api.mexc.com klines for hung names. Short interval; no invented ticks."""
+    """Poll api.mexc.com klines for hung names. Short interval; no invented ticks.
+
+    Always polls 5m alongside chosen TF + faster TF so Path/Size can confirm
+    volume spikes that often show on 5m, not only on the play's chosen TF.
+    """
 
     names: tuple[str, ...] | list[str] = DEFAULT_LIVE_NAMES
     price_interval: str = "1m"
     chosen_tf: str = "4h"
     faster_tf: str = "1h"
-    # Per-name (chosen_tf, faster_tf) from hung plays. Missing name → class defaults.
-    name_tfs: dict[str, tuple[str, str]] = field(default_factory=dict)
+    interval_5m: str = "5m"
     price_limit: int = 3
     tf_limit: int = 30
     base_url: str = MEXC_API
     client: httpx.Client | None = None
+    # fingerprint includes 5m vol/reds so a 5m spike still emits a print
     _last_fingerprint: dict[str, tuple[Any, ...]] = field(default_factory=dict)
-
-    def tfs_for(self, name: str) -> tuple[str, str]:
-        """Resolve this name's chosen + faster intervals. Fallback 4h / 1h."""
-        pair = self.name_tfs.get(name)
-        if not pair:
-            return self.chosen_tf, self.faster_tf
-        chosen = (pair[0] or "").strip() or self.chosen_tf
-        faster = (pair[1] or "").strip() or self.faster_tf
-        return chosen, faster
 
     def poll_once(self) -> list[Print]:
         """Fetch each name once. Skip names with no API data. Dedupe identical bar fingerprint."""
@@ -301,7 +292,6 @@ class MexcLiveFeed:
             http = httpx.Client(timeout=15.0)
         try:
             for name in self.names:
-                chosen_tf, faster_tf = self.tfs_for(name)
                 px_rows = fetch_mexc_klines(
                     name,
                     self.price_interval,
@@ -311,25 +301,25 @@ class MexcLiveFeed:
                 )
                 chosen_rows = fetch_mexc_klines(
                     name,
-                    chosen_tf,
+                    self.chosen_tf,
                     self.tf_limit,
                     client=http,
                     base_url=self.base_url,
                 )
                 faster_rows = fetch_mexc_klines(
                     name,
-                    faster_tf,
+                    self.faster_tf,
                     self.tf_limit,
                     client=http,
                     base_url=self.base_url,
                 )
-                # Always poll 5m for Path/Size spike confirm. Reuse when faster_tf is already 5m.
-                if faster_tf == "5m":
+                # Reuse faster rows when faster_tf is already 5m — one less request.
+                if self.faster_tf == self.interval_5m:
                     rows_5m = faster_rows
                 else:
                     rows_5m = fetch_mexc_klines(
                         name,
-                        "5m",
+                        self.interval_5m,
                         self.tf_limit,
                         client=http,
                         base_url=self.base_url,
@@ -338,7 +328,7 @@ class MexcLiveFeed:
                     name,
                     px_rows,
                     chosen_tf_klines=chosen_rows,
-                    faster_tf=faster_tf,
+                    faster_tf=self.faster_tf,
                     faster_tf_klines=faster_rows,
                     klines_5m=rows_5m,
                 )
@@ -350,7 +340,6 @@ class MexcLiveFeed:
                     pr.volume_usd,
                     pr.volume_usd_5m,
                     pr.reds_5m,
-                    float(pr.high if pr.high is not None else pr.price),
                 )
                 if self._last_fingerprint.get(name) == fp:
                     continue

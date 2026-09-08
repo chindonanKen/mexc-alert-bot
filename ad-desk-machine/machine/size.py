@@ -37,11 +37,6 @@ class SellLayer:
     usd: float
     why: str  # usual_bounce | big_base | panic_like_volume
     status: str = "remaining"
-    plan_usd: float | None = None  # hung share; live usd is bag × this share
-
-    def __post_init__(self) -> None:
-        if self.plan_usd is None:
-            self.plan_usd = float(self.usd)
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -54,7 +54,11 @@ class DecisionLoop:
         self.last_error = None
         for pr in prints:
             self.prints_seen += 1
-            results.append(self.engine.on_print(pr))
+            try:
+                results.append(self.engine.on_print(pr))
+            except Exception as e:  # noqa: BLE001 — keep DecisionLoop alive
+                self.last_error = str(e)
+                log.warning("on_print failed name=%s: %s", getattr(pr, "name", "?"), e)
         return results
 
     async def run_forever(self) -> None:
@@ -68,7 +72,11 @@ class DecisionLoop:
         )
         try:
             while not self._stop.is_set():
-                await asyncio.to_thread(self.step_once)
+                try:
+                    await asyncio.to_thread(self.step_once)
+                except Exception as e:  # noqa: BLE001 — keep DecisionLoop alive
+                    self.last_error = str(e)
+                    log.exception("decision loop step failed: %s", e)
                 try:
                     await asyncio.wait_for(self._stop.wait(), timeout=self.interval_sec)
                 except asyncio.TimeoutError:
@@ -91,32 +99,7 @@ def feed_names_from_engine(engine: Engine) -> list[str]:
     return hung if hung else list(DEFAULT_LIVE_NAMES)
 
 
-def feed_tfs_from_engine(engine: Engine) -> dict[str, tuple[str, str]]:
-    """Per-name (chosen_tf, first faster_tfs) from hung plays. Fallback 4h / 1h."""
-    out: dict[str, tuple[str, str]] = {}
-    for plan in engine.plans.values():
-        chosen = str(plan.play.get("chosen_tf") or plan.play.get("tf") or "").strip()
-        if not chosen or chosen == "?":
-            chosen = "4h"
-        fts = plan.play.get("faster_tfs") or []
-        faster = str(fts[0]).strip() if fts else ""
-        if not faster:
-            faster = "1h"
-        out[plan.name] = (chosen, faster)
-    return out
-
-
-def sync_feed_names(loop: DecisionLoop | None, engine: Engine) -> list[str]:
-    """Refresh live feed names and per-name TFs from hung plans. Always a mutable list."""
-    names = list(feed_names_from_engine(engine))
-    tfs = feed_tfs_from_engine(engine)
-    if loop is not None:
-        loop.feed.names = names
-        loop.feed.name_tfs = tfs
-    return names
-
-
 def build_default_loop(engine: Engine, interval_sec: float = 10.0) -> DecisionLoop:
-    names = list(feed_names_from_engine(engine))
-    feed = MexcLiveFeed(names=names, name_tfs=feed_tfs_from_engine(engine))
+    names = feed_names_from_engine(engine)
+    feed = MexcLiveFeed(names=names)
     return DecisionLoop(engine=engine, feed=feed, interval_sec=interval_sec)

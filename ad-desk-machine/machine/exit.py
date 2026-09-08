@@ -58,6 +58,11 @@ class RemainingCost:
         return remaining_cost_average(self.bought_usd, self.sold_usd, self.remaining_qty)
 
     @property
+    def remaining_usd(self) -> float:
+        """Bought USD still open after prior sells (never negative)."""
+        return max(0.0, float(self.bought_usd) - float(self.sold_usd))
+
+    @property
     def has_leftover(self) -> bool:
         """True leftover: some sells already filled and qty still open."""
         return self.sold_usd > 0.0 and self.remaining_qty > 1e-12
@@ -105,7 +110,7 @@ class ExitFacts:
     usual_bounce_abs: float | None = None
     usual_bounce_frac_of_L: float | None = None
     usual_n: int = 0
-    bases: list[tuple[float, float]] = field(default_factory=list)  # (lo, hi) named unmet shelves used for sells
+    bases: list[tuple[float, float]] = field(default_factory=list)  # (lo, hi)
     vol_ratio_panic_like: float | None = None
     vol_at_low_usd: float | None = None
     candles_to_bounce: int | None = None
@@ -234,7 +239,41 @@ def load_exit_facts(
     if facts.usual_bounce_abs is None and data.get("usual_bounce_abs") is not None:
         facts.usual_bounce_abs = float(data["usual_bounce_abs"])
 
-    facts.bases = _load_named_bases(data)
+    # Kenneth 2026-09-07: prefer unmet_bases_above_B so into-base clip is live.
+    # Also accept TF-tagged big_bases_* and legacy big_bases / bases.
+    # Skip rows marked must_use_for_sells=false or above_live_B=false (entry band).
+    unmet = data.get("unmet_bases_above_B")
+    if isinstance(unmet, list) and unmet:
+        bases_raw = list(unmet)
+    else:
+        bases_raw = []
+        for key in ("big_bases_4h", "big_bases_1h", "big_bases", "bases"):
+            block = data.get(key)
+            if isinstance(block, list) and block:
+                bases_raw.extend(block)
+    seen: set[tuple[float, float]] = set()
+    for row in bases_raw:
+        if isinstance(row, dict):
+            if row.get("must_use_for_sells") is False:
+                continue
+            if row.get("above_live_B") is False:
+                continue
+            zone = row.get("zone") or row.get("price") or ""
+            parsed = parse_base_zone(str(zone))
+            if parsed:
+                if parsed not in seen:
+                    facts.bases.append(parsed)
+                    seen.add(parsed)
+            elif row.get("lo") is not None and row.get("hi") is not None:
+                pair = (float(row["lo"]), float(row["hi"]))
+                if pair not in seen:
+                    facts.bases.append(pair)
+                    seen.add(pair)
+        elif isinstance(row, (list, tuple)) and len(row) >= 2:
+            pair = (float(row[0]), float(row[1]))
+            if pair not in seen:
+                facts.bases.append(pair)
+                seen.add(pair)
 
     vol = data.get("volume") or {}
     if isinstance(vol, dict):
@@ -278,101 +317,6 @@ def load_exit_facts(
         facts.candles_to_bounce = int(candles)
 
     return facts
-
-
-def _base_row_usable(row: dict[str, Any]) -> bool:
-    """Skip entry-band / unused shelves. Missing flags stay usable."""
-    if row.get("must_use_for_sells") is False:
-        return False
-    if row.get("above_live_B") is False:
-        return False
-    return True
-
-
-def _parse_base_row(row: Any) -> tuple[float, float] | None:
-    if isinstance(row, dict):
-        if not _base_row_usable(row):
-            return None
-        zone = row.get("zone") or row.get("price") or ""
-        parsed = parse_base_zone(str(zone)) if zone else None
-        if parsed:
-            return parsed
-        if row.get("lo") is not None and row.get("hi") is not None:
-            lo, hi = float(row["lo"]), float(row["hi"])
-            if lo > hi:
-                lo, hi = hi, lo
-            return (lo, hi)
-        return None
-    if isinstance(row, (list, tuple)) and len(row) >= 2:
-        lo, hi = float(row[0]), float(row[1])
-        if lo > hi:
-            lo, hi = hi, lo
-        return (lo, hi)
-    return None
-
-
-def _load_named_bases(data: dict[str, Any]) -> list[tuple[float, float]]:
-    """Prefer unmet_bases_above_B. Fallback big_bases_4h / 1h / big_bases / bases. No invent."""
-    preferred = data.get("unmet_bases_above_B")
-    if isinstance(preferred, list) and preferred:
-        out: list[tuple[float, float]] = []
-        for row in preferred:
-            parsed = _parse_base_row(row)
-            if parsed:
-                out.append(parsed)
-        return out
-    for key in ("big_bases_4h", "big_bases_1h", "big_bases", "bases"):
-        raw = data.get(key)
-        if isinstance(raw, list) and raw:
-            out = []
-            for row in raw:
-                parsed = _parse_base_row(row)
-                if parsed:
-                    out.append(parsed)
-            if out:
-                return out
-    return []
-
-
-def clip_map_high_to_nearest_unmet_base(
-    map_high: float | None,
-    bases_above_B: list[tuple[float, float]] | None,
-    B: float | None,
-) -> float | None:
-    """
-    Cap usual-bounce map high at the nearest unmet named base above B
-    when that base sits inside or below the map.
-
-    Returns None when map or bases are missing — invent nothing.
-    Cap is the low of the lowest base above B with lo <= map_high.
-    """
-    if map_high is None or B is None:
-        return None
-    try:
-        map_high_f = float(map_high)
-        b = float(B)
-    except (TypeError, ValueError):
-        return None
-    if not bases_above_B:
-        return None
-    caps: list[float] = []
-    for pair in bases_above_B:
-        if not pair or len(pair) < 2:
-            continue
-        lo, hi = float(pair[0]), float(pair[1])
-        if lo > hi:
-            lo, hi = hi, lo
-        if hi <= b:
-            continue  # not above B
-        if lo > map_high_f:
-            continue  # above the map — map does not go through it
-        caps.append(lo)
-    if not caps:
-        return None
-    capped = min(caps)
-    if capped >= map_high_f:
-        return None
-    return capped
 
 
 def price_in_bases(price: float, bases: list[tuple[float, float]]) -> bool:

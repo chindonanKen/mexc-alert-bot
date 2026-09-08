@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,11 +12,12 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .engine import PLAYS_DIR, Engine
-from .loop import DecisionLoop, build_default_loop, sync_feed_names
+from .engine import Engine
+from .loop import DecisionLoop, build_default_loop
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static" / "machine"
+BRAIN_MAP = ROOT / "static" / "brain-map"
 TOKEN = os.environ.get("MACHINE_TOKEN", "dev-token")
 # Decision loop on by default while uvicorn runs. Tests set MACHINE_LOOP=0.
 LOOP_ENABLED = os.environ.get("MACHINE_LOOP", "1") != "0"
@@ -32,6 +32,31 @@ if (ROOT / "data" / "plays").exists():
     engine.load_plays_dir()
 
 
+async def _ensure_loop_task() -> None:
+    """In-process self-heal: keep DecisionLoop running while MACHINE_LOOP is on."""
+    global decision_loop, _loop_task
+    while True:
+        await asyncio.sleep(5)
+        if not LOOP_ENABLED:
+            continue
+        if decision_loop is None:
+            decision_loop = build_default_loop(engine, interval_sec=FEED_INTERVAL)
+        dead = _loop_task is None or _loop_task.done()
+        if not dead:
+            continue
+        # Task died — restart same DecisionLoop (keep polls/errors). Do not ping Master.
+        try:
+            decision_loop._stop = __import__("asyncio").Event()
+            decision_loop.running = False
+            _loop_task = asyncio.create_task(decision_loop.run_forever())
+            decision_loop.last_error = (
+                (decision_loop.last_error or "") + " | loop task restarted"
+            ).strip(" |")
+        except Exception as e:  # noqa: BLE001
+            if decision_loop is not None:
+                decision_loop.last_error = f"loop self-heal failed: {e}"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global decision_loop, _loop_task
@@ -43,6 +68,7 @@ async def lifespan(app: FastAPI):
     if LOOP_ENABLED:
         decision_loop = build_default_loop(engine, interval_sec=FEED_INTERVAL)
         _loop_task = asyncio.create_task(decision_loop.run_forever())
+        asyncio.create_task(_ensure_loop_task())
     yield
     if decision_loop is not None:
         decision_loop.stop()
@@ -142,23 +168,24 @@ def needs_you(_: None = Depends(require_bearer)) -> dict[str, Any]:
     return {"needs_you": engine.needs_you, "live_orders_allowed": False}
 
 
-def persist_hung_play(play: dict[str, Any], play_id: str, plays_dir: Path | None = None) -> Path:
-    """Write hung play JSON under data/plays/{id}.json (not examples/). Overwrite same id is OK."""
-    dest = Path(plays_dir) if plays_dir is not None else PLAYS_DIR
-    dest.mkdir(parents=True, exist_ok=True)
-    path = dest / f"{play_id}.json"
-    path.write_text(json.dumps(play, indent=2) + "\n")
-    return path
+@app.post("/api/machine/hang")
+def hang(body: dict[str, Any], _: None = Depends(require_bearer)) -> dict[str, Any]:
+    """Hang a written plan (watch). Never places live orders."""
+    plan = engine.hang_play(body)
+    rows = {p["id"]: p for p in engine.ranked()}
+    row = rows.get(plan.id) or {"id": plan.id, "name": plan.name, "state": plan.state}
+    row["live_orders_allowed"] = False
+    return row
 
 
 @app.post("/api/machine/kill")
 def kill(body: dict[str, Any], _: None = Depends(require_bearer)) -> dict[str, Any]:
-    """Mark a hung plan out/killed. Never places live orders. Does not invent prices."""
+    """Pull a finished play off the reacting board. Never places live orders."""
     plan_id = body.get("id") or body.get("plan_id")
     if not plan_id:
-        raise HTTPException(status_code=400, detail="id or plan_id required")
-    why = str(body.get("why") or "kill")
-    plan = engine.plans.get(str(plan_id))
+        raise HTTPException(status_code=404, detail="plan not found")
+    plan_id = str(plan_id)
+    plan = engine.plans.get(plan_id)
     if plan is None:
         for p in engine.plans.values():
             if p.name == plan_id or p.id == plan_id:
@@ -166,22 +193,9 @@ def kill(body: dict[str, Any], _: None = Depends(require_bearer)) -> dict[str, A
                 break
     if plan is None:
         raise HTTPException(status_code=404, detail="plan not found")
+    why = str(body.get("why") or "kill")
     engine.kill(plan.id, why=why)
-    sync_feed_names(decision_loop, engine)
     row = engine.plan_row(plan)
-    row["live_orders_allowed"] = False
-    return row
-
-
-@app.post("/api/machine/hang")
-def hang(body: dict[str, Any], _: None = Depends(require_bearer)) -> dict[str, Any]:
-    """Hang a written plan (watch). Never places live orders."""
-    plan = engine.hang_play(body)
-    persist_hung_play(body, plan.id)
-    # Join live MEXC feed + per-name TFs immediately — do not leave names/TFs frozen from boot.
-    sync_feed_names(decision_loop, engine)
-    rows = {p["id"]: p for p in engine.ranked()}
-    row = rows.get(plan.id) or {"id": plan.id, "name": plan.name, "state": plan.state}
     row["live_orders_allowed"] = False
     return row
 
@@ -197,10 +211,9 @@ def simulate(body: dict[str, Any], _: None = Depends(require_bearer)) -> dict[st
         volume_usd=float(body.get("volume_usd") or 0),
         chosen_tf_reds=int(body.get("chosen_tf_reds") or 0),
         faster_tf_reds=dict(body.get("faster_tf_reds") or {}),
-        low=float(body["low"]) if "low" in body else None,
-        high=float(body["high"]) if "high" in body else None,
         reds_5m=int(body.get("reds_5m") or 0),
         volume_usd_5m=float(body.get("volume_usd_5m") or 0),
+        low=float(body["low"]) if "low" in body else None,
     )
     result = engine.on_print(pr)
     result["live_orders_allowed"] = False
@@ -219,6 +232,9 @@ def machine_page() -> FileResponse:
 if STATIC.exists():
     app.mount("/machine/static", StaticFiles(directory=str(STATIC)), name="machine-static")
 
+if BRAIN_MAP.exists():
+    app.mount("/brain-map", StaticFiles(directory=str(BRAIN_MAP), html=True), name="brain-map")
+
 
 @app.get("/")
 def root() -> JSONResponse:
@@ -226,6 +242,7 @@ def root() -> JSONResponse:
         {
             "service": "ad-desk-machine",
             "machine": "/machine",
+            "brain_map": "/brain-map",
             "live_orders_allowed": False,
         }
     )
