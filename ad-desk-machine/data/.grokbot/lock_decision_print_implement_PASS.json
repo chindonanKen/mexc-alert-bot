@@ -1,0 +1,29 @@
+{
+  "lock": "Lock",
+  "at_pht": "2026-09-08 13:00 PHT",
+  "status": "PASS",
+  "step": 1,
+  "plan": "docs/MACHINE_DECISION_PRINT_IMPLEMENT.md",
+  "live_orders_allowed": false,
+  "process_book_path": "/home/box/agent-data/workflows/ad-desk-rules/SKILL.md",
+  "process_book_section": "Machine decision prints (Kenneth 2026-09-08 locked)",
+  "sources": [
+    "docs/MACHINE_UPGRADE_BUNDLE.md",
+    "/workspace/ad-desk-machine/data/.grokbot/lock_decision_prints_G4_G7.json"
+  ],
+  "wrote": [
+    "decision-print shapes by seat",
+    "row vs tape (wait on row only)",
+    "one speaker per print",
+    "why required",
+    "handoff rule (brain-map edge + Machine log tape = print shape)"
+  ],
+  "G4_G7_held": {
+    "G4": "CLOSE",
+    "G5": "CLOSE",
+    "G6": "REJECT",
+    "G7": "CLOSE"
+  },
+  "conflicts": "none \u2014 holds Chart/Path/Size/Fail/Exit locks; no ticker; no play prices",
+  "next": "Grok Build step 2 (engine/log exact shapes). Slate step 3 after. Droplet held."
+}

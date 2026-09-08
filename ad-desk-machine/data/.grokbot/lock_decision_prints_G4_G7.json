@@ -1,0 +1,163 @@
+{
+  "lock": "Lock",
+  "at_pht": "2026-09-08 12:43 PHT",
+  "live_orders_allowed": false,
+  "purpose": "Decision-print shapes per seat + G4\u2013G7 prove/close/reject for Helm to compile into docs/MACHINE_UPGRADE_BUNDLE.md. Process only. staff_proposed Upgrade chips until Kenneth locks via Master.",
+  "decision_print_rule": {
+    "kenneth_locked": "Staff/Master handoff + Machine log (Kenneth 2026-09-07): print only on decision change with why. No wait spam. No invent.",
+    "row_vs_tape": "Plan row always holds last_decision + last_why. Machine log tape only logs LOGGABLE decision changes (see machine/log.py). wait stays on the row, not the tape.",
+    "verbs": [
+      "buy",
+      "sit",
+      "wait",
+      "add-panic",
+      "sell",
+      "met",
+      "kill",
+      "flatten-news"
+    ]
+  },
+  "shapes_per_seat": [
+    {
+      "seat": "Chart",
+      "owns": "met band / AD state",
+      "decisions": [
+        "met"
+      ],
+      "tape_action": "met",
+      "print_when": "first entry into met band (decision change)",
+      "shape": "met | {name} | price? | why: met \u2014 low entered band (or equivalent Chart why)",
+      "does_not_print": "buy / sit / size / exit"
+    },
+    {
+      "seat": "Path",
+      "owns": "buy when print tags hung AD buy layer, or board panic; wait otherwise",
+      "decisions": [
+        "buy",
+        "wait",
+        "sit"
+      ],
+      "tape_action": "paper-buy (only after Size fills) or sit-out (at AD Path sit). wait never on tape.",
+      "print_when": "Path sit at AD (sit-out + Path why). Path buy appears on tape only as paper-buy/add-panic after Size fill, why usually Path tag/panic sentence.",
+      "shape_buy": "paper-buy | {name} | price | size_pct? | why: Path \u2014 tags hung AD buy layer / board panic (Path why)",
+      "shape_sit": "sit-out | {name} | price | why: Path sit reason (at AD only on tape)",
+      "shape_wait": "row only: wait | why clear (not tagged / not hung). No Machine log line.",
+      "does_not_own": "volume / grind wait (Size); met band (Chart)"
+    },
+    {
+      "seat": "Size",
+      "owns": "which layers fill; real-volume gate; grind wait; AD-side scale; panic shares",
+      "decisions": [
+        "buy",
+        "wait",
+        "sit"
+      ],
+      "tape_action": "paper-buy on fill; sit-out when Path bought and Size waits/cancels at AD (or board-grind note)",
+      "print_when": "fill; or Path-buy then Size wait/cancel with clear Size why at AD",
+      "shape_fill": "paper-buy | {name} | price | size_pct | why: Path why (fill owned by Size)",
+      "shape_wait": "sit-out | {name} | price | why: Size grind wait / Size volume / Path buy \u2014 no AD buy layer reached (Size why). Board grind may force second sit-out: board-wide grind \u2014 Size wait for volume",
+      "shape_miss_row": "row: sit-out/wait | why: Path buy but no Size layer at or through current price (S5). Tape mute when not at AD is intentional (sit-out-at-AD rule).",
+      "does_not_own": "Path tag / panic buy gate; met band"
+    },
+    {
+      "seat": "Fail",
+      "owns": "break of AD \u2192 add panic half (not flatten)",
+      "decisions": [
+        "add-panic"
+      ],
+      "tape_action": "add-panic",
+      "print_when": "met already true; current price under B; panic layers fill",
+      "shape": "add-panic | {name} | price | size_pct? | why: Fail \u2014 current price broke AD; add panic half",
+      "must_not": "Path sit must not block Fail add-panic under a met AD"
+    },
+    {
+      "seat": "Exit",
+      "owns": "sell layers; into named base; leftover; sideways-too-long when Reed number exists",
+      "decisions": [
+        "sell"
+      ],
+      "tape_action": "paper-sell; exit-live (adapt reasons)",
+      "print_when": "sell fill or exit live-read adapt decision change",
+      "shape_sell": "paper-sell | {name} | price | why: layer why or into big base / unmet base (no invent)",
+      "shape_adapt": "exit-live | {name} | price | why: joined adapt reasons",
+      "conflict_rule": "Named unmet base clips bounce map high. Machine sells into the named base and does not wait for bounce length past it. Bounce map is not a second exit owner."
+    },
+    {
+      "seat": "Feed",
+      "owns": "prints only (price/low/reds/volume/5m fields)",
+      "decisions": [],
+      "tape_action": null,
+      "print_when": "never a Machine decision",
+      "shape": "no decision print"
+    },
+    {
+      "seat": "Machine log",
+      "owns": "decision-change lines only",
+      "decisions": [
+        "(carrier)"
+      ],
+      "tape_action": "LOGGABLE set in machine/log.py",
+      "print_when": "action + why change per name; skip wait and duplicate same key",
+      "shape": "{ts, manila, action, name, price, size_pct, why}",
+      "banned": "wait spam; invent fills; invent sell targets"
+    }
+  ],
+  "G4_G7": [
+    {
+      "id": "G4",
+      "title": "Path says buy; Size cancels or waits; no clear why on the decision tape",
+      "verdict": "CLOSE",
+      "tag": "staff_proposed_close",
+      "prove": [
+        "S4 / test_board_grind_wait_why: Path buy + quiet \u2192 Size wait why on row and sit-out on tape when at AD / board grind.",
+        "Engine: Path buy + Size gate wait at AD \u2192 log sit-out with Size why (machine/engine.py).",
+        "S5: Path buy + no layer \u2192 Size miss why on row (intentional tape mute off AD matches sit-out-at-AD rule)."
+      ],
+      "note": "Not a profitability upgrade. Process correct. Do not reopen as a true gap unless Kenneth recuts sit-out-at-AD tape rule."
+    },
+    {
+      "id": "G5",
+      "title": "Fail under B blocked by Path sit (must still add panic)",
+      "verdict": "CLOSE",
+      "tag": "staff_proposed_close",
+      "prove": [
+        "F1 PASS: met + price under B + Path would sit \u2192 add panic half.",
+        "test_fail_add_panic_under_B_without_path_habit PASS.",
+        "Path RECUT (Kenneth 2026-09-07): Fail under met AD still adds panic half."
+      ],
+      "note": "Ownership locked: Fail owns add-panic; Path sit does not veto."
+    },
+    {
+      "id": "G6",
+      "title": "watch_only blocks even board panic (must sit with why)",
+      "verdict": "REJECT_AS_GAP",
+      "tag": "staff_proposed_reject",
+      "prove": [
+        "test_watch_only_blocks_board_panic_buy: watch_only true \u2192 sit; why names watch_only; no buy.",
+        "Engine: watch_only blocks Path buy including board panic; sit-out on tape when at AD."
+      ],
+      "note": "Correct locked behavior, not a hole. Upgrade list must not treat this as a fix candidate. Sit with why is the required outcome."
+    },
+    {
+      "id": "G7",
+      "title": "Exit into named base vs bounce map conflict",
+      "verdict": "CLOSE",
+      "tag": "staff_proposed_close",
+      "prove": [
+        "Exit gate Kenneth 2026-09-07: Gauge clips map high to nearest unmet big base; Machine sells into named base; does not wait for bounce length past it.",
+        "E1 / into-base tests PASS (unmet_bases_above_B and big base force sell).",
+        "Lock FAIL: sell pack that puts map high through a named base without a sell into it."
+      ],
+      "note": "No ownership conflict: Exit owns sells; bounce map height is clipped by unmet base. Not two competing exit owners."
+    }
+  ],
+  "helm_compile": {
+    "target": "docs/MACHINE_UPGRADE_BUNDLE.md",
+    "include": [
+      "decision_print_rule",
+      "shapes_per_seat",
+      "G4_G7 verdicts"
+    ],
+    "language": "Plain professional English. Say Machine / hung plan / Machine log / buy layers / sell layers / Size layers. Do not say paper plan, paper decisions, or packs."
+  }
+}

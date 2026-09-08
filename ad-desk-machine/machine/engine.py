@@ -98,6 +98,7 @@ class Engine:
         play_usd = float(play.get("play_usd") or self.book_usd * 0.5)
         ad = AD(top=top, bottom=bottom)
         habit = PathHabit.from_play(play)
+        # Kenneth 2026-09-07 Path RECUT: habit_ready / red fields are not hang Lock gates.
         # Prefer explicit layers if written; else build Size set once
         if play.get("layers"):
             buys: list[BuyLayer] = []
@@ -125,12 +126,8 @@ class Engine:
             )
         sells = load_sell_layers(play.get("sell_layers"))
         fills = FillState(buy_layers=buys, sell_layers=sells, buy_set_id="1")
-        # Reed exit facts (bounce / unmet bases / volume). Missing → blank; do not invent.
-        facts_src = (
-            play.get("reed_exit_facts")
-            or play.get("exit_facts")
-            or play.get("exit_facts_path")
-        )
+        # Reed exit facts (bounce / base / volume). Missing → blank; do not invent.
+        facts_src = play.get("exit_facts") or play.get("exit_facts_path")
         exit_facts = load_exit_facts(facts_src, play_path=play_path)
         exit_live = ExitLiveState(original_sells=snapshot_sells(sells) if sells else [])
         plan = PlanState(
@@ -184,8 +181,8 @@ class Engine:
                 "name": pr.name,
                 "price": pr.price,
                 "volume_usd": pr.volume_usd,
-                "volume_usd_5m": float(getattr(pr, "volume_usd_5m", 0) or 0),
-                "reds_5m": int(getattr(pr, "reds_5m", 0) or 0),
+                "volume_usd_5m": getattr(pr, "volume_usd_5m", 0.0),
+                "reds_5m": getattr(pr, "reds_5m", 0),
                 "ts": pr.ts.isoformat() if pr.ts else None,
             }
         )
@@ -199,7 +196,11 @@ class Engine:
         plan.live_chosen_tf_reds = int(pr.chosen_tf_reds)
         plan.live_vol_usd = float(pr.volume_usd) if pr.volume_usd is not None else None
         plan.live_reds_5m = int(getattr(pr, "reds_5m", 0) or 0)
-        plan.live_vol_usd_5m = float(getattr(pr, "volume_usd_5m", 0) or 0)
+        plan.live_vol_usd_5m = (
+            float(pr.volume_usd_5m)
+            if getattr(pr, "volume_usd_5m", None) is not None
+            else None
+        )
         if pr.faster_tf_reds:
             # one faster TF id from the print map
             ft = next(iter(pr.faster_tf_reds.items()))
@@ -211,8 +212,6 @@ class Engine:
             plan.live_faster_tf = str(fts[0]) if fts else None
             plan.live_faster_tf_reds = None
         low = pr.low if pr.low is not None else pr.price
-        # Sell on full candle travel (bar high). Buys keep low/price.
-        sell_price = pr.high if getattr(pr, "high", None) is not None else pr.price
         was_met = plan.met
         plan.met = update_met(plan.met, low, plan.ad)
         if plan.met and not was_met:
@@ -226,32 +225,36 @@ class Engine:
             )
 
         price_at = at_ad(pr.price, plan.ad)
-        tagged_ad = any(
-            ly.role == "AD"
-            and ly.status in ("empty", "next")
-            and pr.price <= ly.price
-            for ly in plan.fills.buy_layers
-        )
+        tagged_hung_ad = False
+        for ly in plan.fills.buy_layers:
+            if ly.role != "AD" or ly.status not in ("empty", "next"):
+                continue
+            if pr.price <= ly.price:
+                tagged_hung_ad = True
+                break
         snap = PathSnapshot(
             chosen_tf_reds=pr.chosen_tf_reds,
             faster_tf_reds=dict(pr.faster_tf_reds),
             volume_at_ad_usd=pr.volume_usd,
-            volume_usd_5m=float(getattr(pr, "volume_usd_5m", 0) or 0),
+            volume_usd_5m=float(getattr(pr, "volume_usd_5m", 0.0) or 0.0),
             reds_5m=int(getattr(pr, "reds_5m", 0) or 0),
             at_ad=price_at,
             ad_met=plan.met,
             board_panic=self.board_panic,
-            tagged_ad_layer=tagged_ad,
+            tagged_hung_ad_buy=tagged_hung_ad,
         )
         path_dec = evaluate_path(plan.habit, snap)
 
-        # Fail: break of AD = add panic half (not flatten). Path wait must not block under-B panic adds.
-        fail_add_panic = (
+        # Fail: break of AD = add panic half (not flatten). Owns under-B after already-met
+        # even when Path would also buy on tagged AD layers. Require was_met: first touch
+        # under B that first-enters the met band is Chart met, not Fail-add.
+        fail_add_panic = False
+        if (
             not plan.watch_only
-            and plan.met
+            and was_met
             and pr.price < plan.ad.bottom
-        )
-        if fail_add_panic:
+        ):
+            fail_add_panic = True
             path_dec = type(path_dec)(
                 action="buy",
                 why="Fail — current price broke AD; add panic half",
@@ -277,7 +280,7 @@ class Engine:
                 plan.fills.sell_layers,
                 plan.exit_facts,
                 plan.exit_live,
-                current_price=sell_price,
+                current_price=pr.price,
                 low=low,
                 volume_usd=pr.volume_usd,
                 ad_bottom=plan.ad.bottom,
@@ -298,6 +301,7 @@ class Engine:
                     price=pr.price,
                     force=True,
                 )
+            sell_price = pr.high if pr.high is not None else pr.price
             sell_events = try_fill_sells(plan.fills, sell_price)
             if sell_events:
                 self._record_sells(plan, sell_events)
@@ -311,11 +315,11 @@ class Engine:
                     }
                     for e in sell_events
                 )
-                plan.last_decision = "sell"
+                plan.last_decision = "paper-sell"
                 plan.last_why = adapt.reasons[0] if adapt.reasons else (
                     sell_events[0].why or "sell layer filled"
                 )
-                result["action"] = plan.last_decision
+                result["action"] = "sell"
                 result["why"] = plan.last_why
                 if plan.state == "out":
                     return result
@@ -324,15 +328,16 @@ class Engine:
             # Still surface sell action if exit live-read just filled.
             if result["action"] == "sell":
                 return result
+            # Path RECUT: tagged hung AD buy → Path buys (above). Wait why stays clear.
             plan.last_decision = "wait"
             plan.last_why = path_dec.why
-            # no log spam
+            result["why"] = path_dec.why
             return result
 
         if path_dec.action == "sit":
             if result["action"] == "sell":
                 return result
-            plan.last_decision = "sit"
+            plan.last_decision = "sit-out"
             plan.last_why = path_dec.why
             # Tape sit-out only when at AD (SPEC: off-AD first/second red sit stays off strip)
             if price_at:
@@ -347,26 +352,27 @@ class Engine:
         if path_dec.action == "buy":
             # watch_only hung plans must not buy until watch lifts (even board panic)
             if plan.watch_only:
-                plan.last_decision = "sit"
+                plan.last_decision = "sit-out"
                 plan.last_why = "watch_only — do not buy until watch lifts"
                 result["action"] = "sit"
                 result["why"] = plan.last_why
-                if price_at:
-                    self.log.append(
-                        "sit-out",
-                        plan.last_why,
-                        name=plan.name,
-                        price=pr.price,
-                    )
+                # G6: sit-with-why on tape (decision print sit-out)
+                self.log.append(
+                    "sit-out",
+                    plan.last_why,
+                    name=plan.name,
+                    price=pr.price,
+                )
                 return result
 
-            # Size owns volume at fill: grind-wait / skip no-volume / 0.5× late volume
-            path_take_at_ad = bool(path_dec.habit_match) and price_at and not fail_add_panic
-            if self.board_panic and price_at and not fail_add_panic:
+            # Size owns volume at fill: grind-wait / skip no-volume / 0.5× late volume.
+            # Optional require_5m_volume_spike: Size weighs 5m dollar volume (not Path sit).
+            path_take_at_ad = bool(path_dec.habit_match) and price_at
+            if self.board_panic and price_at:
                 path_take_at_ad = True
             size_vol = float(pr.volume_usd or 0)
             if plan.habit.require_5m_volume_spike:
-                size_vol = float(getattr(pr, "volume_usd_5m", 0) or 0)
+                size_vol = float(getattr(pr, "volume_usd_5m", 0.0) or 0.0)
             gate = gate_buy_layers(
                 plan.fills.buy_layers,
                 print_price=pr.price,
@@ -377,6 +383,7 @@ class Engine:
                 band_high=plan.ad.band_high,
                 board_grind=self.board_grind,
             )
+            # Path-tag buy fills AD only; Fail / board panic may fill panic half.
             if fail_add_panic and gate.layer_idxs:
                 panic_idxs = {
                     ly.idx for ly in plan.fills.buy_layers
@@ -386,16 +393,34 @@ class Engine:
                 if not panic_idxs:
                     from machine.size import SizeGateResult
                     gate = SizeGateResult(action="wait", why="Fail add-panic — no panic layer reached", layer_idxs=set())
+            elif (
+                not fail_add_panic
+                and not self.board_panic
+                and gate.layer_idxs
+            ):
+                ad_idxs = {
+                    ly.idx for ly in plan.fills.buy_layers
+                    if ly.role == "AD" and ly.idx in gate.layer_idxs
+                }
+                gate.layer_idxs = ad_idxs
+                if not ad_idxs:
+                    from machine.size import SizeGateResult
+                    gate = SizeGateResult(
+                        action="wait",
+                        why="Path buy — no AD buy layer reached",
+                        layer_idxs=set(),
+                    )
             if gate.action != "buy" or not gate.layer_idxs:
+                # Row keeps wait (not tape). Tape sit-out carries Size why (G4 CLOSE).
                 plan.last_decision = "wait"
                 plan.last_why = gate.why
                 result["action"] = "wait"
                 result["why"] = gate.why
-                # Sit-out on Size grind wait when at AD; board_grind adds its own note
-                if price_at:
+                size_why = gate.why if gate.why.startswith("Size") or "Size" in gate.why else f"Size — {gate.why}"
+                if price_at or self.board_grind:
                     self.log.append(
                         "sit-out",
-                        gate.why,
+                        size_why,
                         name=plan.name,
                         price=pr.price,
                     )
@@ -422,21 +447,30 @@ class Engine:
             result["fills"] = buy_fills + result["fills"]
             if events:
                 plan.state = "live"
-                plan.last_decision = "buy"
-                plan.last_why = path_dec.why
+                print_action = "paper-buy" if events[0].role == "AD" else "add-panic"
+                # Row + tape use print shape; API result action stays buy for Path/Fail take.
+                plan.last_decision = print_action
+                if print_action == "add-panic":
+                    fill_why = path_dec.why if "Fail" in path_dec.why else (
+                        "Fail — current price broke AD; add panic half"
+                    )
+                else:
+                    # Path spoke the tag/panic; Size filled — one speaker: Path why on paper-buy
+                    fill_why = path_dec.why
+                plan.last_why = fill_why
                 # Seed bounce tracking from the fill print.
                 if plan.exit_live.bounce_low is None:
                     plan.exit_live.bounce_low = low
                 if plan.exit_live.bounce_high is None:
-                    plan.exit_live.bounce_high = sell_price
+                    plan.exit_live.bounce_high = pr.price
                 if plan.exit_live.session_low is None:
                     plan.exit_live.session_low = low
                 if not plan.exit_live.original_sells and plan.fills.sell_layers:
                     plan.exit_live.original_sells = snapshot_sells(plan.fills.sell_layers)
                 total_usd = sum(e.usd for e in events)
                 self.log.append(
-                    "paper-buy" if events[0].role == "AD" else "add-panic",
-                    path_dec.why,
+                    print_action,
+                    fill_why,
                     name=plan.name,
                     price=pr.price,
                     size_pct=round(100.0 * total_usd / plan.play_usd, 2) if plan.play_usd else None,
@@ -484,7 +518,7 @@ class Engine:
                         plan.fills.sell_layers,
                         plan.exit_facts,
                         plan.exit_live,
-                        current_price=sell_price,
+                        current_price=pr.price,
                         low=low,
                         volume_usd=pr.volume_usd,
                         ad_bottom=plan.ad.bottom,
@@ -505,10 +539,7 @@ class Engine:
                             price=pr.price,
                             force=True,
                         )
-                # PARKED live unlock (do not turn on): when buys fill live, place
-                # resting sell limit orders on the exchange so a fast spike sells
-                # while it happens, not after the next 1m poll.
-                # live_orders_allowed stays false.
+                sell_price = pr.high if pr.high is not None else pr.price
                 sell_events = try_fill_sells(plan.fills, sell_price)
                 if sell_events:
                     self._record_sells(plan, sell_events)
@@ -526,7 +557,15 @@ class Engine:
                 # Path said buy but no layer at/through — Size miss; off the decision tape
                 plan.last_decision = "sit-out"
                 plan.last_why = "Path buy but no Size layer at or through current price"
-            result["action"] = plan.last_decision
+            # API action stays buy/sit/wait; plan.last_decision holds print shape
+            api_map = {
+                "paper-buy": "buy",
+                "add-panic": "buy",
+                "paper-sell": "sell",
+                "sit-out": "sit",
+                "exit-live": "sell",
+            }
+            result["action"] = api_map.get(plan.last_decision, plan.last_decision)
             result["why"] = plan.last_why
             return result
 
@@ -557,7 +596,7 @@ class Engine:
             self.closes.append({"name": plan.name, "reason": "layers flat"})
 
     def kill(self, plan_id: str, why: str = "kill") -> None:
-        plan = self.plans.get(plan_id) or self._find_plan(plan_id)
+        plan = self.plans.get(plan_id)
         if not plan:
             return
         plan.killed = True
@@ -607,7 +646,7 @@ class Engine:
             "why": plan.last_why,
             "habit_ready": plan.habit.habit_ready,
             "watch_only": plan.watch_only,
-            "killed": bool(plan.killed),
+            "killed": plan.killed,
             "layers": [b.to_dict() for b in plan.fills.buy_layers],
             "sell_layers": [s.to_dict() for s in sells],
         }
@@ -627,12 +666,7 @@ class Engine:
 
     def ranked(self) -> list[dict[str, Any]]:
         # Ranked includes reds+$vol; bounce_kind / last_sell_why stay off this list.
-        # Hide finished plays (out / killed) — sheet/ranked paint contract.
-        rows = [
-            self.plan_row(p, sheet=False)
-            for p in self.plans.values()
-            if p.state != "out" and not p.killed
-        ]
+        rows = [self.plan_row(p, sheet=False) for p in self.plans.values()]
         order = {"live": 0, "met": 1, "watch": 2, "out": 3}
         rows.sort(key=lambda r: (order.get(r["state"], 9), r["name"]))
         for i, r in enumerate(rows, start=1):

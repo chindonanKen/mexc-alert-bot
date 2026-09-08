@@ -1,0 +1,35 @@
+{
+  "kind": "lock_brain_map_tags",
+  "at_pht": "2026-09-08 12:19 PHT",
+  "rule": "kenneth_locked = Master sent Kenneth recut and Lock wrote it into process book (ticker-free). Else staff_proposed.",
+  "seat_tags": {
+    "chart": "kenneth_locked",
+    "path": "kenneth_locked",
+    "size": "kenneth_locked",
+    "fail": "kenneth_locked",
+    "exit": "kenneth_locked",
+    "feed": "staff_proposed",
+    "machine_log": "kenneth_locked"
+  },
+  "seat_notes": {
+    "chart": "ad-desk-rules Chart + full-history-first + discovery-first + HISTORY_TRUNCATED + Measure AD on MEXC + base_land_warn",
+    "path": "ad-desk-rules Path RECUT 2026-09-07 (tag hung AD buy layer; Size owns volume/grind; habit gates deleted)",
+    "size": "ad-desk-rules Size incl. dump-depth, panic Qi, 50/50, volume/grind, H1 P1-above-band FAIL/warn",
+    "fail": "ad-desk-rules Fail (break \u2192 add panic half; grind/short-copy)",
+    "exit": "ad-desk-rules Exit + ad-exit-strategy Exit gate (unmet_bases_above_B; clip to nearest unmet big base)",
+    "feed": "no trade rule book \u2014 staff_proposed (Lock recut 2026-09-08)",
+    "machine_log": "Staff/Master handoff Kenneth 2026-09-07 \u2014 kenneth_locked"
+  },
+  "always_staff_proposed": [
+    "Upgrade area suggestions",
+    "play-file prices / hang packs",
+    "code comments not written into process book",
+    "teach-and-hold pending Kenneth lock"
+  ],
+  "process_book_paths": [
+    "/home/box/agent-data/workflows/ad-desk-rules/SKILL.md",
+    "/home/box/agent-data/workflows/ad-exit-strategy/SKILL.md",
+    "/home/box/agent-data/workflows/measure-ad-on-mexc/SKILL.md"
+  ],
+  "recut": "2026-09-08 Lock: Feed staff_proposed; Machine log kenneth_locked"
+}

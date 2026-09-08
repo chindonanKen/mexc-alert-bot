@@ -1,0 +1,10 @@
+{
+  "at_pht": "2026-09-08 13:08 PHT",
+  "edge": "exit\u2192machine_log",
+  "label": "paper-sell \u00b7 exit-live",
+  "script_line": "scripts/build_machine_brain_map.py L101 MIN_EDGES",
+  "json_path": "static/brain-map/brain-map.json",
+  "openable": "static/brain-map/index.html",
+  "kill": "Machine log node prints only \u2014 not Exit handoff edge",
+  "live_orders_allowed": false
+}

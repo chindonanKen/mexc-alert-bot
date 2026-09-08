@@ -1,0 +1,47 @@
+{
+  "agent": "Grok Build",
+  "at_pht": "2026-09-08 13:06 PHT",
+  "status": "PASS",
+  "step": 2,
+  "plan": "docs/MACHINE_DECISION_PRINT_IMPLEMENT.md",
+  "live_orders_allowed": false,
+  "lock_step1": "data/.grokbot/lock_decision_print_implement_PASS.json",
+  "changed": [
+    "machine/engine.py"
+  ],
+  "shapes": {
+    "tape": [
+      "met",
+      "paper-buy",
+      "sit-out",
+      "add-panic",
+      "paper-sell",
+      "exit-live",
+      "kill"
+    ],
+    "row_wait_not_tape": true,
+    "one_speaker_per_print": true,
+    "why_required": true,
+    "api_action_map": {
+      "paper-buy": "buy",
+      "add-panic": "buy",
+      "paper-sell": "sell",
+      "sit-out": "sit"
+    }
+  },
+  "prove": {
+    "S4": "tests/test_scenario_pass.py::test_S4_board_grind_quiet_size_wait_why PASSED",
+    "F1": "tests/test_scenario_pass.py::test_F1_met_under_B_path_would_sit_adds_panic_half PASSED",
+    "watch_only_sit_with_why": "tests/test_size_volume.py::test_watch_only_blocks_board_panic_buy PASSED",
+    "E1": "tests/test_scenario_pass.py::test_E1_live_price_into_unmet_base_sells PASSED",
+    "named_count": "4 passed",
+    "related_suite": "63 passed (scenario_pass + size_volume + path + kill + api)"
+  },
+  "droplet": "held",
+  "brain_map": {
+    "regen": true,
+    "reason": "Upgrade lock-ask cleared \u2014 decision prints Kenneth-locked; edges already Lock print verbs",
+    "path": "static/brain-map/index.html",
+    "upgrades": []
+  }
+}
