@@ -1,0 +1,149 @@
+{
+  "id": "ANSEMUSDT_1h",
+  "name": "ANSEMUSDT",
+  "chosen_tf": "1h",
+  "faster_tfs": [
+    "15m"
+  ],
+  "chosen_tf_reds_into_met": null,
+  "faster_tf_reds_at_low": null,
+  "vol_at_bottom_usd": null,
+  "habit_ready": false,
+  "example_hint": "habit_ready false: Path sit first/second 1h red; board panic still buys",
+  "ad_top": 0.29763,
+  "ad_bottom": 0.19652,
+  "play_usd": 100,
+  "current_price": 0.23015,
+  "copy_count": 2,
+  "high_magnet": true,
+  "watch_only": false,
+  "lock_pass": "2026-09-07 Lock PASS Size+Exit ANSEMUSDT 1h; Kenneth hang test",
+  "exit_facts": {
+    "usual_bounce_pct_of_low": 13.0,
+    "unmet_bases_above_B": [
+      {
+        "zone": "0.215-0.221",
+        "role": "first shelf above B"
+      },
+      {
+        "zone": "0.254-0.275",
+        "role": "source/Aug31 shelves"
+      }
+    ],
+    "candles_to_bounce_start_median": 1,
+    "big_bases": [
+      "0.215-0.221",
+      "0.254-0.275"
+    ]
+  },
+  "sell_layers": [
+    {
+      "idx": 1,
+      "price": 0.205,
+      "usd": 20.0,
+      "why": "usual_bounce",
+      "status": "remaining"
+    },
+    {
+      "idx": 2,
+      "price": 0.213363,
+      "usd": 35.0,
+      "why": "usual_bounce",
+      "status": "remaining"
+    },
+    {
+      "idx": 3,
+      "price": 0.222068,
+      "usd": 45.0,
+      "why": "big_base",
+      "status": "remaining"
+    }
+  ],
+  "layers": [
+    {
+      "idx": 1,
+      "price": 0.203598,
+      "usd": 5.0,
+      "share_pct": 5,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 2,
+      "price": 0.201727,
+      "usd": 7.5,
+      "share_pct": 7.5,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 3,
+      "price": 0.199857,
+      "usd": 10.0,
+      "share_pct": 10,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 4,
+      "price": 0.197986,
+      "usd": 12.5,
+      "share_pct": 12.5,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 5,
+      "price": 0.196116,
+      "usd": 15.0,
+      "share_pct": 15,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 6,
+      "price": 0.176868,
+      "usd": 10.0,
+      "share_pct": 10,
+      "role": "panic",
+      "status": "empty"
+    },
+    {
+      "idx": 7,
+      "price": 0.159181,
+      "usd": 15.0,
+      "share_pct": 15,
+      "role": "panic",
+      "status": "empty"
+    },
+    {
+      "idx": 8,
+      "price": 0.141494,
+      "usd": 25.0,
+      "share_pct": 25,
+      "role": "panic",
+      "status": "empty"
+    }
+  ],
+  "killed": true,
+  "state": "out",
+  "status": "killed_out",
+  "killed_why": "done",
+  "killed_at": "2026-09-09 09:44 PHT",
+  "outcome": {
+    "closed": true,
+    "closed_at": "2026-09-09 09:44 PHT",
+    "reason": "done",
+    "last_decision": "kill",
+    "last_why": "done",
+    "state": "out",
+    "killed": true,
+    "fills": {
+      "buys_filled": 0,
+      "buys_remaining": 1,
+      "sells_filled": 0,
+      "sells_remaining": 0
+    },
+    "price": null
+  }
+}

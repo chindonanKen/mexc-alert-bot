@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from . import LIVE_ORDERS_ALLOWED
 from .chart import AD, at_ad, update_met
@@ -44,6 +46,7 @@ class PlanState:
     exit_live: ExitLiveState = field(default_factory=ExitLiveState)
     watch_only: bool = False
     out_draft_pinged: bool = False
+    play_path: Path | None = None
 
     @property
     def id(self) -> str:
@@ -140,8 +143,28 @@ class Engine:
             exit_facts=exit_facts,
             exit_live=exit_live,
             watch_only=bool(play.get("watch_only", False)),
+            play_path=play_path,
         )
-        if sells:
+        # Persist-kill / outcome writeback: load closed or killed as non-reacting.
+        outcome = play.get("outcome") if isinstance(play.get("outcome"), dict) else {}
+        killed_flag = bool(play.get("killed")) or str(play.get("status") or "") == "killed_out"
+        closed_flag = bool(outcome.get("closed")) or str(play.get("state") or "") == "out"
+        if killed_flag or closed_flag:
+            plan.state = "out"
+            if killed_flag:
+                plan.killed = True
+            plan.last_decision = str(
+                outcome.get("last_decision")
+                or ("kill" if killed_flag else play.get("last_decision") or "out")
+            )
+            plan.last_why = str(
+                outcome.get("last_why")
+                or play.get("killed_why")
+                or play.get("kill_note")
+                or outcome.get("reason")
+                or ("killed_out" if killed_flag else "closed")
+            )
+        if sells and not plan.killed:
             self.log.append(
                 "sell-layers",
                 "sell layers hung on written plan",
@@ -594,6 +617,7 @@ class Engine:
         if sell_events and not plan.fills.remaining_buys() and not plan.fills.remaining_sells():
             plan.state = "out"
             self.closes.append({"name": plan.name, "reason": "layers flat"})
+            self._write_outcome(plan, reason="layers flat")
 
     def kill(self, plan_id: str, why: str = "kill") -> None:
         plan = self.plans.get(plan_id)
@@ -601,8 +625,77 @@ class Engine:
             return
         plan.killed = True
         plan.state = "out"
+        plan.last_decision = "kill"
+        plan.last_why = why
+        killed_at = datetime.now(ZoneInfo("Asia/Manila")).strftime("%Y-%m-%d %H:%M PHT")
+        plan.play["killed"] = True
+        plan.play["state"] = "out"
+        plan.play["status"] = "killed_out"
+        plan.play["killed_why"] = why
+        plan.play["killed_at"] = killed_at
+        self._write_outcome(plan, reason=why, persist=True)
         self.log.append("kill", why, name=plan.name, price=plan.current_price, force=True)
         self.closes.append({"name": plan.name, "reason": why})
+
+    def _fills_summary(self, plan: PlanState) -> dict[str, int]:
+        buys = plan.fills.buy_layers
+        sells = plan.fills.sell_layers
+        return {
+            "buys_filled": sum(1 for b in buys if b.status == "filled"),
+            "buys_remaining": len(plan.fills.remaining_buys()),
+            "sells_filled": sum(1 for s in sells if getattr(s, "status", "") == "filled"),
+            "sells_remaining": len(plan.fills.remaining_sells()),
+        }
+
+    def _write_outcome(self, plan: PlanState, *, reason: str, persist: bool = True) -> None:
+        """Durable close on the same play JSON DecisionLoop loads. No invent money."""
+        closed_at = datetime.now(ZoneInfo("Asia/Manila")).strftime("%Y-%m-%d %H:%M PHT")
+        outcome = {
+            "closed": True,
+            "closed_at": closed_at,
+            "reason": reason,
+            "last_decision": plan.last_decision,
+            "last_why": plan.last_why,
+            "state": plan.state,
+            "killed": bool(plan.killed),
+            "fills": self._fills_summary(plan),
+            "price": plan.current_price,
+        }
+        plan.play["outcome"] = outcome
+        plan.play["state"] = plan.state
+        if persist:
+            self._persist_play(plan)
+
+    def _resolve_play_path(self, plan: PlanState) -> Path | None:
+        if plan.play_path is not None:
+            return plan.play_path
+        candidate = PLAYS_DIR / f"{plan.id}.json"
+        if candidate.exists():
+            return candidate
+        return None
+
+    def _persist_play(self, plan: PlanState) -> None:
+        """Persist kill / outcome stamps to data/plays. No invent Size.
+
+        If the plan was loaded from a file (play_path set), write plan.play.
+        If only an id match exists on disk, merge kill fields into that file
+        so an in-memory hang cannot overwrite Lock Size.
+        """
+        path = self._resolve_play_path(plan)
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        kill_keys = ("killed", "state", "status", "killed_why", "killed_at", "outcome")
+        if plan.play_path is not None and path == plan.play_path:
+            path.write_text(json.dumps(plan.play, indent=2) + "\n")
+            return
+        # Id-only match: stamp kill fields onto existing file; keep Size / AD.
+        existing = json.loads(path.read_text()) if path.exists() else dict(plan.play)
+        for k in kill_keys:
+            if k in plan.play:
+                existing[k] = plan.play[k]
+        path.write_text(json.dumps(existing, indent=2) + "\n")
+        plan.play_path = path
 
     def _find_plan(self, name: str) -> PlanState | None:
         for p in self.plans.values():

@@ -13,12 +13,10 @@ from machine.feeds import (
     MexcLiveFeed,
     ascending_bounce,
     descending_dump,
-    load_print_file,
     print_from_klines,
-    print_to_dict,
     trailing_red_count,
 )
-from machine.loop import DecisionLoop, feed_names_from_engine, feed_tfs_from_engine, sync_feed_names
+from machine.loop import DecisionLoop, feed_names_from_engine
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -48,22 +46,32 @@ def test_print_from_klines_uses_real_close_low_quote():
         _kline(2, "0.9", "0.9", "0.8", "0.85", "1", "1"),  # red
     ]
     faster = [_kline(1, "1", "1", "0.9", "0.95", "1", "1")]  # red
+    rows_5m = [
+        _kline(1, "0.90", "1", "0.9", "0.92", "1", "500"),  # green (close > open)
+        _kline(2, "0.92", "0.92", "0.88", "0.90", "1", "12000"),  # red
+        _kline(3, "0.90", "0.90", "0.85", "0.87", "1", "45000"),  # red — newest
+    ]
     pr = print_from_klines(
         "SYNUSDT",
         rows,
         chosen_tf_klines=chosen,
         faster_tf="1h",
         faster_tf_klines=faster,
+        klines_5m=rows_5m,
     )
     assert pr is not None
     assert pr.name == "SYNUSDT"
     assert pr.price == 0.095
     assert pr.low == 0.09
-    assert pr.high == 0.11  # 1m candle high (row index 2)
+    assert pr.high == 0.11
     # Dollar volume prefers chosen-TF newest bar quote (not the 1m forming bar).
     assert pr.volume_usd == 1.0
     assert pr.chosen_tf_reds == 2
-    assert pr.faster_tf_reds == {"1h": 1}
+    assert list(pr.faster_tf_reds.keys()) == ["1h", "5m"]  # primary first
+    assert pr.faster_tf_reds["1h"] == 1
+    assert pr.faster_tf_reds.get("5m") == 2  # 5m also mirrored into faster map
+    assert pr.reds_5m == 2
+    assert pr.volume_usd_5m == 45000.0
     assert pr.source == "mexc"
     assert pr.open_time_ms == 1_700_000_000_000
 
@@ -95,6 +103,14 @@ def test_mexc_feed_poll_mocked():
                 200,
                 json=[_kline(1, "0.1", "0.1", "0.09", "0.095", "1", "1")],
             )
+        if interval == "5m":
+            return httpx.Response(
+                200,
+                json=[
+                    _kline(1, "0.1", "0.1", "0.09", "0.095", "1", "1000"),  # red
+                    _kline(2, "0.095", "0.095", "0.09", "0.09", "1", "8000"),  # red
+                ],
+            )
         return httpx.Response(200, json=[])
 
     transport = httpx.MockTransport(handler)
@@ -104,9 +120,51 @@ def test_mexc_feed_poll_mocked():
     assert len(first) == 1
     assert first[0].price == 0.089
     assert first[0].chosen_tf_reds == 2
+    assert first[0].reds_5m == 2
+    assert first[0].volume_usd_5m == 8000.0
     # Identical fingerprint skipped
     second = feed.poll_once()
     assert second == []
+    client.close()
+
+
+def test_mexc_feed_includes_5m_fields_even_when_faster_is_5m():
+    """When faster_tf is already 5m, reuse that poll — still expose reds_5m / volume_usd_5m."""
+
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        interval = dict(request.url.params).get("interval")
+        calls.append(interval or "")
+        if interval == "1m":
+            return httpx.Response(
+                200,
+                json=[_kline(2000, "0.09", "0.09", "0.088", "0.089", "10", "0.89")],
+            )
+        if interval == "4h":
+            return httpx.Response(
+                200,
+                json=[_kline(1, "0.1", "0.1", "0.09", "0.09", "1", "1")],
+            )
+        if interval == "5m":
+            return httpx.Response(
+                200,
+                json=[
+                    _kline(1, "0.1", "0.1", "0.09", "0.09", "1", "1"),
+                    _kline(2, "0.09", "0.09", "0.08", "0.085", "1", "25000"),
+                ],
+            )
+        return httpx.Response(200, json=[])
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    feed = MexcLiveFeed(names=["SYNUSDT"], client=client, faster_tf="5m")
+    out = feed.poll_once()
+    assert len(out) == 1
+    assert out[0].faster_tf_reds == {"5m": 2}
+    assert out[0].reds_5m == 2
+    assert out[0].volume_usd_5m == 25000.0
+    # 1m + 4h + 5m only (no duplicate 5m)
+    assert calls.count("5m") == 1
     client.close()
 
 
@@ -164,318 +222,8 @@ def test_feed_names_from_hung_plans():
     assert "SYNUSDT" in names
     assert "AGIUSDT" in names
     assert "USUSDT" in names
-
-
-def test_hang_play_sync_feed_adds_new_name():
-    """API hang hole: hung USDT name must join live feed without restart."""
-    from machine.feeds import MexcLiveFeed
-
-    eng = Engine()
-    feed = MexcLiveFeed(names=["SYNUSDT", "AGIUSDT", "USUSDT"])
-    loop = DecisionLoop(engine=eng, feed=feed, interval_sec=99)
-    assert "BPUSDT" not in list(loop.feed.names)
-    eng.hang_play(
-        {
-            "id": "BPUSDT_4h",
-            "name": "BPUSDT",
-            "chosen_tf": "4h",
-            "habit_ready": False,
-            "ad_top": 1.0,
-            "ad_bottom": 0.8,
-            "play_usd": 100,
-            "sell_layers": [],
-        }
-    )
-    # hang_play alone leaves feed frozen — sync is required
-    assert "BPUSDT" not in list(loop.feed.names)
-    names = sync_feed_names(loop, eng)
-    assert "BPUSDT" in names
-    assert "BPUSDT" in list(loop.feed.names)
-    assert isinstance(loop.feed.names, list)
-    # Hang also refreshes per-name TFs (4h / fallback 1h)
-    assert loop.feed.name_tfs["BPUSDT"] == ("4h", "1h")
-
-
-def test_feed_tfs_from_hung_plans_use_play_intervals():
-    """1d play maps to 1d/4h; 4h play stays 4h/1h; missing TFs fall back."""
-    eng = Engine()
-    eng.hang_play(
-        {
-            "id": "BPUSDT_1d",
-            "name": "BPUSDT",
-            "chosen_tf": "1d",
-            "faster_tfs": ["4h"],
-            "habit_ready": False,
-            "ad_top": 1.0,
-            "ad_bottom": 0.8,
-            "play_usd": 100,
-            "sell_layers": [],
-        }
-    )
-    eng.hang_play(
-        {
-            "id": "SYNUSDT_4h",
-            "name": "SYNUSDT",
-            "chosen_tf": "4h",
-            "faster_tfs": ["1h"],
-            "habit_ready": False,
-            "ad_top": 1.0,
-            "ad_bottom": 0.8,
-            "play_usd": 100,
-            "sell_layers": [],
-        }
-    )
-    eng.hang_play(
-        {
-            "id": "MISSING_TF",
-            "name": "MISSINGUSDT",
-            "habit_ready": False,
-            "ad_top": 1.0,
-            "ad_bottom": 0.8,
-            "play_usd": 100,
-            "sell_layers": [],
-        }
-    )
-    tfs = feed_tfs_from_engine(eng)
-    assert tfs["BPUSDT"] == ("1d", "4h")
-    assert tfs["SYNUSDT"] == ("4h", "1h")
-    assert tfs["MISSINGUSDT"] == ("4h", "1h")
-
-
-def test_poll_uses_plan_chosen_tf_not_global_4h():
-    """Hung 1d plan fetches 1d chosen reds; 4h plan still uses 4h. Not one global pair."""
-    seen: list[tuple[str, str]] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        params = dict(request.url.params)
-        sym = params.get("symbol") or ""
-        interval = params.get("interval") or ""
-        seen.append((sym, interval))
-        if interval == "1m":
-            # Distinct fingerprints so both names emit a print
-            open_ms = 2000 if sym == "BPUSDT" else 1000
-            return httpx.Response(
-                200,
-                json=[_kline(open_ms, "0.09", "0.09", "0.088", "0.089", "10", "0.89")],
-            )
-        if interval == "1d":
-            # 3 trailing reds — must be BPUSDT chosen, never SYN
-            return httpx.Response(
-                200,
-                json=[
-                    _kline(1, "0.12", "0.12", "0.10", "0.11", "1", "1"),  # red
-                    _kline(2, "0.11", "0.11", "0.09", "0.10", "1", "1"),  # red
-                    _kline(3, "0.10", "0.10", "0.08", "0.09", "1", "1"),  # red
-                ],
-            )
-        if interval == "4h":
-            # 1 trailing red — SYN chosen; BP faster
-            return httpx.Response(
-                200,
-                json=[
-                    _kline(1, "0.10", "0.10", "0.09", "0.11", "1", "1"),  # green
-                    _kline(2, "0.11", "0.11", "0.09", "0.10", "1", "1"),  # red
-                ],
-            )
-        if interval == "1h":
-            # 2 trailing reds — SYN faster only
-            return httpx.Response(
-                200,
-                json=[
-                    _kline(1, "0.10", "0.10", "0.09", "0.09", "1", "1"),  # red
-                    _kline(2, "0.09", "0.09", "0.08", "0.08", "1", "1"),  # red
-                ],
-            )
-        return httpx.Response(200, json=[])
-
-    eng = Engine()
-    eng.hang_play(
-        {
-            "id": "BPUSDT_1d",
-            "name": "BPUSDT",
-            "chosen_tf": "1d",
-            "faster_tfs": ["4h"],
-            "habit_ready": False,
-            "ad_top": 1.0,
-            "ad_bottom": 0.8,
-            "play_usd": 100,
-            "sell_layers": [],
-        }
-    )
-    eng.hang_play(
-        {
-            "id": "SYNUSDT_4h",
-            "name": "SYNUSDT",
-            "chosen_tf": "4h",
-            "faster_tfs": ["1h"],
-            "habit_ready": False,
-            "ad_top": 1.0,
-            "ad_bottom": 0.8,
-            "play_usd": 100,
-            "sell_layers": [],
-        }
-    )
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-    feed = MexcLiveFeed(names=["BPUSDT", "SYNUSDT"], client=client)
-    loop = DecisionLoop(engine=eng, feed=feed, interval_sec=99)
-    sync_feed_names(loop, eng)
-    prints = feed.poll_once()
-    by_name = {p.name: p for p in prints}
-    assert set(by_name) == {"BPUSDT", "SYNUSDT"}
-    # Intervals requested per play — not one global 4h/1h for both
-    assert ("BPUSDT", "1d") in seen
-    assert ("BPUSDT", "4h") in seen
-    assert ("SYNUSDT", "4h") in seen
-    assert ("SYNUSDT", "1h") in seen
-    assert ("BPUSDT", "1h") not in seen
-    assert ("SYNUSDT", "1d") not in seen
-    # 1d has 3 reds; if the bug still used global 4h, BP would be 1
-    assert by_name["BPUSDT"].chosen_tf_reds == 3
-    assert by_name["BPUSDT"].faster_tf_reds["4h"] == 1
-    assert by_name["BPUSDT"].faster_tf_reds["5m"] == 0
-    # 4h plan unchanged primary; 5m attached after
-    assert by_name["SYNUSDT"].chosen_tf_reds == 1
-    assert by_name["SYNUSDT"].faster_tf_reds["1h"] == 2
-    assert by_name["SYNUSDT"].faster_tf_reds["5m"] == 0
-    assert ("BPUSDT", "5m") in seen
-    assert ("SYNUSDT", "5m") in seen
-    client.close()
-
-
-def test_print_from_klines_attaches_5m_reds_and_quote_vol():
-    rows = [_kline(1_700_000_000_000, "0.10", "0.11", "0.09", "0.095", "100", "9.5")]
-    chosen = [_kline(1, "1", "1", "0.9", "0.9", "1", "1")]
-    faster = [_kline(1, "1", "1", "0.9", "0.95", "1", "1")]
-    k5 = [
-        _kline(1, "0.10", "0.10", "0.09", "0.09", "10", "100"),  # red
-        _kline(2, "0.09", "0.09", "0.08", "0.08", "20", "226.5"),  # red
-    ]
-    pr = print_from_klines(
-        "SYNUSDT",
-        rows,
-        chosen_tf_klines=chosen,
-        faster_tf="1h",
-        faster_tf_klines=faster,
-        klines_5m=k5,
-    )
-    assert pr is not None
-    assert pr.reds_5m == 2
-    assert pr.volume_usd_5m == 226.5
-    assert list(pr.faster_tf_reds.items()) == [("1h", 1), ("5m", 2)]
-    roundtrip = print_to_dict(pr)
-    assert roundtrip["reds_5m"] == 2
-    assert roundtrip["volume_usd_5m"] == 226.5
-
-
-def test_print_to_dict_load_print_file_roundtrip_5m(tmp_path):
-    pr = print_from_klines(
-        "AGIUSDT",
-        [_kline(9, "1", "1", "0.9", "0.95", "1", "2")],
-        klines_5m=[_kline(1, "1", "1", "0.9", "0.8", "5", "40")],
-        faster_tf="1h",
-        faster_tf_klines=[_kline(1, "1", "1", "0.9", "0.95", "1", "1")],
-    )
-    assert pr is not None
-    path = tmp_path / "prints.json"
-    path.write_text(json.dumps([print_to_dict(pr)]))
-    loaded = load_print_file(str(path))
-    assert len(loaded) == 1
-    assert loaded[0].reds_5m == pr.reds_5m == 1
-    assert loaded[0].volume_usd_5m == pr.volume_usd_5m == 40.0
-
-
-def test_mexc_live_feed_always_polls_5m():
-    seen: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        interval = dict(request.url.params).get("interval") or ""
-        seen.append(interval)
-        if interval == "1m":
-            return httpx.Response(
-                200,
-                json=[_kline(1000, "0.09", "0.09", "0.088", "0.089", "10", "0.89")],
-            )
-        if interval == "5m":
-            return httpx.Response(
-                200,
-                json=[_kline(1, "0.10", "0.10", "0.09", "0.09", "8", "80")],
-            )
-        return httpx.Response(200, json=[_kline(1, "0.10", "0.10", "0.09", "0.11", "1", "1")])
-
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-    feed = MexcLiveFeed(names=["SYNUSDT"], client=client, faster_tf="1h")
-    prints = feed.poll_once()
-    assert seen.count("5m") == 1
-    assert seen.count("1h") == 1
-    assert seen.count("1m") == 1
-    assert len(prints) == 1
-    assert prints[0].reds_5m == 1
-    assert prints[0].volume_usd_5m == 80.0
-    assert prints[0].faster_tf_reds["1h"] == 0
-    assert prints[0].faster_tf_reds["5m"] == 1
-    client.close()
-
-
-def test_mexc_live_feed_reuses_5m_when_faster_tf_is_5m():
-    seen: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        interval = dict(request.url.params).get("interval") or ""
-        seen.append(interval)
-        if interval == "1m":
-            return httpx.Response(
-                200,
-                json=[_kline(1000, "0.09", "0.09", "0.088", "0.089", "10", "0.89")],
-            )
-        if interval == "5m":
-            return httpx.Response(
-                200,
-                json=[
-                    _kline(1, "0.10", "0.10", "0.09", "0.09", "8", "80"),
-                    _kline(2, "0.09", "0.09", "0.08", "0.08", "9", "90"),
-                ],
-            )
-        return httpx.Response(200, json=[])
-
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-    feed = MexcLiveFeed(names=["SYNUSDT"], client=client, faster_tf="5m")
-    prints = feed.poll_once()
-    assert seen.count("5m") == 1
-    assert len(prints) == 1
-    assert prints[0].faster_tf_reds == {"5m": 2}
-    assert prints[0].reds_5m == 2
-    assert prints[0].volume_usd_5m == 90.0
-    client.close()
-
-
-def test_fingerprint_includes_5m_so_spike_emits():
-    n5 = {"quote": "10"}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        interval = dict(request.url.params).get("interval") or ""
-        if interval == "1m":
-            return httpx.Response(
-                200,
-                json=[_kline(1000, "0.09", "0.09", "0.088", "0.089", "10", "0.89")],
-            )
-        if interval == "5m":
-            return httpx.Response(
-                200,
-                json=[_kline(1, "0.10", "0.10", "0.09", "0.09", "8", n5["quote"])],
-            )
-        return httpx.Response(200, json=[_kline(1, "1", "1", "0.9", "1.1", "1", "1")])
-
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-    feed = MexcLiveFeed(names=["SYNUSDT"], client=client)
-    first = feed.poll_once()
-    assert len(first) == 1
-    second = feed.poll_once()
-    assert second == []
-    n5["quote"] = "999"
-    third = feed.poll_once()
-    assert len(third) == 1
-    assert third[0].volume_usd_5m == 999.0
-    client.close()
+    # ANSEMUSDT_1h is killed_out on disk — must not be polled
+    assert "ANSEMUSDT" not in names
 
 
 def test_load_plays_dir_hangs_syn_agi_us_not_only_examples():

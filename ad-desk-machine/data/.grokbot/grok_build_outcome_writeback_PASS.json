@@ -1,0 +1,20 @@
+{
+  "when": "2026-09-09 09:41 PHT",
+  "seat": "Grok Build",
+  "item": "outcome_writeback_here_build",
+  "result": "PASS",
+  "pytest": "144 passed",
+  "also": "persist_kill already PASS; both landed on here-build",
+  "changes": [
+    "_write_outcome on kill and layers-flat close",
+    "_persist_play merges outcome without overwriting Lock Size/AD",
+    "hang_play loads outcome.closed or state out / killed_out as non-reacting",
+    "Engine.closes kept for API",
+    "ANSEMUSDT_1h.json has killed_out + outcome; L1=0.203598"
+  ],
+  "held": [
+    "droplet write",
+    "git push \u2014 need Kenneth yes on droplet/git draft"
+  ],
+  "live_orders_allowed": false
+}

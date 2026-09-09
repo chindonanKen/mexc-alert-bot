@@ -1,0 +1,20 @@
+{
+  "when": "2026-09-09 09:38 PHT",
+  "seat": "Grok Build",
+  "item": "persist_kill_here_build",
+  "result": "PASS",
+  "pytest": "141 passed",
+  "kill_tests": "tests/test_kill.py 8 passed",
+  "changes": [
+    "engine.kill writes killed/state/status=killed_out/killed_why/killed_at to play file",
+    "hang_play loads killed or status=killed_out as non-reacting",
+    "id-only persist merges kill fields only (does not overwrite Lock Size)",
+    "feed_names_from_engine omits killed/out; DecisionLoop refreshes names each poll",
+    "here-build data/plays/ANSEMUSDT_1h.json: killed_out + Gauge/Lock Size L1=0.203598 (AD 0.29763\u21920.19652)"
+  ],
+  "held": [
+    "droplet write",
+    "git push \u2014 need Kenneth yes on droplet/git draft"
+  ],
+  "live_orders_allowed": false
+}

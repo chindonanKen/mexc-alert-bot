@@ -44,6 +44,8 @@ class DecisionLoop:
     def step_once(self) -> list[dict[str, Any]]:
         """One poll → evaluate. Sync helper for tests / scripts."""
         results: list[dict[str, Any]] = []
+        # Drop killed/out names from the live feed without restarting the loop.
+        self.feed.names = feed_names_from_engine(self.engine)
         try:
             prints = self.feed.poll_once()
         except Exception as e:  # noqa: BLE001 — keep loop alive
@@ -87,16 +89,18 @@ class DecisionLoop:
 
 
 def feed_names_from_engine(engine: Engine) -> list[str]:
-    """Prefer hung plan names; fall back to SYN/AGI/US."""
-    names = [p.name for p in engine.plans.values()]
-    # Keep stable order; ensure defaults present when hung
-    ordered: list[str] = []
-    for n in list(DEFAULT_LIVE_NAMES) + names:
-        if n not in ordered:
-            ordered.append(n)
-    # If we have hung plans, only poll those that look like MEXC symbols
-    hung = [p.name for p in engine.plans.values() if p.name.endswith("USDT")]
-    return hung if hung else list(DEFAULT_LIVE_NAMES)
+    """Prefer hung plan names; fall back to SYN/AGI/US. Omit killed / out."""
+    reacting = [
+        p.name
+        for p in engine.plans.values()
+        if not p.killed and p.state != "out"
+    ]
+    usdt = [n for n in reacting if n.endswith("USDT")]
+    if usdt:
+        return usdt
+    if reacting:
+        return reacting
+    return list(DEFAULT_LIVE_NAMES)
 
 
 def build_default_loop(engine: Engine, interval_sec: float = 10.0) -> DecisionLoop:
