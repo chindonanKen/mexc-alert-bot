@@ -1,0 +1,20 @@
+{
+  "when": "2026-09-09 10:32 PHT",
+  "seat": "Grok Build",
+  "item": "brain_map_pass3_gate_rail_here_build",
+  "result": "PASS",
+  "path": "/workspace/ad-desk-machine/static/brain-map/index.html",
+  "neurons": 10,
+  "kept": "Chart Path Size Fail Exit Feed Machine log",
+  "added": "Lock PASS \u00b7 Hang \u00b7 Outcome writeback",
+  "refuse": "R1\u2013R3 waypoints x=1220",
+  "fail_split": false,
+  "path_fail_conflict": true,
+  "decision_loop_neuron": false,
+  "held": [
+    "droplet",
+    "git \u2014 until Slate+Pike score and Kenneth/Master yes on ship draft"
+  ],
+  "live_orders_allowed": false,
+  "tailscale_standing_url": "http://100.90.109.34:8787/brain-map"
+}

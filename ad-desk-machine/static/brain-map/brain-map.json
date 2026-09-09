@@ -402,8 +402,8 @@
     {
       "id": "machine_log",
       "name": "Machine log",
-      "x": 600,
-      "y": 660,
+      "x": 700,
+      "y": 700,
       "when": "decision + why",
       "prints": [
         {
@@ -448,6 +448,101 @@
         {
           "path": "machine/api.py",
           "symbols": "POST /api/machine/kill"
+        }
+      ],
+      "scenarios": []
+    },
+    {
+      "id": "lock_pass",
+      "name": "Lock PASS",
+      "x": 1120,
+      "y": 240,
+      "when": "PASS · FAIL",
+      "prints": [
+        {
+          "verb": "PASS",
+          "when": "Layers + facts hang-ready",
+          "shape": "PASS + Lock why. No invent prices.",
+          "tape": true,
+          "row": true
+        },
+        {
+          "verb": "FAIL",
+          "when": "Broken lock named",
+          "shape": "FAIL + Lock why (hang not ready).",
+          "tape": true,
+          "row": true
+        }
+      ],
+      "owns": "",
+      "does_not_own": "",
+      "tag": "kenneth_locked",
+      "rules": [],
+      "modules": [
+        {
+          "path": "process book / Lock seat",
+          "symbols": "Lock PASS|FAIL before hang"
+        }
+      ],
+      "scenarios": []
+    },
+    {
+      "id": "hang",
+      "name": "Hang",
+      "x": 1120,
+      "y": 400,
+      "when": "hung · watch-only",
+      "prints": [
+        {
+          "verb": "hung",
+          "when": "After Lock PASS only",
+          "shape": "hung (watch-only until Kenneth unlocks live).",
+          "tape": true,
+          "row": true
+        },
+        {
+          "verb": "watch-only",
+          "when": "Hung plan watch",
+          "shape": "watch-only on hung record until live unlock.",
+          "tape": false,
+          "row": true
+        }
+      ],
+      "owns": "",
+      "does_not_own": "",
+      "tag": "kenneth_locked",
+      "rules": [],
+      "modules": [
+        {
+          "path": "machine/api.py",
+          "symbols": "POST /api/machine/hang"
+        }
+      ],
+      "scenarios": []
+    },
+    {
+      "id": "outcome_writeback",
+      "name": "Outcome writeback",
+      "x": 1120,
+      "y": 560,
+      "when": "outcome on record",
+      "prints": [
+        {
+          "verb": "outcome",
+          "when": "Close / kill on same hung record",
+          "shape": "Write outcome on the same hung record; then Machine log may print the change.",
+          "tape": true,
+          "row": true
+        }
+      ],
+      "owns": "",
+      "does_not_own": "",
+      "tag": "kenneth_locked",
+      "rules": [],
+      "modules": [
+        {
+          "path": "machine/engine.py",
+          "symbols": "_write_outcome, _persist_play"
         }
       ],
       "scenarios": []
@@ -537,11 +632,95 @@
       "to": "machine_log",
       "kind": "handoff",
       "label": "paper-sell · exit-live"
+    },
+    {
+      "from": "size",
+      "to": "lock_pass",
+      "kind": "handoff",
+      "label": "layers ready"
+    },
+    {
+      "from": "exit",
+      "to": "lock_pass",
+      "kind": "handoff",
+      "label": "sell layers"
+    },
+    {
+      "from": "chart",
+      "to": "lock_pass",
+      "kind": "handoff",
+      "label": "facts"
+    },
+    {
+      "from": "lock_pass",
+      "to": "hang",
+      "kind": "handoff",
+      "label": "PASS"
+    },
+    {
+      "from": "hang",
+      "to": "outcome_writeback",
+      "kind": "handoff",
+      "label": "same record"
+    },
+    {
+      "from": "outcome_writeback",
+      "to": "machine_log",
+      "kind": "handoff",
+      "label": "outcome"
+    },
+    {
+      "from": "size",
+      "to": "hang",
+      "kind": "refuse",
+      "label": "skip Lock",
+      "waypoints": [
+        [
+          1220,
+          280
+        ],
+        [
+          1220,
+          400
+        ]
+      ]
+    },
+    {
+      "from": "lock_pass",
+      "to": "outcome_writeback",
+      "kind": "refuse",
+      "label": "skip Hang",
+      "waypoints": [
+        [
+          1220,
+          240
+        ],
+        [
+          1220,
+          560
+        ]
+      ]
+    },
+    {
+      "from": "hang",
+      "to": "machine_log",
+      "kind": "refuse",
+      "label": "skip writeback",
+      "waypoints": [
+        [
+          1220,
+          400
+        ],
+        [
+          1220,
+          700
+        ]
+      ]
     }
   ],
-  "regenerated_at": "2026-09-08 13:08 PHT",
+  "regenerated_at": "2026-09-09 10:32 PHT",
   "overlaps": [],
   "upgrades": [],
   "upgrade_help": "suggestions stay staff-proposed until Kenneth locks",
-  "legend": "solid = handoff · warm = takeover · dotted = feeds · rose ╳ = conflict · labels = decision prints"
+  "legend": "solid = handoff · warm = takeover · dotted = feeds · rose ╳ = conflict · rose dash = wrong gate · labels = prints / gates"
 }

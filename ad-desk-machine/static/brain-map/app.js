@@ -22,7 +22,13 @@
       : '<span class="tag tag-proposed">Staff-proposed</span>';
   }
   function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
-  function edgePath(a, b, kind) {
+  function edgePath(a, b, kind, waypoints) {
+    if (waypoints && waypoints.length) {
+      var d = "M " + a.x + " " + a.y;
+      waypoints.forEach(function (p) { d += " L " + p[0] + " " + p[1]; });
+      d += " L " + b.x + " " + b.y;
+      return d;
+    }
     const dx = b.x - a.x, dy = b.y - a.y;
     if (kind === "conflict") {
       const mx = (a.x + b.x) / 2 + 36, my = (a.y + b.y) / 2;
@@ -38,11 +44,20 @@
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
     return "M " + a.x + " " + a.y + " Q " + mx + " " + (my + (dy > 0 ? 10 : -10)) + " " + b.x + " " + b.y;
   }
+  function labelPoint(a, b, kind, waypoints) {
+    if (waypoints && waypoints.length) {
+      var midWp = waypoints[Math.floor((waypoints.length - 1) / 2)];
+      return { x: midWp[0] + (kind === "refuse" ? 14 : 0), y: midWp[1] - 8 };
+    }
+    var m = mid(a, b);
+    if (kind === "conflict") return { x: m.x + 18, y: m.y - 6 };
+    return { x: m.x, y: m.y - 8 };
+  }
 
   function draw() {
     const defs =
       '<defs>' +
-      ['handoff','takeover','feeds','conflict'].map(function (k) {
+      ['handoff','takeover','feeds','conflict','refuse'].map(function (k) {
         return '<marker id="arrow-' + k + '" class="marker ' + k + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker>';
       }).join("") +
       "</defs>";
@@ -50,15 +65,19 @@
     (data.edges || []).forEach(function (e, i) {
       const a = byId[e.from], b = byId[e.to];
       if (!a || !b) return;
-      const d = edgePath(a, b, e.kind);
+      const d = edgePath(a, b, e.kind, e.waypoints);
       const m = mid(a, b);
+      const lp = labelPoint(a, b, e.kind, e.waypoints);
       const marker = e.kind === "conflict" ? "" : ' marker-end="url(#arrow-' + e.kind + ')"';
       edges += '<path class="edge ' + e.kind + '" data-i="' + i + '" data-from="' + e.from + '" data-to="' + e.to + '" d="' + d + '"' + marker + "/>";
-      const lx = e.kind === "conflict" ? m.x + 18 : m.x;
-      const ly = e.kind === "conflict" ? m.y - 6 : m.y - 8;
-      edges += '<text class="edge-label ' + (e.kind === "conflict" ? "conflict" : "") + '" x="' + lx + '" y="' + ly + '">' + esc(e.label || "") + "</text>";
+      edges += '<text class="edge-label ' + (e.kind === "conflict" || e.kind === "refuse" ? e.kind : "") + '" x="' + lp.x + '" y="' + lp.y + '">' + esc(e.label || "") + "</text>";
       if (e.kind === "conflict") {
         edges += '<text class="conflict-x" x="' + m.x + '" y="' + (m.y + 5) + '">╳</text>';
+      }
+      if (e.kind === "refuse" && e.waypoints && e.waypoints.length) {
+        var wx = e.waypoints[Math.floor(e.waypoints.length / 2)][0];
+        var wy = e.waypoints[Math.floor(e.waypoints.length / 2)][1];
+        edges += '<text class="refuse-x" x="' + wx + '" y="' + (wy + 4) + '">╳</text>';
       }
     });
     edges += "</g>";
@@ -68,10 +87,13 @@
       const locked = l.tag === "kenneth_locked";
       const cls = locked ? "locked" : "proposed";
       const pip = locked ? "locked" : "proposed";
+      const wide = (l.name || "").length > 12;
+      const w = wide ? 150 : 140;
+      const hx = w / 2;
       nodes +=
         '<g class="node-hit" data-seat="' + l.id + '" transform="translate(' + l.x + " " + l.y + ')">' +
-          '<rect class="node-body ' + cls + '" x="-70" y="-28" rx="18" ry="18" width="140" height="56"/>' +
-          '<circle class="pip ' + pip + '" cx="58" cy="-18" r="4"/>' +
+          '<rect class="node-body ' + cls + '" x="' + (-hx) + '" y="-28" rx="18" ry="18" width="' + w + '" height="56"/>' +
+          '<circle class="pip ' + pip + '" cx="' + (hx - 12) + '" cy="-18" r="4"/>' +
           '<text class="node-label" x="0" y="-2">' + esc(l.name) + "</text>" +
           '<text class="node-when" x="0" y="16">' + esc(l.when || "") + "</text>" +
         "</g>";
@@ -164,7 +186,7 @@
       '<div id="sheet-head"><div class="name">' + esc(layer.name) + " " + tagChip(layer.tag) + '</div>' +
       '<div class="when">' + esc(layer.when || "") + "</div>" +
       ownsMute + "</div>" +
-      '<div class="block"><div class="kicker">Decision prints</div>' + printsBlock(prints) + "</div>" +
+      '<div class="block"><div class="kicker">' + (["lock_pass","hang","outcome_writeback"].indexOf(layer.id) >= 0 ? "Gate" : "Decision prints") + '</div>' + printsBlock(prints) + "</div>" +
       '<div class="block"><div class="kicker">Rules</div>' + rulesBlock(rules) + "</div>" +
       '<div class="block"><div class="kicker">Code modules</div>' + modsBlock(layer.modules) + "</div>" +
       '<div class="block"><div class="kicker">Scenario seats</div>' + scenBlock(layer.scenarios) + "</div>" +

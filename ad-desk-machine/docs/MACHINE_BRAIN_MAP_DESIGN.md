@@ -4,9 +4,17 @@ Kenneth FAIL 2026-09-08 on the prior card-stack map: boxes of text / copy of `/m
 
 **Recut he wants:** look like a brain (futuristic, not a card list); every decision seat connected with edges for handoff / take-over; overlaps drawn as visible crossings; rule depth on hover/click — not walls of locked text as the first view.
 
-**Design pass 2 (2026-09-08):** handoffs and conflicts present as **Machine decision prints** (`met` / `paper-buy` / `sit-out` / `wait` / `add-panic` / `paper-sell` / `exit-live` / `kill` + why), not abstract “owns” text. Source: `docs/MACHINE_UPGRADE_BUNDLE.md` + Lock `data/.grokbot/lock_decision_prints_G4_G7.json`. Shapes stay `staff_proposed` until Kenneth locks via Master.
+**Design pass 2 (2026-09-08):** handoffs and conflicts present as **Machine decision prints** (`met` / `paper-buy` / `sit-out` / `wait` / `add-panic` / `paper-sell` / `exit-live` / `kill` + why), not abstract “owns” text. Print shapes are Kenneth-locked in the process book (2026-09-08).
 
-This file replaces the flat seven-card primary view. Grok Build applies it in `scripts/build_machine_brain_map.py` → `static/brain-map/`. Live orders stay off. Not a ticker board. Not a hang console. Not orders.
+**Design pass 3 (2026-09-09):** Kenneth yes — add **three neurons only** on the **same** live Brain (Tailscale `http://100.90.109.34:8787/brain-map`). No second Brain. No DecisionLoop redraw. No invented names. Live orders off.
+
+New neurons (exact names): **Lock PASS** · **Hang** · **Outcome writeback**.
+
+KEEP neurons (unchanged seats): Chart · Path · Size · Fail · Exit · Feed · Machine log. **Fail stays one neuron** (do not split this week). Keep Path↔Fail rose conflict ╳.
+
+Staff path (process, not extra neurons): data → Reed facts → Gauge layers → **Lock PASS** → **Hang** → write **Outcome writeback** on the same record → Machine log. Reed and Gauge are **not** graph neurons this week — they feed Lock PASS through Chart / Size / Exit facts and layers already on the KEEP graph.
+
+Slate owns design docs only. Grok Build codes. Pike reviews after this draft. Slate does not touch the droplet.
 
 **Name lock:** The Machine. Do not say “here-build” in the product.
 
@@ -14,63 +22,58 @@ This file replaces the flat seven-card primary view. Grok Build applies it in `s
 
 ## Feel
 
-A single **connected brain graph** of decision seats. Nodes are seats. Edges are handoffs and take-overs labeled with the **print the Machine writes** when that seat speaks. Conflicts are rose crossings you can see without reading a panel first.
+A single **connected brain graph** of decision seats plus the hang gate rail. KEEP cortex stays left/center and readable. The three new neurons form a clear **gate rail** on the right so Lock → Hang → Outcome cannot be skipped without a visible wrong-gate mark.
 
-Dark iron field. Brass = Kenneth-locked. Dashed iron = Staff-proposed. Rose = structure conflict edge. Depth lives in a slim inspector (hover or click) — the first view is the diagram.
+Dark iron field. Brass = Kenneth-locked. Dashed iron = Staff-proposed. Rose = conflict or wrong-gate refuse. Depth in slim inspector. First view = diagram.
 
 ---
 
 ## Primary view — the brain (not a list)
 
-Full-viewport SVG (or canvas) diagram. No vertical stack of brass cards as the hero.
+Full-viewport SVG diagram. No vertical stack of brass cards as the hero. Same site as today’s Brain — widen the canvas; do not spawn a second page.
 
-### Node layout (fixed seats — generator places, designer locks relative topology)
-
-Think of a neural cluster, left-to-right flow with a vertical spine:
+### Node layout (KEEP + gate rail)
 
 ```
-                    [ Feed ]
-                       │ prints (no decision)
-                       ▼
-   [ Chart ] ──met──► [ Path ] ──paper-buy gate──► [ Size ]
-       │                   │  ▲                        │
-       │                   │  │ sit-out / wait         │ paper-buy fill
-       │                   │  │ (Size why)             │
-       │                   │  └────────────────────────┘
-       │                   │
-       │              conflict╳ (rose) Path sit-out
-       │                   │      vs Fail add-panic
-       └──── met break ──► [ Fail ] ──add-panic──► [ Size ]
-                                                      │
-                              open bag                ▼
-                                                 [ Exit ]
-                                                      │
-                         decision changes ────────────┴──► [ Machine log ]
+                         [ Feed ]
+                            │ prints
+                            ▼
+        [ Chart ] ──met──► [ Path ] ──paper-buy gate──► [ Size ] ──layers──► [ Lock PASS ]
+            │                 │  ▲                          │                    │
+            │                 │  │ sit-out · Size why       │                    │ PASS
+            │                 │  └──────────────────────────┘                    ▼
+            │            conflict╳ (rose)                                   [ Hang ]
+            │            sit-out vs add-panic                                    │
+            └─ met break ► [ Fail ] ──add-panic──► [ Size ]                      │ hung record
+                                                 │                               ▼
+                                                 └─ open bag ► [ Exit ] ► [ Outcome writeback ]
+                                                      paper-sell · exit-live         │
+                                                                                     ▼
+                                                              all decision why ─► [ Machine log ]
 ```
 
-Absolute positions (viewBox 1200×720, origin top-left) — Grok Build may nudge ±8px for label clearance but keep this topology:
+Absolute positions — viewBox **1320×760** (KEEP cluster unchanged; gate rail on the right). Grok Build may nudge ±8px for label clearance; keep topology.
 
 | Seat | x | y | Notes |
 | --- | --- | --- | --- |
-| Feed | 600 | 80 | Top sensor |
-| Chart | 180 | 280 | Left cortex |
-| Path | 520 | 280 | Center gate |
-| Size | 860 | 280 | Right gate |
-| Fail | 520 | 480 | Under Path |
-| Exit | 860 | 520 | Lower right |
-| Machine log | 600 | 660 | Bottom sink |
+| Feed | 600 | 80 | Top sensor — KEEP |
+| Chart | 180 | 280 | Left cortex — KEEP |
+| Path | 520 | 280 | Center gate — KEEP |
+| Size | 860 | 280 | Right KEEP gate |
+| Fail | 520 | 480 | Under Path — **one neuron** — KEEP |
+| Exit | 860 | 520 | Lower KEEP — KEEP |
+| **Lock PASS** | **1120** | **240** | Gate rail 1 — after layers ready |
+| **Hang** | **1120** | **400** | Gate rail 2 — only after Lock PASS |
+| **Outcome writeback** | **1120** | **560** | Gate rail 3 — same hung record |
+| Machine log | 700 | 700 | Bottom sink — KEEP; also from Outcome writeback |
 
-Nodes: rounded lozenge ~140×56. Label = seat name only on the node. Tiny tag pip (brass filled / iron dashed) at the corner — not a full chip wall.
+Nodes: rounded lozenge ~140×56 (gate-rail nodes may use ~150×56 if the name needs it). Label = seat name only. Tiny tag pip (brass / iron dashed) — not a chip wall.
 
-### Decision-print fragments on nodes (first view)
+KEEP nodes must stay at the same relative cluster so the Path↔Fail rose ╳ and Size↔Path takeover remain readable. Do not shrink KEEP labels to fit the rail.
 
-On the **first view**, each node shows only:
+### Decision-print / gate fragments on nodes (first view)
 
-- Seat name
-- Tag pip (Kenneth-locked / Staff-proposed)
-- One mute **print** fragment under the name (≤6 words) — the verb The Machine writes when this seat speaks, not an “owns” sentence
-
-| Seat | Node mute fragment (print) | Speaks when |
+| Seat | Node mute fragment | Speaks when |
 | --- | --- | --- |
 | Chart | `met + why` | First met-band entry |
 | Path | `paper-buy · sit-out · wait` | Tag buy, board panic, or sit at AD |
@@ -79,25 +82,25 @@ On the **first view**, each node shows only:
 | Exit | `paper-sell · exit-live` | Sell / adapt |
 | Feed | `prints only` | Never a trade decision |
 | Machine log | `decision + why` | Carrier; one line per change |
+| **Lock PASS** | `PASS · FAIL` | Layers + facts scored; hang-ready or not |
+| **Hang** | `hung · watch-only` | Master hang after Lock PASS only |
+| **Outcome writeback** | `outcome on record` | Write outcome on the **same** hung record |
 
-Do **not** paint walls of process-book text or “owns / does not own” essays on the canvas.
+Do **not** paint process-book essays or owns-text on the canvas.
 
-### Edges (required) — labels are print shapes
-
-Generator emits edges from owners freeze + plan refuse lines + Lock decision-print shapes. Each edge has: `from`, `to`, `kind`, `label` (print verb, ≤4 words), optional `print` object for tip/inspector.
+### Edges — KEEP prints + gate rail + wrong gates
 
 | kind | Look | Meaning |
 | --- | --- | --- |
-| `handoff` | Solid mute 1.5px, arrow | Seat A finishes; seat B’s print is next |
-| `takeover` | Solid warm 1.5px, arrow | Seat B’s print overrides A’s gate |
-| `feeds` | Dotted mute 1px, arrow | Data only (Feed → Path / Size); no decision print |
-| `conflict` | Rose 2px, **crossing mark** (╳ at midpoint) | Two seats could both claim a print for the same moment |
+| `handoff` | Solid mute 1.5px, arrow | Next legal seat / print |
+| `takeover` | Solid warm 1.5px, arrow | Seat B overrides A’s gate |
+| `feeds` | Dotted mute 1px, arrow | Data only |
+| `conflict` | Rose 2px + ╳ | Two seats claim the same print moment |
+| `refuse` | Rose **dashed** 1.5px + small ╳ | **Wrong gate** — illegal skip (must stay visible) |
 
-**Handoff rule (staff_proposed, from Upgrade bundle):** when a seat takes over, the edge label and the tip must look like that seat’s **decision-print shape**, not abstract “owns” text. Example: Size → Path takeover label is `sit-out · Size why`, not `vol / grind wait` as ownership prose.
+**KEEP minimum edges (unchanged labels):**
 
-**Minimum edge set (always draw) — print labels:**
-
-| # | Edge | kind | Label (print) |
+| # | Edge | kind | Label |
 | --- | --- | --- | --- |
 | 1 | Feed → Path | `feeds` | `prints` |
 | 2 | Feed → Size | `feeds` | `prints` |
@@ -109,16 +112,44 @@ Generator emits edges from owners freeze + plan refuse lines + Lock decision-pri
 | 8 | Fail → Size | `handoff` | `add-panic` |
 | 9 | Path ↔ Fail | `conflict` | `sit-out vs add-panic` — rose ╳ |
 | 10 | Size → Exit | `handoff` | `open bag` |
-| 11 | Path / Size / Fail / Exit → Machine log | `handoff` | `why` |
-| 12 | Exit → Machine log | Exit handoff edge | `paper-sell · exit-live` (Kill stays on Machine log node / kill route only — not this edge) |
+| 11 | Path / Size / Fail → Machine log | `handoff` | `why` |
+| 12 | Exit → Machine log | `handoff` | `paper-sell · exit-live` |
 
-Add more conflict edges only when `overlaps[]` / owners freeze names them. Draw those as rose crossings on the shared region — **visible on the graph**, not a hidden text panel.
+**Gate-rail edges (new):**
 
-Optional mute legend under the graph: `solid = handoff · warm = takeover · dotted = feeds · rose ╳ = conflict · labels = decision prints`.
+| # | Edge | kind | Label |
+| --- | --- | --- | --- |
+| 13 | Size → Lock PASS | `handoff` | `layers ready` |
+| 14 | Exit → Lock PASS | `handoff` | `sell layers` |
+| 15 | Chart → Lock PASS | `handoff` | `facts` (Reed facts land via Chart walk — no Reed neuron) |
+| 16 | Lock PASS → Hang | `handoff` | `PASS` |
+| 17 | Hang → Outcome writeback | `handoff` | `same record` |
+| 18 | Outcome writeback → Machine log | `handoff` | `outcome` |
+
+**Wrong gates (always draw — visible refuse):**
+
+| # | Edge | kind | Label |
+| --- | --- | --- | --- |
+| R1 | Size → Hang | `refuse` | `skip Lock` |
+| R2 | Lock PASS → Outcome writeback | `refuse` | `skip Hang` |
+| R3 | Hang → Machine log | `refuse` | `skip writeback` |
+
+No direct Size→Hang, Lock→Outcome, or Hang→Machine log as `handoff`. Those paths exist only as rose dashed `refuse` so a wrong gate is obvious on the first view.
+
+**Refuse path geometry (Pike FAIL 2026-09-09 — required):** R1–R3 must **never** cross gate-rail node bodies (Lock PASS / Hang / Outcome writeback).
+
+- Draw refuse edges on a **right refuse rail** at **x ≥ 1220** (viewBox still 1320×760), **or** use an elbow/quadratic whose mid control clears the nearest gate-rail node by **≥ 28px** (half of the 56px node height) in both x and y.
+- **R2** (Lock PASS → Outcome writeback) must not share the gate-rail column `x = 1120` as a straight vertical through Hang. Route R2 as: Lock PASS → (1220, 240) → (1220, 560) → Outcome writeback — a U on the refuse rail that **bypasses Hang**.
+- **R1** (Size → Hang): elbow right of Size then into Hang; do not cut through Lock PASS. Example: Size (860,280) → (1220, 280) → (1220, 400) → Hang (1120, 400).
+- **R3** (Hang → Machine log): elbow down/left on or outside the refuse rail; do not cut Outcome writeback. Example: Hang (1120,400) → (1220, 400) → (1220, 700) → Machine log (700, 700).
+- Legal handoffs **13–18** stay on the gate-rail column (short solid arrows between Lock PASS → Hang → Outcome writeback). KEEP Path↔Fail rose ╳ unchanged.
+- Generator: `refuse` paths use explicit `d` waypoints or `rail_x: 1220`; do not auto-line-center between endpoints for R1–R3.
+
+Optional mute legend: `solid = handoff · warm = takeover · dotted = feeds · rose ╳ = conflict · rose dash = wrong gate · labels = prints / gates`.
 
 ---
 
-## Decision-print shapes (Lock confirmed — staff_proposed until Kenneth locks)
+## Decision-print shapes (Kenneth-locked in process book)
 
 Match Machine log LOGGABLE actions. Plan row always holds `last_decision` + `last_why`. Tape prints decision changes only — `wait` stays on the row, not the tape.
 
@@ -126,77 +157,65 @@ Match Machine log LOGGABLE actions. Plan row always holds `last_decision` + `las
 | --- | --- |
 | Chart | `met` + why (low entered band). No buy / sit / size / exit. |
 | Path | Tape: `paper-buy` only after Size fills (why = Path tag/panic) · or `sit-out` + Path why at AD. Row: `wait` + why not tagged (no tape line). |
-| Size | Tape: `paper-buy` on fill · or `sit-out` + Size why when Path bought and Size waits at AD / board grind. Off-AD Size miss: why on row; tape mute matches sit-out-at-AD. |
+| Size | Tape: `paper-buy` on fill · or `sit-out` + Size why when Path bought and Size waits at AD / board grind. |
 | Fail | `add-panic` + why Fail — current price broke AD; add panic half. Path sit must not block. |
-| Exit | `paper-sell` + layer why or into named base · `exit-live` + adapt reasons. Named unmet base clips bounce map high. |
+| Exit | `paper-sell` + layer why or into named base · `exit-live` + adapt reasons. |
 | Feed | prints only — no buy / sit / sell |
 | Machine log | one line per change: `{action, name, price, size_pct?, why}`; no wait spam |
-| Kill | `kill` + why intentional out |
+| Kill | `kill` + why intentional out (Machine log node — not the Exit→log edge) |
+| Lock PASS | Row/tape gate mark: `PASS` or `FAIL` + Lock why (hang-ready or not). No invent prices. |
+| Hang | Record state: hung (watch-only until Kenneth unlocks live). Only after Lock PASS. |
+| Outcome writeback | Write outcome fields on the **same** hung record; then Machine log may print the change. |
 
-**One speaker per print:** Path may tag buy or sit/wait. Size may only fill / wait / cancel with Size why — never a second Path buy. Fail may add-panic under a met AD break even if Path would sit. Exit may sell only into hung sells under the Exit gate.
+**One speaker per print** on KEEP seats unchanged. Gate rail: Lock PASS speaks before Hang; Hang before Outcome writeback; Outcome writeback before the outcome line hits Machine log.
 
 ---
 
-## Hover and inspector (print depth, not owns essays)
+## Hover and inspector
 
-**Hover** (desktop): soft amber ring on node; floating tip shows:
+**Hover:** amber ring; tip = seat name + print/gate verbs + one example shape. Refuse edges stay rose when a connected wrong gate is hot.
 
-1. Seat name
-2. **Print verbs** this seat may write (mono)
-3. One example print line shape (from Lock table) — not the owns sentence
+**Click inspector (~380px):**
 
-Connected edges highlight. Conflict edges stay rose.
+1. Seat name · tag chip · fragment
+2. **Decision prints** / **Gate** (for Lock PASS / Hang / Outcome writeback) — lead this block
+3. Rules · Code modules · Scenario seats · Edges (including refuse links)
 
-**Click**: open **inspector** (right sheet ~380px) — the only dense surface:
-
-1. Seat name · tag chip · print fragment
-2. **Decision prints** — each shape this seat may write (verb + when + example why). Lead this block. Do not lead with owns / does-not-own prose.
-3. **Rules** — process-book sentences with per-row tag + Kenneth date (scrollable)
-4. **Code modules** — mono paths/symbols
-5. **Scenario seats** — IDs
-6. **Edges** — list of links from this seat with **print label** (click jumps highlight on graph)
-
-Empty: mute `none yet`. No invent.
-
-Owns / does-not-own may appear as a mute secondary line under the head if needed for Lock freeze context — never as the first canvas or tip text.
+Empty: `none yet`. No invent.
 
 ---
 
 ## Color / type / motion
-
-Same tokens as before (desk continuity without copying the trading page chrome):
 
 | Token | Hex | Use |
 | --- | --- | --- |
 | `--bg` | `#0c0b0a` | Field |
 | `--panel` | `#141210` | Nodes, inspector |
 | `--ink` | `#e8e0d4` | Labels |
-| `--mute` | `#7a7268` | Edges handoff, print fragment |
-| `--warm` | `#e0b87a` | Brand, takeover edges |
-| `--brass` | `#c4a35a` | Kenneth-locked pip / ring |
+| `--mute` | `#7a7268` | Handoff, fragments |
+| `--warm` | `#e0b87a` | Brand, takeover |
+| `--brass` | `#c4a35a` | Kenneth-locked pip |
 | `--iron` | `#2a2622` | Staff-proposed dash |
-| `--rose` | `#c45c5c` | Conflict crossings |
+| `--rose` | `#c45c5c` | Conflict + refuse |
 | `--amber` | `#d4a017` | Hover / selected |
 
-Type: IBM Plex Sans for seat names (14px); IBM Plex Mono for print fragments, edge labels, and tips (10–11px).
+Type: IBM Plex Sans seat names (13–14px); IBM Plex Mono fragments and edge labels (10–11px).
 
-Motion: 0.2s edge glow on hover; node lift 1px; inspector fade. No pulse spam on conflict — rose is enough.
+Motion: 0.2s edge glow; no pulse spam on refuse — rose dash + ╳ is enough.
 
-Head: `THE MACHINE · brain map` + chip `live orders off` (badge only). Thin left rail brand optional.
+Head: `THE MACHINE · brain map` + `live orders off` badge only. Standing shared URL for humans: Tailscale `http://100.90.109.34:8787/brain-map` (never localhost as the standing link).
 
 ---
 
 ## Upgrade (separate)
 
-Quiet band **below** the graph (or mute tab). Never nodes inside the brain. Cards stay `staff_proposed` until Kenneth locks. Title `Upgrade` + one mute help line.
-
-G4–G7 from the Upgrade bundle are **not open process holes** (G4 CLOSE, G5 CLOSE, G6 REJECT, G7 CLOSE). Upgrade band may show the one bundled staff_proposed ask: lock the decision-print shapes + handoff rule for the brain map and Machine log — not reopen G4–G7 as fixes. Do not invent new Upgrade chips beyond the bundle.
+Quiet band below the graph. Empty unless Lock/Master open a new staff_proposed chip. Do not reopen G4–G7. Do not put Lock PASS / Hang / Outcome writeback in Upgrade — they are graph neurons now.
 
 ---
 
 ## Plays branch (optional)
 
-Secondary entry only if Kenneth opens it. Never mixed into the brain graph process seats.
+Secondary only if Kenneth opens it. Never mixed into process neurons.
 
 ---
 
@@ -206,58 +225,59 @@ Secondary entry only if Kenneth opens it. Never mixed into the brain graph proce
 <body class="brain-map">
   <header id="head">…</header>
   <main id="stage">
-    <svg id="brain" viewBox="0 0 1200 720" …>
-      <g id="edges">…path.handoff / .feeds / .takeover / .conflict…</g>
+    <svg id="brain" viewBox="0 0 1320 760" …>
+      <g id="edges">…handoff / feeds / takeover / conflict / refuse…</g>
       <g id="nodes">…g.node[data-seat]…</g>
     </svg>
     <div id="tip" class="hidden">…</div>
     <p id="legend" class="mute">…</p>
   </main>
-  <aside id="sheet" class="hidden">…inspector…</aside>
+  <aside id="sheet" class="hidden">…</aside>
   <section id="upgrade">…</section>
 </body>
 ```
 
-JSON (generator) — pass 2 fields:
+JSON ids (exact — no invent): `lock_pass`, `hang`, `outcome_writeback` plus existing `chart` `path` `size` `fail` `exit` `feed` `machine_log`.
 
 ```
-edges: [{ from, to, kind: handoff|takeover|feeds|conflict, label }]
-  // label = decision-print verb(s), not owns prose
-layers[].when → rename conceptually to print fragment (keep key `when` or add `print` if easier; UI shows print verbs)
-layers[].prints: [{ verb, when, shape, tape?, row? }]  // from Lock shapes; tip + inspector lead
+edges[].kind: handoff | takeover | feeds | conflict | refuse
+layers[].when: mute fragment
+layers[].prints: [{ verb, when, shape, tape?, row? }]
 ```
 
-Keep existing `layers`, `tag`, `rules`, `modules`, `scenarios`, `upgrades`. `overlaps[]` become **conflict edges** (and optional tip text) — do not rely on a rose text panel as the only signal.
+Lock freeze tags: add the three new seats when Lock files them. Until freeze lands, paint pip as Kenneth-locked for the implement Kenneth already yes’d, or follow Lock freeze the hour it updates — do not invent a third tag.
 
 **Do not:**
 
-- Restore the seven flat brass cards as the primary view.
-- Copy `/machine` ranked/slot chrome onto this page.
-- Put process-book essays or owns-text on the canvas or as edge labels.
-- Hide conflicts only in a text list.
-- Invent edges or print verbs not backed by Lock decision-print shapes / owners freeze.
-- Mix plays into the brain.
-- Place-order or hang controls.
-- Reopen G4–G7 as open Upgrade holes (CLOSE / REJECT already scored).
+- Add a second Brain page or DecisionLoop redraw.
+- Split Fail this week.
+- Add Reed or Gauge as neurons this week.
+- Hide wrong-gate skips (must draw `refuse` edges R1–R3).
+- Restore card stack; copy `/machine` chrome; owns-text on canvas.
+- Invent product names or seat nicknames.
+- Place-order controls; live orders.
+- Droplet work from this design seat (Grok Build ports after Pike + Master).
 
 ---
 
-## Prove bar (Slate score after pass-2 regen)
+## Prove bar (Slate score after pass-3 regen)
 
 PASS when:
 
-1. First view is a connected diagram (nodes + edges), not a card stack.
-2. All seven seats visible and linked; Feed / Chart / Path / Size / Fail / Exit / Machine log present.
-3. At least Path↔Fail conflict drawn as rose ╳ with print label `sit-out vs add-panic` (or Lock-equivalent).
-4. Edge labels and node mute lines are **decision-print verbs** (met / paper-buy / sit-out / wait / add-panic / paper-sell / exit-live / kill / prints), not owns-text.
-5. Hover tip and inspector lead with print shapes + why; owns prose is secondary or absent on canvas.
-6. Tags follow Lock freeze chips; Upgrade separate; live orders off chip only.
-7. No ticker / hang / orders.
+1. First view is one connected diagram on the same Brain site — not a card stack, not a second Brain.
+2. All **ten** neurons present: KEEP seven + Lock PASS + Hang + Outcome writeback. Fail is still one node.
+3. Path↔Fail rose ╳ `sit-out vs add-panic` still drawn.
+4. Gate rail edges 13–18 present with print/gate labels (not owns-text).
+5. Wrong gates R1–R3 drawn as rose dashed `refuse` with ╳ (skip Lock / skip Hang / skip writeback); refuse paths on right rail x≥1220 or elbows clearing gate-rail nodes by ≥28px — R2 must not draw through Hang.
+6. KEEP decision-print edge labels held (including Exit→Machine log = `paper-sell · exit-live`).
+7. Tip/inspector lead with prints/gates; live orders off badge only; no ticker / hang console / order controls.
 
 ---
 
 ## Changelog
 
 - 2026-09-08 — First design: seven-card stack (Kenneth FAIL: not a brain).
-- 2026-09-08 — Recut: connected brain graph; edges; visible conflict crossings; inspector for depth. Flat cards demoted — not primary.
-- 2026-09-08 — Design pass 2: handoffs/conflicts as Machine decision prints per `MACHINE_UPGRADE_BUNDLE.md` + Lock decision-print shapes; owns-text off canvas and edge labels; prove bar updated. Grok Build applies after Slate lands this file.
+- 2026-09-08 — Recut: connected brain graph; edges; visible conflict crossings; inspector for depth.
+- 2026-09-08 — Design pass 2: decision-print edge/node labels; Exit→log = `paper-sell · exit-live`.
+- 2026-09-09 — Design pass 3: three neurons Lock PASS · Hang · Outcome writeback on same Tailscale Brain; KEEP seven + Fail one + rose ╳ held; wrong-gate refuse edges; ready for Pike.
+- 2026-09-09 — Pike FAIL fix: refuse R1–R3 offset to right refuse rail (x≥1220) / elbows; R2 bypasses Hang; legal handoffs 13–18 and KEEP rose ╳ unchanged.

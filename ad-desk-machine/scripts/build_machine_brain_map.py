@@ -16,7 +16,19 @@ EXIT_BOOK = Path("/home/box/agent-data/workflows/ad-exit-strategy/SKILL.md")
 LOCK_TAGS = ROOT / "data" / ".grokbot" / "lock_brain_map_tags.json"
 LOCK_TAGS_DOCS = DOCS / "LOCK_BRAIN_MAP_TAGS.json"
 
-LAYER_ORDER = ["Chart", "Path", "Size", "Fail", "Exit", "Feed", "Machine log"]
+# KEEP seven + gate rail three (design pass 3). Fail stays one neuron.
+LAYER_ORDER = [
+    "Chart",
+    "Path",
+    "Size",
+    "Fail",
+    "Exit",
+    "Feed",
+    "Machine log",
+    "Lock PASS",
+    "Hang",
+    "Outcome writeback",
+]
 
 NODE_POS = {
     "Feed": (600, 80),
@@ -25,7 +37,10 @@ NODE_POS = {
     "Size": (860, 280),
     "Fail": (520, 480),
     "Exit": (860, 520),
-    "Machine log": (600, 660),
+    "Lock PASS": (1120, 240),
+    "Hang": (1120, 400),
+    "Outcome writeback": (1120, 560),
+    "Machine log": (700, 700),
 }
 
 WHEN = {
@@ -36,9 +51,12 @@ WHEN = {
     "Fail": "add-panic + why",
     "Exit": "paper-sell · exit-live",
     "Machine log": "decision + why",
+    "Lock PASS": "PASS · FAIL",
+    "Hang": "hung · watch-only",
+    "Outcome writeback": "outcome on record",
 }
 
-# Decision-print shapes — Kenneth 2026-09-08 locked (process book Machine decision prints)
+# Decision-print / gate shapes — KEEP Kenneth-locked; gate rail Kenneth yes 2026-09-09
 PRINTS = {
     "Chart": [
         {"verb": "met", "when": "First met-band entry", "shape": "met + why (low entered band). No buy / sit / size / exit.", "tape": True, "row": True},
@@ -66,6 +84,17 @@ PRINTS = {
         {"verb": "decision", "when": "Decision change", "shape": "one line per change: {action, name, price, size_pct?, why}; no wait spam.", "tape": True, "row": True},
         {"verb": "kill", "when": "Intentional out", "shape": "kill + why intentional out.", "tape": True, "row": True},
     ],
+    "Lock PASS": [
+        {"verb": "PASS", "when": "Layers + facts hang-ready", "shape": "PASS + Lock why. No invent prices.", "tape": True, "row": True},
+        {"verb": "FAIL", "when": "Broken lock named", "shape": "FAIL + Lock why (hang not ready).", "tape": True, "row": True},
+    ],
+    "Hang": [
+        {"verb": "hung", "when": "After Lock PASS only", "shape": "hung (watch-only until Kenneth unlocks live).", "tape": True, "row": True},
+        {"verb": "watch-only", "when": "Hung plan watch", "shape": "watch-only on hung record until live unlock.", "tape": False, "row": True},
+    ],
+    "Outcome writeback": [
+        {"verb": "outcome", "when": "Close / kill on same hung record", "shape": "Write outcome on the same hung record; then Machine log may print the change.", "tape": True, "row": True},
+    ],
 }
 
 MODULE_MAP = {
@@ -82,8 +111,12 @@ MODULE_MAP = {
         {"path": "machine/log.py", "symbols": "MachineLog"},
         {"path": "machine/api.py", "symbols": "POST /api/machine/kill"},
     ],
+    "Lock PASS": [{"path": "process book / Lock seat", "symbols": "Lock PASS|FAIL before hang"}],
+    "Hang": [{"path": "machine/api.py", "symbols": "POST /api/machine/hang"}],
+    "Outcome writeback": [{"path": "machine/engine.py", "symbols": "_write_outcome, _persist_play"}],
 }
 
+# KEEP 1–12 + gate rail 13–18 + refuse R1–R3 (waypoints on refuse rail x=1220)
 MIN_EDGES = [
     {"from": "feed", "to": "path", "kind": "feeds", "label": "prints"},
     {"from": "feed", "to": "size", "kind": "feeds", "label": "prints"},
@@ -99,8 +132,19 @@ MIN_EDGES = [
     {"from": "size", "to": "machine_log", "kind": "handoff", "label": "why"},
     {"from": "fail", "to": "machine_log", "kind": "handoff", "label": "why"},
     {"from": "exit", "to": "machine_log", "kind": "handoff", "label": "paper-sell · exit-live"},
+    {"from": "size", "to": "lock_pass", "kind": "handoff", "label": "layers ready"},
+    {"from": "exit", "to": "lock_pass", "kind": "handoff", "label": "sell layers"},
+    {"from": "chart", "to": "lock_pass", "kind": "handoff", "label": "facts"},
+    {"from": "lock_pass", "to": "hang", "kind": "handoff", "label": "PASS"},
+    {"from": "hang", "to": "outcome_writeback", "kind": "handoff", "label": "same record"},
+    {"from": "outcome_writeback", "to": "machine_log", "kind": "handoff", "label": "outcome"},
+    # Wrong gates — refuse rail x≥1220; never through gate-rail bodies
+    {"from": "size", "to": "hang", "kind": "refuse", "label": "skip Lock", "waypoints": [[1220, 280], [1220, 400]]},
+    {"from": "lock_pass", "to": "outcome_writeback", "kind": "refuse", "label": "skip Hang", "waypoints": [[1220, 240], [1220, 560]]},
+    {"from": "hang", "to": "machine_log", "kind": "refuse", "label": "skip writeback", "waypoints": [[1220, 400], [1220, 700]]},
 ]
 
+GATE_SEATS = {"Lock PASS", "Hang", "Outcome writeback"}
 
 def _read(p: Path) -> str:
     return p.read_text(encoding="utf-8") if p.is_file() else ""
@@ -281,7 +325,13 @@ def build_payload() -> dict:
         x, y = NODE_POS[name]
         od = owners.get(name, {"owns": "", "does_not_own": ""})
         freeze = seat_tags.get(lid)
-        tag = freeze if freeze in ("kenneth_locked", "staff_proposed") else "staff_proposed"
+        if freeze in ("kenneth_locked", "staff_proposed"):
+            tag = freeze
+        elif name in GATE_SEATS:
+            # Kenneth yes on implement 2026-09-09 — until Lock freeze files these seats
+            tag = "kenneth_locked"
+        else:
+            tag = "staff_proposed"
         layers.append(
             {
                 "id": lid,
@@ -310,7 +360,7 @@ def build_payload() -> dict:
         "overlaps": [],
         "upgrades": upgrades,
         "upgrade_help": "suggestions stay staff-proposed until Kenneth locks",
-        "legend": "solid = handoff · warm = takeover · dotted = feeds · rose ╳ = conflict · labels = decision prints",
+        "legend": "solid = handoff · warm = takeover · dotted = feeds · rose ╳ = conflict · rose dash = wrong gate · labels = prints / gates",
     }
 
 
@@ -331,7 +381,7 @@ body.brain-map { padding: 0 24px 48px 24px; }
 #head .live-off { margin-left: auto; letter-spacing: 0.08em; font-size: 11px; font-weight: 400;
   color: var(--mute); border: 1px solid var(--iron); padding: 4px 8px; border-radius: 3px;
   font-family: var(--mono); }
-#stage { position: relative; max-width: 1200px; margin: 0 auto; }
+#stage { position: relative; max-width: 1320px; margin: 0 auto; }
 #brain { width: 100%; height: auto; display: block; background: radial-gradient(ellipse at 50% 40%, #161310 0%, var(--bg) 70%);
   border: 1px solid var(--iron); border-radius: 6px; }
 #legend { color: var(--mute); font-size: 11px; letter-spacing: 0.06em; margin: 10px 0 0; font-family: var(--mono); }
@@ -358,14 +408,17 @@ body.brain-map { padding: 0 24px 48px 24px; }
 .edge.takeover { stroke: var(--warm); stroke-width: 1.5; }
 .edge.feeds { stroke: var(--mute); stroke-width: 1; stroke-dasharray: 3 4; }
 .edge.conflict { stroke: var(--rose); stroke-width: 2; }
+.edge.refuse { stroke: var(--rose); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .edge.hot { filter: drop-shadow(0 0 3px var(--amber)); opacity: 1; }
 .edge-label { fill: var(--mute); font-family: var(--mono); font-size: 10px; text-anchor: middle; }
-.edge-label.conflict { fill: var(--rose); }
-.conflict-x { fill: var(--rose); font-family: var(--mono); font-size: 14px; text-anchor: middle; font-weight: 600; }
+.edge-label.conflict, .edge-label.refuse { fill: var(--rose); }
+.conflict-x, .refuse-x { fill: var(--rose); font-family: var(--mono); font-size: 14px; text-anchor: middle; font-weight: 600; }
+.refuse-x { font-size: 11px; }
 .marker path { fill: var(--mute); }
 .marker.takeover path { fill: var(--warm); }
 .marker.feeds path { fill: var(--mute); }
 .marker.conflict path { fill: var(--rose); }
+.marker.refuse path { fill: var(--rose); }
 
 #sheet { position: fixed; top: 0; right: 0; width: 380px; height: 100vh; background: #12100e;
   border-left: 1px solid var(--iron); padding: 20px 18px; overflow-y: auto; z-index: 20;
@@ -391,7 +444,7 @@ body.brain-map { padding: 0 24px 48px 24px; }
 #sheet-foot { margin-top: 24px; border-top: 1px solid var(--iron); padding-top: 14px;
   color: var(--mute); font-size: 11px; letter-spacing: .1em; cursor: pointer; }
 
-#upgrade { max-width: 1200px; margin: 28px auto 0; background: var(--panel); border: 1px solid var(--iron);
+#upgrade { max-width: 1320px; margin: 28px auto 0; background: var(--panel); border: 1px solid var(--iron);
   border-radius: 4px; padding: 14px 16px; opacity: .88; }
 #upgrade .kicker { color: var(--mute); font-size: 11px; letter-spacing: .14em; margin-bottom: 6px; }
 #upgrade .help { color: var(--mute); font-size: 12px; margin-bottom: 12px; }
@@ -426,7 +479,13 @@ APP_JS = r"""
       : '<span class="tag tag-proposed">Staff-proposed</span>';
   }
   function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
-  function edgePath(a, b, kind) {
+  function edgePath(a, b, kind, waypoints) {
+    if (waypoints && waypoints.length) {
+      var d = "M " + a.x + " " + a.y;
+      waypoints.forEach(function (p) { d += " L " + p[0] + " " + p[1]; });
+      d += " L " + b.x + " " + b.y;
+      return d;
+    }
     const dx = b.x - a.x, dy = b.y - a.y;
     if (kind === "conflict") {
       const mx = (a.x + b.x) / 2 + 36, my = (a.y + b.y) / 2;
@@ -442,11 +501,20 @@ APP_JS = r"""
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
     return "M " + a.x + " " + a.y + " Q " + mx + " " + (my + (dy > 0 ? 10 : -10)) + " " + b.x + " " + b.y;
   }
+  function labelPoint(a, b, kind, waypoints) {
+    if (waypoints && waypoints.length) {
+      var midWp = waypoints[Math.floor((waypoints.length - 1) / 2)];
+      return { x: midWp[0] + (kind === "refuse" ? 14 : 0), y: midWp[1] - 8 };
+    }
+    var m = mid(a, b);
+    if (kind === "conflict") return { x: m.x + 18, y: m.y - 6 };
+    return { x: m.x, y: m.y - 8 };
+  }
 
   function draw() {
     const defs =
       '<defs>' +
-      ['handoff','takeover','feeds','conflict'].map(function (k) {
+      ['handoff','takeover','feeds','conflict','refuse'].map(function (k) {
         return '<marker id="arrow-' + k + '" class="marker ' + k + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker>';
       }).join("") +
       "</defs>";
@@ -454,15 +522,19 @@ APP_JS = r"""
     (data.edges || []).forEach(function (e, i) {
       const a = byId[e.from], b = byId[e.to];
       if (!a || !b) return;
-      const d = edgePath(a, b, e.kind);
+      const d = edgePath(a, b, e.kind, e.waypoints);
       const m = mid(a, b);
+      const lp = labelPoint(a, b, e.kind, e.waypoints);
       const marker = e.kind === "conflict" ? "" : ' marker-end="url(#arrow-' + e.kind + ')"';
       edges += '<path class="edge ' + e.kind + '" data-i="' + i + '" data-from="' + e.from + '" data-to="' + e.to + '" d="' + d + '"' + marker + "/>";
-      const lx = e.kind === "conflict" ? m.x + 18 : m.x;
-      const ly = e.kind === "conflict" ? m.y - 6 : m.y - 8;
-      edges += '<text class="edge-label ' + (e.kind === "conflict" ? "conflict" : "") + '" x="' + lx + '" y="' + ly + '">' + esc(e.label || "") + "</text>";
+      edges += '<text class="edge-label ' + (e.kind === "conflict" || e.kind === "refuse" ? e.kind : "") + '" x="' + lp.x + '" y="' + lp.y + '">' + esc(e.label || "") + "</text>";
       if (e.kind === "conflict") {
         edges += '<text class="conflict-x" x="' + m.x + '" y="' + (m.y + 5) + '">╳</text>';
+      }
+      if (e.kind === "refuse" && e.waypoints && e.waypoints.length) {
+        var wx = e.waypoints[Math.floor(e.waypoints.length / 2)][0];
+        var wy = e.waypoints[Math.floor(e.waypoints.length / 2)][1];
+        edges += '<text class="refuse-x" x="' + wx + '" y="' + (wy + 4) + '">╳</text>';
       }
     });
     edges += "</g>";
@@ -472,10 +544,13 @@ APP_JS = r"""
       const locked = l.tag === "kenneth_locked";
       const cls = locked ? "locked" : "proposed";
       const pip = locked ? "locked" : "proposed";
+      const wide = (l.name || "").length > 12;
+      const w = wide ? 150 : 140;
+      const hx = w / 2;
       nodes +=
         '<g class="node-hit" data-seat="' + l.id + '" transform="translate(' + l.x + " " + l.y + ')">' +
-          '<rect class="node-body ' + cls + '" x="-70" y="-28" rx="18" ry="18" width="140" height="56"/>' +
-          '<circle class="pip ' + pip + '" cx="58" cy="-18" r="4"/>' +
+          '<rect class="node-body ' + cls + '" x="' + (-hx) + '" y="-28" rx="18" ry="18" width="' + w + '" height="56"/>' +
+          '<circle class="pip ' + pip + '" cx="' + (hx - 12) + '" cy="-18" r="4"/>' +
           '<text class="node-label" x="0" y="-2">' + esc(l.name) + "</text>" +
           '<text class="node-when" x="0" y="16">' + esc(l.when || "") + "</text>" +
         "</g>";
@@ -568,7 +643,7 @@ APP_JS = r"""
       '<div id="sheet-head"><div class="name">' + esc(layer.name) + " " + tagChip(layer.tag) + '</div>' +
       '<div class="when">' + esc(layer.when || "") + "</div>" +
       ownsMute + "</div>" +
-      '<div class="block"><div class="kicker">Decision prints</div>' + printsBlock(prints) + "</div>" +
+      '<div class="block"><div class="kicker">' + (["lock_pass","hang","outcome_writeback"].indexOf(layer.id) >= 0 ? "Gate" : "Decision prints") + '</div>' + printsBlock(prints) + "</div>" +
       '<div class="block"><div class="kicker">Rules</div>' + rulesBlock(rules) + "</div>" +
       '<div class="block"><div class="kicker">Code modules</div>' + modsBlock(layer.modules) + "</div>" +
       '<div class="block"><div class="kicker">Scenario seats</div>' + scenBlock(layer.scenarios) + "</div>" +
@@ -621,7 +696,7 @@ def render_index(payload: dict) -> str:
     <span class="live-off">live orders off</span>
   </header>
   <main id="stage">
-    <svg id="brain" viewBox="0 0 1200 720" role="img" aria-label="The Machine decision brain graph"></svg>
+    <svg id="brain" viewBox="0 0 1320 760" role="img" aria-label="The Machine decision brain graph"></svg>
     <div id="tip" class="hidden"></div>
     <p id="legend"></p>
   </main>

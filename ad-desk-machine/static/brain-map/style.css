@@ -14,7 +14,7 @@ body.brain-map { padding: 0 24px 48px 24px; }
 #head .live-off { margin-left: auto; letter-spacing: 0.08em; font-size: 11px; font-weight: 400;
   color: var(--mute); border: 1px solid var(--iron); padding: 4px 8px; border-radius: 3px;
   font-family: var(--mono); }
-#stage { position: relative; max-width: 1200px; margin: 0 auto; }
+#stage { position: relative; max-width: 1320px; margin: 0 auto; }
 #brain { width: 100%; height: auto; display: block; background: radial-gradient(ellipse at 50% 40%, #161310 0%, var(--bg) 70%);
   border: 1px solid var(--iron); border-radius: 6px; }
 #legend { color: var(--mute); font-size: 11px; letter-spacing: 0.06em; margin: 10px 0 0; font-family: var(--mono); }
@@ -41,14 +41,17 @@ body.brain-map { padding: 0 24px 48px 24px; }
 .edge.takeover { stroke: var(--warm); stroke-width: 1.5; }
 .edge.feeds { stroke: var(--mute); stroke-width: 1; stroke-dasharray: 3 4; }
 .edge.conflict { stroke: var(--rose); stroke-width: 2; }
+.edge.refuse { stroke: var(--rose); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .edge.hot { filter: drop-shadow(0 0 3px var(--amber)); opacity: 1; }
 .edge-label { fill: var(--mute); font-family: var(--mono); font-size: 10px; text-anchor: middle; }
-.edge-label.conflict { fill: var(--rose); }
-.conflict-x { fill: var(--rose); font-family: var(--mono); font-size: 14px; text-anchor: middle; font-weight: 600; }
+.edge-label.conflict, .edge-label.refuse { fill: var(--rose); }
+.conflict-x, .refuse-x { fill: var(--rose); font-family: var(--mono); font-size: 14px; text-anchor: middle; font-weight: 600; }
+.refuse-x { font-size: 11px; }
 .marker path { fill: var(--mute); }
 .marker.takeover path { fill: var(--warm); }
 .marker.feeds path { fill: var(--mute); }
 .marker.conflict path { fill: var(--rose); }
+.marker.refuse path { fill: var(--rose); }
 
 #sheet { position: fixed; top: 0; right: 0; width: 380px; height: 100vh; background: #12100e;
   border-left: 1px solid var(--iron); padding: 20px 18px; overflow-y: auto; z-index: 20;
@@ -74,7 +77,7 @@ body.brain-map { padding: 0 24px 48px 24px; }
 #sheet-foot { margin-top: 24px; border-top: 1px solid var(--iron); padding-top: 14px;
   color: var(--mute); font-size: 11px; letter-spacing: .1em; cursor: pointer; }
 
-#upgrade { max-width: 1200px; margin: 28px auto 0; background: var(--panel); border: 1px solid var(--iron);
+#upgrade { max-width: 1320px; margin: 28px auto 0; background: var(--panel); border: 1px solid var(--iron);
   border-radius: 4px; padding: 14px 16px; opacity: .88; }
 #upgrade .kicker { color: var(--mute); font-size: 11px; letter-spacing: .14em; margin-bottom: 6px; }
 #upgrade .help { color: var(--mute); font-size: 12px; margin-bottom: 12px; }
