@@ -15,9 +15,9 @@
   "seat_notes": {
     "chart": "ad-desk-rules Chart + full-history-first + discovery-first + HISTORY_TRUNCATED + Measure AD on MEXC + base_land_warn",
     "path": "ad-desk-rules Path RECUT 2026-09-07 (tag hung AD buy layer; Size owns volume/grind; habit gates deleted)",
-    "size": "ad-desk-rules Size incl. dump-depth, panic Qi, 50/50, volume/grind",
-    "fail": "ad-desk-rules Fail (break \u2192 add panic half; grind/short-copy)",
-    "exit": "ad-desk-rules Exit + ad-exit-strategy Exit gate (unmet_bases_above_B; clip to nearest unmet big base)",
+    "size": "Kenneth 2026-09-10 met-band equal 20% buys; dump-depth / panic / grind-wait not standing",
+    "fail": "Kenneth 2026-09-10 Fail add-panic not standing",
+    "exit": "Kenneth 2026-09-10 percentile bounce_frac sells equal 20%; bounce-floor / fat 3rd-4th not standing",
     "feed": "no trade rule book \u2014 staff_proposed (Lock recut 2026-09-08)",
     "machine_log": "Staff/Master handoff Kenneth 2026-09-07 \u2014 kenneth_locked",
     "lock_pass": "ad-desk-rules Lock hang checks \u2014 Kenneth 2026-09-10 H1 hang gate (not Size)"

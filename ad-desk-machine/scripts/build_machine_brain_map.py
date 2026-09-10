@@ -100,9 +100,9 @@ PRINTS = {
 MODULE_MAP = {
     "Chart": [{"path": "machine/chart.py", "symbols": "is_in_met_band, update_met, at_ad"}],
     "Path": [{"path": "machine/path.py", "symbols": "evaluate_path"}],
-    "Size": [{"path": "machine/size.py", "symbols": "build_buy_layers, gate_buy_layers, is_real_volume"}],
-    "Fail": [{"path": "machine/engine.py", "symbols": "fail_add_panic"}],
-    "Exit": [{"path": "machine/exit.py", "symbols": "live_read_exit, load_exit_facts"}],
+    "Size": [{"path": "machine/size.py", "symbols": "met_band_buy_prices, build_buy_layers, gate_buy_layers"}],
+    "Fail": [{"path": "machine/engine.py", "symbols": "Fail add-panic not standing (2026-09-10)"}],
+    "Exit": [{"path": "machine/research_tape.py", "symbols": "load_research_tape_layers (percentile sells)"}],
     "Feed": [
         {"path": "machine/feeds.py", "symbols": "print_from_klines, fetch_mexc_klines"},
         {"path": "machine/loop.py", "symbols": "DecisionLoop, build_default_loop"},
@@ -111,9 +111,72 @@ MODULE_MAP = {
         {"path": "machine/log.py", "symbols": "MachineLog"},
         {"path": "machine/api.py", "symbols": "POST /api/machine/kill"},
     ],
-    "Lock PASS": [{"path": "process book / Lock seat", "symbols": "Lock PASS|FAIL before hang"}],
-    "Hang": [{"path": "machine/api.py", "symbols": "POST /api/machine/hang"}],
+    "Lock PASS": [{"path": "process book / Lock seat", "symbols": "Kenneth 2026-09-10 clean preferred three"}],
+    "Hang": [
+        {"path": "machine/api.py", "symbols": "POST /api/machine/hang"},
+        {"path": "machine/research_tape.py", "symbols": "load_research_tape_layers"},
+    ],
     "Outcome writeback": [{"path": "machine/engine.py", "symbols": "_write_outcome, _persist_play"}],
+}
+
+# Kenneth 2026-09-10 — standing Machine process (clean preferred three).
+CLEAN_PROCESS_RULES = {
+    "Chart": [
+        {
+            "text": "Kenneth 2026-09-10: hung charts are ETHUSDT 1h, XPINUSDT 4h, SYNUSDT 1h only. AD T/B/L from Gauge clean pack. Met band = last 5% of L above B through B. Met stays met.",
+            "tag": "kenneth_locked",
+            "kenneth_date": "2026-09-10",
+            "source": "clean preferred-three process",
+        }
+    ],
+    "Path": [
+        {
+            "text": "Kenneth 2026-09-10: Path buys when print tags a hung AD buy layer. Habit_ready / red-count Lock gates are not standing buy gates. Paid filters are tape (ETH/XPIN reds_into_met≥1; SYN dump_speed_vs_mid≥1.0), not Path sit.",
+            "tag": "kenneth_locked",
+            "kenneth_date": "2026-09-10",
+            "source": "clean preferred-three process",
+        }
+    ],
+    "Size": [
+        {
+            "text": "Kenneth 2026-09-10: five equal-spaced buys across the AD met-band (B+0.05×L down to B). Equal 20% of play each. No Size dump-depth. No panic under B. Grind-wait is not a standing entry gate.",
+            "tag": "kenneth_locked",
+            "kenneth_date": "2026-09-10",
+            "source": "clean preferred-three process",
+        }
+    ],
+    "Fail": [
+        {
+            "text": "Kenneth 2026-09-10: Fail add-panic / panic half is not standing on this Machine. No panic layers are hung.",
+            "tag": "kenneth_locked",
+            "kenneth_date": "2026-09-10",
+            "source": "clean preferred-three process",
+        }
+    ],
+    "Exit": [
+        {
+            "text": "Kenneth 2026-09-10: five sells at B + q×L where q is the 20/35/50/65/80th percentile of bounce_frac_of_L on paid mets (tape). Equal 20% each. No Exit bounce-floor. No fat 3rd/4th Exit sizes.",
+            "tag": "kenneth_locked",
+            "kenneth_date": "2026-09-10",
+            "source": "clean preferred-three process",
+        }
+    ],
+    "Hang": [
+        {
+            "text": "Kenneth 2026-09-10: hang loads play-file tape prices for the preferred three. Never call dump-depth or panic generators for those plays. live_orders_allowed stays false.",
+            "tag": "kenneth_locked",
+            "kenneth_date": "2026-09-10",
+            "source": "clean preferred-three process",
+        }
+    ],
+    "Lock PASS": [
+        {
+            "text": "Kenneth 2026-09-10: Gauge clean pack Lock PASS for ETHUSDT 1h / XPINUSDT 4h / SYNUSDT 1h met-band + percentile sells.",
+            "tag": "kenneth_locked",
+            "kenneth_date": "2026-09-10",
+            "source": "clean preferred-three process",
+        }
+    ],
 }
 
 # KEEP 1–12 + gate rail 13–18 + refuse R1–R3 (waypoints on refuse rail x=1220)
@@ -300,9 +363,21 @@ def extract_rules(scenario: str, process: str, exit_book: str) -> dict[str, list
 
 
 def extract_upgrades(scenario: str) -> list[dict]:
-    # G4–G7 CLOSE/REJECT. Decision-print shapes Kenneth-locked 2026-09-08 — no open lock-ask.
     _ = scenario
     return []
+
+
+def load_preferred_three() -> dict:
+    pack = ROOT / "data" / "research" / "preferred_three_2026-09-10.json"
+    if pack.is_file():
+        return json.loads(pack.read_text(encoding="utf-8"))
+    return {
+        "kind": "clean_preferred_three",
+        "kenneth_date": "2026-09-10",
+        "tag": "kenneth_locked",
+        "live_orders_allowed": False,
+        "plays": [],
+    }
 
 
 def load_lock_tags() -> dict:
@@ -319,8 +394,22 @@ def build_payload() -> dict:
     owners = parse_decision_owners(scenario)
     scenarios = parse_scenario_ids(scenario)
     rules = extract_rules(scenario, process, exit_book)
+    # Standing 2026-09-10 process supersedes older dump-depth / panic / bounce-floor sentences.
+    for seat, extra in CLEAN_PROCESS_RULES.items():
+        existing = rules.setdefault(seat, [])
+        kept = [r for r in existing if r.get("tag") != "kenneth_locked" or r.get("kenneth_date") == "2026-09-10"]
+        # Drop archived Size dump-depth / panic / grind and Exit bounce-floor locked lines.
+        dropped_src = []
+        for r in existing:
+            text = (r.get("text") or "").lower()
+            if any(k in text for k in ("dump depth", "dump-depth", "panic prices", "q_i", "grind extra", "bounce-floor", "fat")):
+                dropped_src.append(r)
+                continue
+        kept = [r for r in kept if r not in dropped_src]
+        rules[seat] = list(extra) + [r for r in kept if all(r.get("text") != x.get("text") for x in extra)]
     upgrades = extract_upgrades(scenario)
     seat_tags = (load_lock_tags().get("seat_tags") or {})
+    preferred = load_preferred_three()
 
     layers = []
     for name in LAYER_ORDER:
@@ -362,7 +451,17 @@ def build_payload() -> dict:
         "regenerated_at": __import__("datetime").datetime.now(__import__("datetime").timezone(__import__("datetime").timedelta(hours=8))).strftime("%Y-%m-%d %H:%M PHT"),
         "overlaps": [],
         "upgrades": upgrades,
-        "upgrade_help": "suggestions stay staff-proposed until Kenneth locks",
+        "upgrade_help": "Upgrade empty — clean preferred three is Kenneth-locked 2026-09-10",
+        "research": {
+            "tag": "kenneth_locked",
+            "status": "kenneth_locked",
+            "title": "Clean preferred-three strategy",
+            "live_orders_allowed": False,
+            "kenneth_date": "2026-09-10",
+            "board_pct_on_200": preferred.get("board_pct_on_200"),
+            "layer_method": preferred.get("layer_method"),
+            "plays": preferred.get("plays") or [],
+        },
         "legend": "solid = handoff · warm = takeover · dotted = feeds · rose ╳ = conflict · rose dash = wrong gate · labels = prints / gates",
     }
 
@@ -447,6 +546,14 @@ body.brain-map { padding: 0 24px 48px 24px; }
 #sheet-foot { margin-top: 24px; border-top: 1px solid var(--iron); padding-top: 14px;
   color: var(--mute); font-size: 11px; letter-spacing: .1em; cursor: pointer; }
 
+#research { max-width: 1320px; margin: 28px auto 0; background: var(--panel); border: 1px solid var(--brass);
+  border-radius: 4px; padding: 14px 16px; }
+#research .kicker { color: var(--brass); font-size: 11px; letter-spacing: .14em; margin-bottom: 6px; }
+#research .help { color: var(--mute); font-size: 12px; margin-bottom: 12px; }
+.research-card { border: 1px solid var(--brass); border-radius: 3px; padding: 10px 12px; margin-bottom: 8px; }
+.research-card .title { color: var(--ink); font-family: var(--mono); font-size: 12px; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 10px; }
+.research-card .body { color: var(--mute); font-size: 12px; }
 #upgrade { max-width: 1320px; margin: 28px auto 0; background: var(--panel); border: 1px solid var(--iron);
   border-radius: 4px; padding: 14px 16px; opacity: .88; }
 #upgrade .kicker { color: var(--mute); font-size: 11px; letter-spacing: .14em; margin-bottom: 6px; }
@@ -468,6 +575,7 @@ APP_JS = r"""
   const sheetBody = document.getElementById("sheet-body");
   const sheetClose = document.getElementById("sheet-close");
   const upgrade = document.getElementById("upgrade");
+  const research = document.getElementById("research");
   const legend = document.getElementById("legend");
   const byId = {};
   (data.layers || []).forEach(function (l) { byId[l.id] = l; });
@@ -662,19 +770,41 @@ function closeSheet() {
 
   function renderUpgrade() {
     const items = data.upgrades || [];
-    const help = data.upgrade_help || "suggestions stay staff-proposed until Kenneth locks";
+    const help = data.upgrade_help || "Upgrade empty — clean preferred three is Kenneth-locked 2026-09-10";
     const cards = items.length
       ? items.map(function (u) {
-          return '<div class="upgrade-card"><div class="title">' + esc(u.title) + " " + tagChip("staff_proposed") + '</div><div class="body">' + esc(u.text) + "</div></div>";
+          return '<div class="upgrade-card"><div class="title">' + esc(u.title) + " " + tagChip(u.tag || "staff_proposed") + '</div><div class="body">' + esc(u.text) + "</div></div>";
         }).join("")
       : '<div class="empty">none yet</div>';
     upgrade.innerHTML = '<div class="kicker">Upgrade</div><div class="help">' + esc(help) + "</div>" + cards;
+  }
+
+  function renderResearch() {
+    if (!research) return;
+    const r = data.research || {};
+    const plays = r.plays || [];
+    const method = r.layer_method || {};
+    const cards = plays.map(function (p) {
+      return '<div class="research-card"><div class="title">' + esc(p.id) + " " + tagChip(r.tag || "kenneth_locked") +
+        '</div><div class="body">filter ' + esc(p.filter || "") +
+        (p.pnl_pct_on_200 != null ? " · +" + esc(p.pnl_pct_on_200) + "% on $200" : "") +
+        "</div></div>";
+    }).join("");
+    const body = [
+      r.title || "Clean preferred-three strategy",
+      "live_orders_allowed false",
+      method.buys ? "Buys: " + method.buys : "",
+      method.sells ? "Sells: " + method.sells : "",
+      r.board_pct_on_200 != null ? "Board +" + r.board_pct_on_200 + "% on $200" : "",
+    ].filter(Boolean).join(" · ");
+    research.innerHTML = '<div class="kicker">Preferred three</div><div class="help">' + esc(body) + "</div>" + (cards || '<div class="empty">none</div>');
   }
 
   legend.textContent = data.legend || "";
   sheetClose.addEventListener("click", closeSheet);
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeSheet(); });
   draw();
+  renderResearch();
   renderUpgrade();
 })();
 """
@@ -707,6 +837,7 @@ def render_index(payload: dict) -> str:
     <button type="button" id="sheet-close" aria-label="Close">×</button>
     <div id="sheet-body"></div>
   </aside>
+  <section id="research"></section>
   <section id="upgrade"></section>
   <script>window.BRAIN_MAP = {embedded};</script>
   <script src="app.js"></script>

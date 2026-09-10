@@ -1,0 +1,28 @@
+{
+  "kind": "clean_preferred_three",
+  "kenneth_date": "2026-09-10",
+  "tag": "kenneth_locked",
+  "live_orders_allowed": false,
+  "board_pct_on_200": 245.78,
+  "layer_method": {
+    "buys": "five equal steps across AD met-band = last 5% of L above B; equal 20%; no dump-depth; no panic",
+    "sells": "B + q*L at 20/35/50/65/80 bounce_frac_of_L on paid mets; equal 20%; no Exit bounce-floor; no fat 3rd/4th"
+  },
+  "plays": [
+    {
+      "id": "ETHUSDT_1h",
+      "filter": "reds_into_met>=1",
+      "pnl_pct_on_200": 22.68
+    },
+    {
+      "id": "XPINUSDT_4h",
+      "filter": "reds_into_met>=1",
+      "pnl_pct_on_200": 178.24
+    },
+    {
+      "id": "SYNUSDT_1h",
+      "filter": "dump_speed_vs_mid>=1.0",
+      "pnl_pct_on_200": 44.86
+    }
+  ]
+}

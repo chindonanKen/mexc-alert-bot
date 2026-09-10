@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,12 +13,14 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .engine import PLAYS_DIR as ENGINE_PLAYS_DIR
 from .engine import Engine
-from .loop import DecisionLoop, build_default_loop
+from .loop import DecisionLoop, build_default_loop, feed_names_from_engine
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static" / "machine"
 BRAIN_MAP = ROOT / "static" / "brain-map"
+PLAYS_DIR = ENGINE_PLAYS_DIR
 TOKEN = os.environ.get("MACHINE_TOKEN", "dev-token")
 # Decision loop on by default while uvicorn runs. Tests set MACHINE_LOOP=0.
 LOOP_ENABLED = os.environ.get("MACHINE_LOOP", "1") != "0"
@@ -27,7 +30,7 @@ engine = Engine()
 decision_loop: DecisionLoop | None = None
 _loop_task: asyncio.Task | None = None
 
-# Load all data/plays/*.json at import (SYN/AGI/US hang on boot). Not examples/.
+# Load data/plays/*.json at import (preferred three). Not examples/ or archive/.
 if (ROOT / "data" / "plays").exists():
     engine.load_plays_dir()
 
@@ -171,7 +174,14 @@ def needs_you(_: None = Depends(require_bearer)) -> dict[str, Any]:
 @app.post("/api/machine/hang")
 def hang(body: dict[str, Any], _: None = Depends(require_bearer)) -> dict[str, Any]:
     """Hang a written plan (watch). Never places live orders."""
-    plan = engine.hang_play(body)
+    dest = Path(PLAYS_DIR) / f"{body.get('id') or body.get('name')}.json"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(body, indent=2) + "\n")
+    plan = engine.hang_play(body, play_path=dest)
+    if decision_loop is not None:
+        decision_loop.feed.names = list(feed_names_from_engine(engine))
+        faster = (plan.play.get("faster_tfs") or [decision_loop.feed.faster_tf])[0]
+        decision_loop.feed.name_tfs[plan.name] = (plan.tf, str(faster))
     rows = {p["id"]: p for p in engine.ranked()}
     row = rows.get(plan.id) or {"id": plan.id, "name": plan.name, "state": plan.state}
     row["live_orders_allowed"] = False

@@ -27,6 +27,8 @@ def test_print_from_klines_high_is_1m_index_2():
 def test_bar_high_wick_fills_sell_when_close_is_below(engine, habit_play):
     """Close below hung sell; 1m high through the sell → paper-sell. Not invent ticks."""
     play = dict(habit_play)
+    play["play_usd"] = 100
+    play["layers"] = [{"idx": 1, "price": 0.86, "usd": 5, "share_pct": 5, "role": "AD"}]
     play["sell_layers"] = [
         {"idx": 1, "price": 0.90, "usd": 20, "why": "usual_bounce"},
         {"idx": 2, "price": 0.95, "usd": 35, "why": "usual_bounce"},
@@ -54,6 +56,8 @@ def test_bar_high_wick_fills_sell_when_close_is_below(engine, habit_play):
 
 def test_close_below_sell_without_high_does_not_fill(engine, habit_play):
     play = dict(habit_play)
+    play["play_usd"] = 100
+    play["layers"] = [{"idx": 1, "price": 0.86, "usd": 5, "share_pct": 5, "role": "AD"}]
     play["sell_layers"] = [
         {"idx": 1, "price": 0.90, "usd": 20, "why": "usual_bounce"},
         {"idx": 2, "price": 0.95, "usd": 35, "why": "usual_bounce"},
@@ -133,6 +137,8 @@ def test_empty_bag_cancels_phantom_hung_usd():
 
 def test_engine_buy_five_live_sell_slices_not_hung_usd(engine, habit_play):
     play = dict(habit_play)
+    play["play_usd"] = 100
+    play["layers"] = [{"idx": 1, "price": 0.86, "usd": 5, "share_pct": 5, "role": "AD"}]
     play["sell_layers"] = [
         {"idx": 1, "price": 0.90, "usd": 20, "why": "usual_bounce"},
         {"idx": 2, "price": 0.95, "usd": 35, "why": "usual_bounce"},

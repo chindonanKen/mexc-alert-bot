@@ -219,29 +219,29 @@ def test_feed_names_from_hung_plans():
     eng = Engine()
     eng.load_plays_dir(ROOT / "data" / "plays")
     names = feed_names_from_engine(eng)
+    assert "ETHUSDT" in names
+    assert "XPINUSDT" in names
     assert "SYNUSDT" in names
-    assert "AGIUSDT" in names
-    assert "USUSDT" in names
-    # ANSEMUSDT_1h is killed_out on disk — must not be polled
+    assert "AGIUSDT" not in names
+    assert "USUSDT" not in names
     assert "ANSEMUSDT" not in names
 
 
-def test_load_plays_dir_hangs_syn_agi_us_not_only_examples():
+def test_load_plays_dir_hangs_preferred_three_not_examples_or_archive():
     eng = Engine()
     plans = eng.load_plays_dir(ROOT / "data" / "plays")
     ids = {p.id for p in plans}
-    assert "SYNUSDT_4h" in ids
-    assert "AGIUSDT_4h" in ids
-    assert "USUSDT_4h" in ids
-    # examples/ is a subdir — not loaded by *.json glob on plays/
+    assert ids == {"ETHUSDT_1h", "XPINUSDT_4h", "SYNUSDT_1h"}
     assert not any(p.id.startswith("demo_") for p in plans)
+    assert "SYNUSDT_4h" not in ids
+    assert "AGIUSDT_4h" not in ids
 
 
 def test_money_sample_m2_closed_has_sells_and_stats():
     from scripts import money_sample_m2_closed as ms
 
     # Allow importing scripts/
-    payload = ms.run(ROOT / "data" / "plays" / "SYNUSDT_4h.json")
+    payload = ms.run(ROOT / "data" / "plays" / "archive" / "SYNUSDT_4h.json")
     assert payload["live_orders_allowed"] is False
     sells = [t for t in payload["trades"] if t["side"] == "sell"]
     buys = [t for t in payload["trades"] if t["side"] == "buy"]

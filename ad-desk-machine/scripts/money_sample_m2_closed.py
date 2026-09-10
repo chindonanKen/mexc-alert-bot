@@ -22,7 +22,7 @@ from machine.feeds import Print, ascending_bounce, descending_dump
 
 MANILA = timezone(timedelta(hours=8))
 OUT = ROOT / "data" / "money_sample_m2_closed.json"
-PLAY = ROOT / "data" / "plays" / "SYNUSDT_4h.json"
+PLAY = ROOT / "data" / "plays" / "archive" / "SYNUSDT_4h.json"
 
 
 def _pnl_for_name(trades: list[dict], name: str) -> float | None:

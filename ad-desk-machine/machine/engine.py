@@ -16,11 +16,13 @@ from .feeds import Print
 from .fills import FillState, remaining_cost_from_state, try_fill_buys, try_fill_sells
 from .log import MachineLog
 from .path import PathHabit, PathSnapshot, evaluate_path
+from .research_tape import is_research_tape_play, load_research_tape_layers
 from .size import BuyLayer, build_buy_layers, gate_buy_layers, load_sell_layers
 
 
 ROOT = Path(__file__).resolve().parent.parent
 PLAYS_DIR = ROOT / "data" / "plays"
+PREFERRED_PLAY_IDS = frozenset({"ETHUSDT_1h", "XPINUSDT_4h", "SYNUSDT_1h"})
 
 
 @dataclass
@@ -47,6 +49,7 @@ class PlanState:
     watch_only: bool = False
     out_draft_pinged: bool = False
     play_path: Path | None = None
+    layer_source: str = "size_met_band"  # research_tape | play_file | size_met_band
 
     @property
     def id(self) -> str:
@@ -92,6 +95,8 @@ class Engine:
         if not d.exists():
             return out
         for f in sorted(d.glob("*.json")):
+            if d.resolve() == PLAYS_DIR.resolve() and f.stem not in PREFERRED_PLAY_IDS:
+                continue
             out.append(self.load_play_file(f))
         return out
 
@@ -101,10 +106,12 @@ class Engine:
         play_usd = float(play.get("play_usd") or self.book_usd * 0.5)
         ad = AD(top=top, bottom=bottom)
         habit = PathHabit.from_play(play)
-        # Kenneth 2026-09-07 Path RECUT: habit_ready / red fields are not hang Lock gates.
-        # Prefer explicit layers if written; else build Size set once
-        if play.get("layers"):
-            buys: list[BuyLayer] = []
+        # Kenneth 2026-09-10: tape met-band + percentile sells. Never dump-depth / panic.
+        if is_research_tape_play(play):
+            buys, sells = load_research_tape_layers(play, play_usd)
+            layer_source = "research_tape"
+        elif play.get("layers"):
+            buys = []
             for row in play["layers"]:
                 buys.append(
                     BuyLayer(
@@ -119,18 +126,15 @@ class Engine:
             from .size import _refresh_next
 
             _refresh_next(buys)
+            sells = load_sell_layers(play.get("sell_layers"))
+            layer_source = "play_file"
         else:
-            buys = build_buy_layers(
-                top,
-                bottom,
-                play_usd,
-                high_magnet=bool(play.get("high_magnet", False)),
-                copy_count=int(play.get("copy_count") or 0),
-            )
-        sells = load_sell_layers(play.get("sell_layers"))
+            buys = build_buy_layers(top, bottom, play_usd)
+            sells = load_sell_layers(play.get("sell_layers"))
+            layer_source = "size_met_band"
         fills = FillState(buy_layers=buys, sell_layers=sells, buy_set_id="1")
         # Reed exit facts (bounce / base / volume). Missing → blank; do not invent.
-        facts_src = play.get("exit_facts") or play.get("exit_facts_path")
+        facts_src = play.get("exit_facts") or play.get("exit_facts_path") or play.get("reed_exit_facts")
         exit_facts = load_exit_facts(facts_src, play_path=play_path)
         exit_live = ExitLiveState(original_sells=snapshot_sells(sells) if sells else [])
         plan = PlanState(
@@ -144,6 +148,7 @@ class Engine:
             exit_live=exit_live,
             watch_only=bool(play.get("watch_only", False)),
             play_path=play_path,
+            layer_source=layer_source,
         )
         # Persist-kill / outcome writeback: load closed or killed as non-reacting.
         outcome = play.get("outcome") if isinstance(play.get("outcome"), dict) else {}
@@ -268,21 +273,7 @@ class Engine:
         )
         path_dec = evaluate_path(plan.habit, snap)
 
-        # Fail: break of AD = add panic half (not flatten). Owns under-B after already-met
-        # even when Path would also buy on tagged AD layers. Require was_met: first touch
-        # under B that first-enters the met band is Chart met, not Fail-add.
-        fail_add_panic = False
-        if (
-            not plan.watch_only
-            and was_met
-            and pr.price < plan.ad.bottom
-        ):
-            fail_add_panic = True
-            path_dec = type(path_dec)(
-                action="buy",
-                why="Fail — current price broke AD; add panic half",
-                habit_match=False,
-            )
+        # Kenneth 2026-09-10: Fail add-panic is not standing. No panic-under-B layers.
 
         result: dict[str, Any] = {
             "name": plan.name,
@@ -388,14 +379,9 @@ class Engine:
                 )
                 return result
 
-            # Size owns volume at fill: grind-wait / skip no-volume / 0.5× late volume.
-            # Optional require_5m_volume_spike: Size weighs 5m dollar volume (not Path sit).
+            # Kenneth 2026-09-10: Size fills reached AD layers. Grind-wait is not standing.
             path_take_at_ad = bool(path_dec.habit_match) and price_at
-            if self.board_panic and price_at:
-                path_take_at_ad = True
             size_vol = float(pr.volume_usd or 0)
-            if plan.habit.require_5m_volume_spike:
-                size_vol = float(getattr(pr, "volume_usd_5m", 0.0) or 0.0)
             gate = gate_buy_layers(
                 plan.fills.buy_layers,
                 print_price=pr.price,
@@ -406,21 +392,7 @@ class Engine:
                 band_high=plan.ad.band_high,
                 board_grind=self.board_grind,
             )
-            # Path-tag buy fills AD only; Fail / board panic may fill panic half.
-            if fail_add_panic and gate.layer_idxs:
-                panic_idxs = {
-                    ly.idx for ly in plan.fills.buy_layers
-                    if ly.role == "panic" and ly.idx in gate.layer_idxs
-                }
-                gate.layer_idxs = panic_idxs
-                if not panic_idxs:
-                    from machine.size import SizeGateResult
-                    gate = SizeGateResult(action="wait", why="Fail add-panic — no panic layer reached", layer_idxs=set())
-            elif (
-                not fail_add_panic
-                and not self.board_panic
-                and gate.layer_idxs
-            ):
+            if gate.layer_idxs:
                 ad_idxs = {
                     ly.idx for ly in plan.fills.buy_layers
                     if ly.role == "AD" and ly.idx in gate.layer_idxs
@@ -698,10 +670,19 @@ class Engine:
         plan.play_path = path
 
     def _find_plan(self, name: str) -> PlanState | None:
-        for p in self.plans.values():
-            if p.name == name or p.id == name:
+        hits = [p for p in self.plans.values() if p.name == name or p.id == name]
+        if not hits:
+            return None
+        if len(hits) == 1:
+            return hits[0]
+        # Prefer exact id, then research tape (preferred-three rebuild), else first.
+        for p in hits:
+            if p.id == name:
                 return p
-        return None
+        for p in hits:
+            if p.layer_source == "research_tape" or is_research_tape_play(p.play):
+                return p
+        return hits[0]
 
     # --- API serializers ---
     def status(self) -> dict[str, Any]:
@@ -742,6 +723,8 @@ class Engine:
             "killed": plan.killed,
             "layers": [b.to_dict() for b in plan.fills.buy_layers],
             "sell_layers": [s.to_dict() for s in sells],
+            "layer_source": plan.layer_source,
+            "research_tape_layers": is_research_tape_play(plan.play),
         }
         # Reds + $vol on ranked and sheet (Kenneth overview). Bounce why stays sheet-only.
         row["chosen_tf_reds"] = plan.live_chosen_tf_reds

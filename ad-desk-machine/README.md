@@ -18,7 +18,7 @@ API calls need header: `Authorization: Bearer $MACHINE_TOKEN` (default `dev-toke
 
 On boot the API:
 
-1. Loads **all** `data/plays/*.json` (SYNUSDT / AGIUSDT / USUSDT hang; `examples/` is not auto-loaded).
+1. Loads **`data/plays/*.json`** — Kenneth 2026-09-10 preferred three only (ETHUSDT 1h, XPINUSDT 4h, SYNUSDT 1h). `examples/` and `archive/` are not auto-loaded.
 2. Starts the **always-on decision loop**: live MEXC print feed → `engine.on_print` → Machine log / fills (page already polls; you do not need POST `/simulate` for the loop to react).
 
 | What | Live vs simulated |
@@ -68,12 +68,13 @@ pip install -r requirements.txt
 
 ## Load a play file
 
-Hung plans in `data/plays/`:
+Hung plans in `data/plays/` (Kenneth 2026-09-10 clean preferred three):
 
-- `SYNUSDT_4h.json` / `AGIUSDT_4h.json` / `USUSDT_4h.json` — live hang-ready (Size buys; SYN has sell layers)
-- `examples/demo_habit.json` — habit_ready true + sell layers
-- `examples/demo_sit.json` — habit_ready false (sit first/second chosen TF red)
-- `examples/demo_empty_out.json` — habit ready, **empty OUT** scaffold only — not live PRL (do not invent sells; official PRL AD is 0.47→0.2008)
+- `ETHUSDT_1h.json` — tape met-band buys + percentile sells; paid filter `reds_into_met>=1`
+- `XPINUSDT_4h.json` — same layer method; paid filter `reds_into_met>=1`
+- `SYNUSDT_1h.json` — same layer method; paid filter `dump_speed_vs_mid>=1.0`
+- `archive/` — old SYN/AGI/US/ANSEM dump-depth hangs (not auto-loaded)
+- `examples/` — demo fixtures (not auto-loaded)
 
 `data/plays/*.json` load when the API starts. Examples stay under `examples/` until you hang them. Staff simulator:
 
@@ -130,8 +131,8 @@ ad-desk-machine/
 
 ## Rules (summary)
 
-- **Path:** `habit_ready` false → sit on first/second red of chosen TF (board-wide panic still buys). When AD met + at AD + habit ready → BUY on chosen-TF habit **or** faster-TF reds+volume — even on first chosen red. No fixed 15m≥3 for every name.
-- **Size / fills:** fill only when print is at or through layer price; filled USD = Size share; unreached stay empty; one buy set per hung plan; empty OUT when no sells written.
+- **Path:** buy when print tags a hung AD buy layer (or board-wide panic). Habit / red Lock gates are not standing.
+- **Size / fills:** standing buys are five equal-spaced met-band prices, equal 20% of play. No dump-depth. No panic under B. Fill when print is at or through layer price. Grind-wait is not a standing entry gate.
 - **Chart:** met when low enters last 5% of AD length above B through B; met stays met.
 - **Exit live-read:** while live with remaining sell layers, re-read play-file bounce/base/volume facts + live tape. Bounce kind is scored GOOD / WEAK / FAIL / TOO_EARLY from the tape + Reed facts (`score_bounce_kind`); `Print.weak_bounce` is an optional test override only. Usual bounce height is a map (fat sells on 3rd/4th toward it), not a freeze. Into a big base → sell the invested bag (do not wait for bounce-length past the base). Panic-like volume on the way up (~3× low-bar from facts) → sell a matching amount without waiting for usual height. WEAK → pull remaining sell layers down. TOO_EARLY → do not sell the first weak tick. FAIL → consider exit when Reed’s `candles_to_bounce` have passed at the AD with no bounce like this chart prints (not a clock). GOOD → usual path; strong first bounce may sell a matching amount; leftover may full-exit above remaining cost. Drop past AD without board-wide panic → defensive lower sell layers vs original, scaled to the new bottom (not parked at the bottom). Board-wide panic → do not sell the first weak bounce; if under/into a big base, still sell up into that base. Leftover remaining-cost: leftover avg = (bought USD − sold USD) / remaining qty; sell above remaining cost → leftover avg goes down (simulated fills only). No repeating bounce / empty sell layers → do not invent sells. Static fill when print ≥ hung sell price still works.
 - **Machine log:** only decision changes (enter/exit/miss/kill/first met/grind/panic/exit-live) — no wait spam.

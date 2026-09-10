@@ -180,3 +180,19 @@ def remaining_cost_from_state(state: FillState):
     from .exit import remaining_cost_from_fill_events
 
     return remaining_cost_from_fill_events(state.fills)
+
+
+def bag_usd(state: FillState) -> float:
+    return float(remaining_cost_from_state(state).remaining_usd)
+
+
+def allocate_sell_usd(state: FillState) -> None:
+    """Split remaining bag across remaining sells. Empty bag cancels phantom OUT."""
+    rc = remaining_cost_from_state(state)
+    if rc.remaining_usd <= 1e-12:
+        for s in state.sell_layers:
+            if s.status == "remaining":
+                s.status = "cancelled"
+                s.usd = 0.0
+        return
+    apply_pro_rata_sell_usd(state)

@@ -16,7 +16,7 @@ from machine.chart import AD
 from machine.feeds import Print
 
 ROOT = Path(__file__).resolve().parent.parent
-ANSEM_PLAY_PATH = ROOT / "data" / "plays" / "ANSEMUSDT_1h.json"
+ANSEM_PLAY_PATH = ROOT / "data" / "plays" / "archive" / "ANSEMUSDT_1h.json"
 
 # ANSEM facts (staff): T=0.29763 B=0.19652 band_high≈0.2015755; P1 buy=0.203598 above band
 ANSEM_T = 0.29763
@@ -63,19 +63,16 @@ def _demo_habit_play() -> dict:
         "habit_ready": True,
         "ad_top": 1.0,
         "ad_bottom": 0.8,
-        "play_usd": 100,
+        "play_usd": 200,
         "layers": [
-            {"idx": 1, "price": 0.86, "usd": 5, "share_pct": 5, "role": "AD"},
-            {"idx": 2, "price": 0.84, "usd": 7.5, "share_pct": 7.5, "role": "AD"},
-            {"idx": 3, "price": 0.82, "usd": 10, "share_pct": 10, "role": "AD"},
-            {"idx": 4, "price": 0.81, "usd": 12.5, "share_pct": 12.5, "role": "AD"},
-            {"idx": 5, "price": 0.80, "usd": 15, "share_pct": 15, "role": "AD"},
-            {"idx": 6, "price": 0.78, "usd": 10, "share_pct": 10, "role": "panic"},
-            {"idx": 7, "price": 0.762, "usd": 15, "share_pct": 15, "role": "panic"},
-            {"idx": 8, "price": 0.744, "usd": 25, "share_pct": 25, "role": "panic"},
+            {"idx": 1, "price": 0.81, "usd": 40, "share_pct": 20, "role": "AD"},
+            {"idx": 2, "price": 0.8075, "usd": 40, "share_pct": 20, "role": "AD"},
+            {"idx": 3, "price": 0.805, "usd": 40, "share_pct": 20, "role": "AD"},
+            {"idx": 4, "price": 0.8025, "usd": 40, "share_pct": 20, "role": "AD"},
+            {"idx": 5, "price": 0.80, "usd": 40, "share_pct": 20, "role": "AD"},
         ],
         "sell_layers": [
-            {"idx": 1, "price": 0.88, "usd": 20, "why": "usual_bounce"},
+            {"idx": 1, "price": 0.88, "usd": 40, "share_pct": 20, "why": "research_tape"},
         ],
     }
 
@@ -431,42 +428,35 @@ def test_S2_quiet_at_ad_path_take_band_only(engine):
     assert all(b.role == "AD" and b.price <= plan.ad.band_high for b in filled)
 
 
-def test_S3_late_volume_near_B_half_scale(engine):
+def test_S3_late_print_near_B_fills_full_equal_share(engine):
+    """Kenneth 2026-09-10: no 0.5× late-volume scale; equal 20% fills."""
     play = _demo_habit_play()
     play["id"] = "S3"
     play["name"] = "S3"
     plan = engine.hang_play(play)
-    engine.set_board_panic(True)
-    # Quiet early — cancel upper AD layers
-    engine.on_print(Print(name="S3", price=0.82, low=0.82, chosen_tf_reds=1, volume_usd=0))
-    cancelled = [b for b in plan.fills.buy_layers if b.status == "cancelled"]
-    assert cancelled, "quiet early should cancel reached AD layers"
-    # Late real volume near B
     engine.on_print(
         Print(name="S3", price=0.80, low=0.80, chosen_tf_reds=1, volume_usd=50_000)
     )
     filled_ad = [b for b in plan.fills.buy_layers if b.status == "filled" and b.role == "AD"]
     assert filled_ad
-    first = min(filled_ad, key=lambda b: b.idx)
-    assert first.idx >= 4
-    orig = next(row for row in play["layers"] if row["idx"] == first.idx)
-    assert first.usd == round(orig["usd"] * 0.5, 4)
+    for b in filled_ad:
+        assert b.usd == 40.0
+        assert b.share_pct == 20.0
 
 
-def test_S4_board_grind_quiet_size_wait_why(engine):
+def test_S4_board_grind_does_not_block_tagged_fill(engine):
+    """Kenneth 2026-09-10: grind-wait is not a standing entry gate."""
     play = _demo_habit_play()
     play["id"] = "S4"
     play["name"] = "S4"
     plan = engine.hang_play(play)
     engine.set_board_grind(True)
-    engine.set_board_panic(True)
     r = engine.on_print(
-        Print(name="S4", price=0.83, low=0.83, chosen_tf_reds=1, volume_usd=0)
+        Print(name="S4", price=0.81, low=0.81, chosen_tf_reds=1, volume_usd=0)
     )
-    assert r["action"] == "wait"
-    assert "Size" in r["why"] and ("grind" in r["why"].lower() or "volume" in r["why"].lower())
-    notes = [e.why for e in engine.log.entries]
-    assert any("grind" in w.lower() or "Size" in w for w in notes)
+    assert r["action"] == "buy"
+    assert any(b.status == "filled" for b in plan.fills.buy_layers)
+    assert engine.live_orders_allowed is False
 
 
 def test_S5_path_buy_no_layer_at_print_size_miss_why(engine):
@@ -496,37 +486,21 @@ def test_S5_path_buy_no_layer_at_print_size_miss_why(engine):
 # --- Fail ---
 
 
-def test_F1_met_under_B_path_would_sit_adds_panic_half(engine):
-    play = {
-        "id": "F1",
-        "name": "F1",
-        "chosen_tf": "15m",
-        "faster_tfs": ["5m"],
-        "habit_ready": False,
-        "watch_only": False,
-        "ad_top": 1.0,
-        "ad_bottom": 0.8,
-        "play_usd": 100,
-        "vol_at_bottom_usd": 10_000,
-        "layers": [
-            {"idx": 1, "price": 0.86, "usd": 5, "share_pct": 5, "role": "AD"},
-            {"idx": 5, "price": 0.80, "usd": 15, "share_pct": 15, "role": "AD"},
-            {"idx": 6, "price": 0.72, "usd": 10, "share_pct": 10, "role": "panic"},
-            {"idx": 7, "price": 0.648, "usd": 15, "share_pct": 15, "role": "panic"},
-            {"idx": 8, "price": 0.576, "usd": 25, "share_pct": 25, "role": "panic"},
-        ],
-        "sell_layers": [],
-    }
+def test_F1_met_under_B_does_not_add_panic(engine):
+    """Kenneth 2026-09-10: Fail add-panic is not standing."""
+    play = _demo_habit_play()
+    play["id"] = "F1"
+    play["name"] = "F1"
+    play["habit_ready"] = False
     plan = engine.hang_play(play)
     engine.on_print(Print(name="F1", price=0.80, low=0.80, chosen_tf_reds=1, volume_usd=50_000))
     assert plan.met is True
     r = engine.on_print(
         Print(name="F1", price=0.70, low=0.70, chosen_tf_reds=3, volume_usd=50_000)
     )
-    assert r["action"] == "buy"
-    assert "Fail" in r["why"]
-    panic_filled = [b for b in plan.fills.buy_layers if b.status == "filled" and b.role == "panic"]
-    assert panic_filled, "Fail under met AD must add panic half"
+    assert "Fail" not in (r.get("why") or "")
+    assert not any(b.role == "panic" for b in plan.fills.buy_layers)
+    assert engine.live_orders_allowed is False
 
 
 def test_F2_under_B_not_met_yet_does_not_fail_add(engine):

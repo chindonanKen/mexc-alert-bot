@@ -8,6 +8,7 @@
   const sheetBody = document.getElementById("sheet-body");
   const sheetClose = document.getElementById("sheet-close");
   const upgrade = document.getElementById("upgrade");
+  const research = document.getElementById("research");
   const legend = document.getElementById("legend");
   const byId = {};
   (data.layers || []).forEach(function (l) { byId[l.id] = l; });
@@ -202,18 +203,40 @@ function closeSheet() {
 
   function renderUpgrade() {
     const items = data.upgrades || [];
-    const help = data.upgrade_help || "suggestions stay staff-proposed until Kenneth locks";
+    const help = data.upgrade_help || "Upgrade empty — clean preferred three is Kenneth-locked 2026-09-10";
     const cards = items.length
       ? items.map(function (u) {
-          return '<div class="upgrade-card"><div class="title">' + esc(u.title) + " " + tagChip("staff_proposed") + '</div><div class="body">' + esc(u.text) + "</div></div>";
+          return '<div class="upgrade-card"><div class="title">' + esc(u.title) + " " + tagChip(u.tag || "staff_proposed") + '</div><div class="body">' + esc(u.text) + "</div></div>";
         }).join("")
       : '<div class="empty">none yet</div>';
     upgrade.innerHTML = '<div class="kicker">Upgrade</div><div class="help">' + esc(help) + "</div>" + cards;
+  }
+
+  function renderResearch() {
+    if (!research) return;
+    const r = data.research || {};
+    const plays = r.plays || [];
+    const method = r.layer_method || {};
+    const cards = plays.map(function (p) {
+      return '<div class="research-card"><div class="title">' + esc(p.id) + " " + tagChip(r.tag || "kenneth_locked") +
+        '</div><div class="body">filter ' + esc(p.filter || "") +
+        (p.pnl_pct_on_200 != null ? " · +" + esc(p.pnl_pct_on_200) + "% on $200" : "") +
+        "</div></div>";
+    }).join("");
+    const body = [
+      r.title || "Clean preferred-three strategy",
+      "live_orders_allowed false",
+      method.buys ? "Buys: " + method.buys : "",
+      method.sells ? "Sells: " + method.sells : "",
+      r.board_pct_on_200 != null ? "Board +" + r.board_pct_on_200 + "% on $200" : "",
+    ].filter(Boolean).join(" · ");
+    research.innerHTML = '<div class="kicker">Preferred three</div><div class="help">' + esc(body) + "</div>" + (cards || '<div class="empty">none</div>');
   }
 
   legend.textContent = data.legend || "";
   sheetClose.addEventListener("click", closeSheet);
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeSheet(); });
   draw();
+  renderResearch();
   renderUpgrade();
 })();

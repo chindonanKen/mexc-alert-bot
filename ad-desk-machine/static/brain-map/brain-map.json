@@ -24,22 +24,10 @@
       "tag": "kenneth_locked",
       "rules": [
         {
-          "text": "The AD is the high-to-low this chart keeps recreating, then bouncing enough to sell. One length, this TF, this price range. Kenneth 2026-09-01 locked this.",
+          "text": "Kenneth 2026-09-10: hung charts are ETHUSDT 1h, XPINUSDT 4h, SYNUSDT 1h only. AD T/B/L from Gauge clean pack. Met band = last 5% of L above B through B. Met stays met.",
           "tag": "kenneth_locked",
-          "kenneth_date": "2026-09-01",
-          "source": "ad-desk-rules process book"
-        },
-        {
-          "text": "Kenneth 2026-09-07 full-history-first (locked): Every Chart walk starts from listing (or the earliest official bars on this venue for that name), then walks forward. Do not open on the current swing area or a mid-range start date. Measure bigger dumps across the whole available history first. Then filter to the length that still meets and bounces in the price area price is swinging in. Current range is the filter …",
-          "tag": "kenneth_locked",
-          "kenneth_date": "2026-09-07",
-          "source": "ad-desk-rules process book"
-        },
-        {
-          "text": "Kenneth 2026-09-07 Chart base-land warning (locked): Every Chart walk names major bases/supports in the window as zones. Omit = FAIL the walk (missing facts), not FAIL the AD. An AD lands on a base when projected B sits in or against that named base zone — general area with wiggle, not a precise tick (same estimate standard as the AD). When that happens, mark base_land_warn on the play. It is a warning weigh, not …",
-          "tag": "kenneth_locked",
-          "kenneth_date": "2026-09-07",
-          "source": "ad-desk-rules process book"
+          "kenneth_date": "2026-09-10",
+          "source": "clean preferred-three process"
         },
         {
           "text": "Owns: AD T/B/L, met band, met stays met, base_land_warn",
@@ -102,16 +90,10 @@
       "tag": "kenneth_locked",
       "rules": [
         {
-          "text": "Path buys when print tags a hung AD buy layer (print ≤ empty/next AD-role layer) or board-wide panic. Size owns live volume and grind wait.",
+          "text": "Kenneth 2026-09-10: Path buys when print tags a hung AD buy layer. Habit_ready / red-count Lock gates are not standing buy gates. Paid filters are tape (ETH/XPIN reds_into_met≥1; SYN dump_speed_vs_mid≥1.0), not Path sit.",
           "tag": "kenneth_locked",
-          "kenneth_date": "2026-09-07",
-          "source": "MACHINE_SCENARIO_PASS_PLAN.md Path RECUT"
-        },
-        {
-          "text": "Kenneth 2026-09-07 Path RECUT (locked). Delete: habit_ready and red-count / faster-TF habit match as buy gates. Delete: habit_ready false sit that blocks buys at the AD.",
-          "tag": "kenneth_locked",
-          "kenneth_date": "2026-09-07",
-          "source": "ad-desk-rules process book"
+          "kenneth_date": "2026-09-10",
+          "source": "clean preferred-three process"
         },
         {
           "text": "Owns: buy when print tags hung AD buy layer, or board panic; wait otherwise",
@@ -175,28 +157,10 @@
       "tag": "kenneth_locked",
       "rules": [
         {
-          "text": "Kenneth 2026-09-07 base_land_warn Size pointer: when Chart marks base_land_warn, stay conservative (smaller size) until the warn lifts or another clean AD is preferred — detail in Chart; not a Fail rewrite.",
+          "text": "Kenneth 2026-09-10: five equal-spaced buys across the AD met-band (B+0.05×L down to B). Equal 20% of play each. No Size dump-depth. No panic under B. Grind-wait is not a standing entry gate.",
           "tag": "kenneth_locked",
-          "kenneth_date": "2026-09-07",
-          "source": "ad-desk-rules process book"
-        },
-        {
-          "text": "AD-side prices use dump depth D = L / T. The standing rule is (Kenneth 2026-09-01, across the board): start_pct = clip(70 + 30×D, 78, 95). end_pct = clip(98 + 5×D, 97.5, 100.8). If D ≥ 0.50, end_pct = max(end_pct, 100.3). If high_magnet (this same AD already has copy_count ≥ 2, or a prior volume tag of this same AD — never by ticker name), start_pct = max(start_pct, 93) and end_pct = max(end_pct, 99.6). Default hi…",
-          "tag": "kenneth_locked",
-          "kenneth_date": "2026-09-01",
-          "source": "ad-desk-rules process book"
-        },
-        {
-          "text": "Board-wide grind extra sentences (Kenneth 2026-09-03): these run only when most watched coins (stocks out) are slow and board-wide panic is not on. How the list is counted lives in the Board-wide grind file, not here. Mixed tape, a sideways board, or too few names: these sentences stay off. One name grinding its last red into its own AD is this chart, not the list. When they are on: react to the live dump plus vol…",
-          "tag": "kenneth_locked",
-          "kenneth_date": "2026-09-03",
-          "source": "ad-desk-rules process book"
-        },
-        {
-          "text": "Panic prices: Q_i = B − B × (0.10 + 0.18 × (i−1)/2) for i = 1, 2, 3 (10 / 19 / 28% of B under B). Kenneth 2026-09-04 recut. Do not use L in panic depth. Old Q_i = B − L × (0.10 + 0.18 × (i−1)/2) is deleted. Do not put Q1 slightly under B. Q1 must sit clearly below P5. Breaking the AD is usually add, not flatten. That half is where this process earns.",
-          "tag": "kenneth_locked",
-          "kenneth_date": "2026-09-04",
-          "source": "ad-desk-rules process book"
+          "kenneth_date": "2026-09-10",
+          "source": "clean preferred-three process"
         },
         {
           "text": "Owns: Which buy layers fill, real-volume gate, grind wait, AD-side scale, panic shares; optional 5m vol weigh",
@@ -216,7 +180,7 @@
       "modules": [
         {
           "path": "machine/size.py",
-          "symbols": "build_buy_layers, gate_buy_layers, is_real_volume"
+          "symbols": "met_band_buy_prices, build_buy_layers, gate_buy_layers"
         }
       ],
       "scenarios": [
@@ -249,6 +213,12 @@
       "tag": "kenneth_locked",
       "rules": [
         {
+          "text": "Kenneth 2026-09-10: Fail add-panic / panic half is not standing on this Machine. No panic layers are hung.",
+          "tag": "kenneth_locked",
+          "kenneth_date": "2026-09-10",
+          "source": "clean preferred-three process"
+        },
+        {
           "text": "Owns: Break of AD → add panic half (not flatten); grind fail / short-copy fail",
           "tag": "staff_proposed",
           "kenneth_date": null,
@@ -266,7 +236,7 @@
       "modules": [
         {
           "path": "machine/engine.py",
-          "symbols": "fail_add_panic"
+          "symbols": "Fail add-panic not standing (2026-09-10)"
         }
       ],
       "scenarios": [
@@ -301,22 +271,10 @@
       "tag": "kenneth_locked",
       "rules": [
         {
-          "text": "Exits are TF dependent. Exit layers sit toward the typical bounce on the chosen TF: how far a finished AD bounce on that TF usually runs, from official bars. If this TF has no repeating bounce, do not invent one. The Machine does not guess a target. Kenneth 2026-09-04 exit hang correction: Master does not wait for Kenneth to name that chart’s sell prices first. Reed writes bounce, base, and candles-to-bounce from …",
+          "text": "Kenneth 2026-09-10: five sells at B + q×L where q is the 20/35/50/65/80th percentile of bounce_frac_of_L on paid mets (tape). Equal 20% each. No Exit bounce-floor. No fat 3rd/4th Exit sizes.",
           "tag": "kenneth_locked",
-          "kenneth_date": "2026-09-04",
-          "source": "ad-desk-rules process book"
-        },
-        {
-          "text": "Kenneth 2026-09-07 Exit gate workflow (locked): Reed exit facts not ready without bounce + unmet bases above B (zones + role) + candles-to-bounce; Gauge clips map high to nearest unmet big base above B inside/below the bounce map before placing layers; Lock FAILs any sell pack that misses bases, puts map high through a named base without a sell into it, wrong TF layer count, or parks at bottom — bounce-legal alone…",
-          "tag": "kenneth_locked",
-          "kenneth_date": "2026-09-07",
-          "source": "ad-desk-rules process book"
-        },
-        {
-          "text": "Sideways too long is not a clock. Reed writes this TF’s bounce habit: how many candles after an AD tag a real bounce usually starts. If current price is at the AD, those candles have passed, and there is no bounce like this chart usually prints, that is sideways too long. Then consider an exit. If this TF has no repeating start time, do not use this line. The Machine does not flatten on it until Kenneth recuts tha…",
-          "tag": "kenneth_locked",
-          "kenneth_date": null,
-          "source": "ad-desk-rules process book"
+          "kenneth_date": "2026-09-10",
+          "source": "clean preferred-three process"
         },
         {
           "text": "Owns: Sell layers adapt, into-base, leftover, sideways-too-long when Reed number exists",
@@ -335,8 +293,8 @@
       ],
       "modules": [
         {
-          "path": "machine/exit.py",
-          "symbols": "live_read_exit, load_exit_facts"
+          "path": "machine/research_tape.py",
+          "symbols": "load_research_tape_layers (percentile sells)"
         }
       ],
       "scenarios": [
@@ -473,16 +431,16 @@
       "tag": "kenneth_locked",
       "rules": [
         {
-          "text": "Kenneth 2026-09-10 H1 hang gate (locked): Met-band = B through B + 0.05×L. Before hang, Lock checks AD-side buy layers vs that band. Lock FAILs a hang if AD-side layers are not acceptably in/near the met-band approach — do not hang a broken set; Gauge fixes first. If only P1 is above the met-band high and P2–P5 are correct, Lock FAIL or warn on P1 and do not hang until P1 is fixed. This is Lock before hang, not Si…",
+          "text": "Kenneth 2026-09-10: Gauge clean pack Lock PASS for ETHUSDT 1h / XPINUSDT 4h / SYNUSDT 1h met-band + percentile sells.",
           "tag": "kenneth_locked",
           "kenneth_date": "2026-09-10",
-          "source": "ad-desk-rules process book"
+          "source": "clean preferred-three process"
         }
       ],
       "modules": [
         {
           "path": "process book / Lock seat",
-          "symbols": "Lock PASS|FAIL before hang"
+          "symbols": "Kenneth 2026-09-10 clean preferred three"
         }
       ],
       "scenarios": []
@@ -512,11 +470,22 @@
       "owns": "",
       "does_not_own": "",
       "tag": "kenneth_locked",
-      "rules": [],
+      "rules": [
+        {
+          "text": "Kenneth 2026-09-10: hang loads play-file tape prices for the preferred three. Never call dump-depth or panic generators for those plays. live_orders_allowed stays false.",
+          "tag": "kenneth_locked",
+          "kenneth_date": "2026-09-10",
+          "source": "clean preferred-three process"
+        }
+      ],
       "modules": [
         {
           "path": "machine/api.py",
           "symbols": "POST /api/machine/hang"
+        },
+        {
+          "path": "machine/research_tape.py",
+          "symbols": "load_research_tape_layers"
         }
       ],
       "scenarios": []
@@ -719,9 +688,38 @@
       ]
     }
   ],
-  "regenerated_at": "2026-09-10 08:59 PHT",
+  "regenerated_at": "2026-09-10 20:53 PHT",
   "overlaps": [],
   "upgrades": [],
-  "upgrade_help": "suggestions stay staff-proposed until Kenneth locks",
+  "upgrade_help": "Upgrade empty — clean preferred three is Kenneth-locked 2026-09-10",
+  "research": {
+    "tag": "kenneth_locked",
+    "status": "kenneth_locked",
+    "title": "Clean preferred-three strategy",
+    "live_orders_allowed": false,
+    "kenneth_date": "2026-09-10",
+    "board_pct_on_200": 245.78,
+    "layer_method": {
+      "buys": "five equal steps across AD met-band = last 5% of L above B; equal 20%; no dump-depth; no panic",
+      "sells": "B + q*L at 20/35/50/65/80 bounce_frac_of_L on paid mets; equal 20%; no Exit bounce-floor; no fat 3rd/4th"
+    },
+    "plays": [
+      {
+        "id": "ETHUSDT_1h",
+        "filter": "reds_into_met>=1",
+        "pnl_pct_on_200": 22.68
+      },
+      {
+        "id": "XPINUSDT_4h",
+        "filter": "reds_into_met>=1",
+        "pnl_pct_on_200": 178.24
+      },
+      {
+        "id": "SYNUSDT_1h",
+        "filter": "dump_speed_vs_mid>=1.0",
+        "pnl_pct_on_200": 44.86
+      }
+    ]
+  },
   "legend": "solid = handoff · warm = takeover · dotted = feeds · rose ╳ = conflict · rose dash = wrong gate · labels = prints / gates"
 }

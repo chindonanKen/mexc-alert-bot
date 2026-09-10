@@ -18,6 +18,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("MACHINE_LOOP", "0")
     # Reload flag used at lifespan — patch module attribute directly
     monkeypatch.setattr(api_mod, "LOOP_ENABLED", False)
+    monkeypatch.setattr(api_mod, "PLAYS_DIR", tmp_path)
     api_mod.engine = Engine()
     api_mod.decision_loop = None
     return TestClient(api_mod.app)

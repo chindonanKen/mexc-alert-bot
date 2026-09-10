@@ -216,3 +216,4 @@ No site ship. Droplet later. Live orders stay off.
 - 2026-09-08 — Grok Build: sync method — `scripts/build_machine_brain_map.py` → `static/brain-map/`; droplet later; no site ship until Kenneth yes.
 - 2026-09-08 — Reed / Gauge: drill-in only notes for exit/entry facts.
 - 2026-09-08 — Kenneth approved screen shape + sync; build seat opened (Slate UI, Upgrade area staff_proposed).
+- 2026-09-10 — Kenneth lock: standing process is clean preferred three (met-band equal-20 buys, percentile equal-20 sells). Dump-depth / panic / grind-wait / Fail add-panic / Exit bounce-floor not standing. live_orders_allowed false.
