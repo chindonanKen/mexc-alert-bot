@@ -108,18 +108,18 @@ def test_engine_habit_false_paper_buy_on_tagged_layer(engine, sit_play):
     assert engine.live_orders_allowed is False
 
 
-def test_engine_quiet_volume_size_wait_not_habit_sit(engine, habit_play):
-    """Tag layer 1 off-band (0.86 > band 0.81): quiet → Size wait, not habit sit."""
+def test_engine_quiet_volume_fills_tagged_layer_not_habit_sit(engine, habit_play):
+    """Kenneth 2026-09-10: grind-wait is not standing — tagged AD layer fills."""
     play = dict(habit_play)
     play["habit_ready"] = False
     plan = engine.hang_play(play)
     r = engine.on_print(
-        Print(name="DEMO", price=0.86, low=0.86, chosen_tf_reds=0, volume_usd=0)
+        Print(name="DEMO", price=0.81, low=0.81, chosen_tf_reds=0, volume_usd=0)
     )
-    assert r["action"] == "wait"
-    assert "Size grind wait" in r["why"]
+    assert r["action"] == "buy"
     assert "habit_ready" not in r["why"]
-    assert not any(b.status == "filled" for b in plan.fills.buy_layers)
+    assert any(b.status == "filled" for b in plan.fills.buy_layers)
+    assert engine.live_orders_allowed is False
 
 
 def test_engine_untagged_price_waits(engine, habit_play):
@@ -131,30 +131,28 @@ def test_engine_untagged_price_waits(engine, habit_play):
     assert "has not tagged" in r["why"]
 
 
-def test_engine_5m_weak_is_size_wait_not_path_sit(engine, habit_play):
+def test_engine_5m_weak_is_not_a_path_or_size_sit(engine, habit_play):
     play = dict(habit_play)
     play["require_5m_volume_spike"] = True
     play["vol_5m_usual_usd"] = 40_000
     plan = engine.hang_play(play)
-    # Tag layer 1 (0.86) off-band so path_take_at_ad does not fill quiet 5m.
     weak = engine.on_print(
         Print(
             name="DEMO",
-            price=0.86,
-            low=0.86,
+            price=0.81,
+            low=0.81,
             chosen_tf_reds=0,
             volume_usd=50_000,
             volume_usd_5m=100,
             reds_5m=1,
         )
     )
-    assert weak["action"] == "wait"
-    assert "Size grind wait" in weak["why"]
+    assert weak["action"] == "buy"
     assert "missing 5m volume spike" not in weak["why"]
-    assert not any(b.status == "filled" for b in plan.fills.buy_layers)
+    assert any(b.status == "filled" for b in plan.fills.buy_layers)
 
 
-def test_engine_5m_spike_paper_buy_off_band(engine, habit_play):
+def test_engine_5m_spike_paper_buy(engine, habit_play):
     play = dict(habit_play)
     play["require_5m_volume_spike"] = True
     play["vol_5m_usual_usd"] = 40_000
@@ -162,8 +160,8 @@ def test_engine_5m_spike_paper_buy_off_band(engine, habit_play):
     r = engine.on_print(
         Print(
             name="DEMO",
-            price=0.86,
-            low=0.86,
+            price=0.81,
+            low=0.81,
             chosen_tf_reds=0,
             volume_usd=50_000,
             volume_usd_5m=50_000,

@@ -12,9 +12,10 @@ from machine.engine import Engine
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(tmp_path, monkeypatch):
     monkeypatch.setenv("MACHINE_LOOP", "0")
     monkeypatch.setattr(api_mod, "LOOP_ENABLED", False)
+    monkeypatch.setattr(api_mod, "PLAYS_DIR", tmp_path)
     api_mod.engine = Engine()
     api_mod.decision_loop = None
     return TestClient(api_mod.app)

@@ -30,7 +30,7 @@ def test_unreached_stay_empty():
 def test_one_buy_set_per_hung_plan(engine, habit_play):
     plan = engine.hang_play(habit_play)
     assert plan.fills.buy_set_id == "1"
-    assert len(plan.fills.buy_layers) == 8  # one set only
+    assert len(plan.fills.buy_layers) == 5  # standing met-band set; no panic
     engine.on_print(
         Print(
             name="DEMO",
@@ -41,7 +41,8 @@ def test_one_buy_set_per_hung_plan(engine, habit_play):
         )
     )
     assert plan.fills.buy_set_id == "1"
-    assert len(plan.fills.buy_layers) == 8
+    assert len(plan.fills.buy_layers) == 5
+    assert all(b.role == "AD" for b in plan.fills.buy_layers)
 
 
 def test_empty_out_when_no_sells(engine, sit_play):
@@ -80,14 +81,21 @@ def test_filled_usd_equals_layer_share(engine, habit_play):
     # Spot-check first AD layer share from fixture
     by_idx = {b.idx: b for b in filled}
     if 1 in by_idx:
-        assert by_idx[1].usd == 5.0
+        assert by_idx[1].usd == 40.0
 
 
-def test_panic_prices_use_percent_of_B():
-    """Kenneth 2026-09-04: Q_i = B - B*(0.10+0.18*(i-1)/2), not L."""
+def test_standing_build_is_five_equal_ad_no_panic():
+    layers = build_buy_layers(1.0, 0.8, play_usd=200)
+    assert len(layers) == 5
+    assert all(ly.role == "AD" and ly.share_pct == 20.0 and ly.usd == 40.0 for ly in layers)
+
+
+def test_archived_panic_prices_not_used_by_standing_build():
+    """Archived Q_i still computable; standing build must not attach panic layers."""
     from machine.size import panic_prices
     B = 0.0413
     qs = panic_prices(0.14753, B)
     assert abs(qs[0] - B * 0.90) < 1e-12
-    assert abs(qs[1] - B * 0.81) < 1e-12
-    assert abs(qs[2] - B * 0.72) < 1e-12
+    layers = build_buy_layers(0.14753, B, play_usd=200)
+    assert not any(ly.role == "panic" for ly in layers)
+    assert all(ly.price >= B - 1e-12 for ly in layers)

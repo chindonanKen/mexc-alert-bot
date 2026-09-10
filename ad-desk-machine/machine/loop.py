@@ -89,7 +89,7 @@ class DecisionLoop:
 
 
 def feed_names_from_engine(engine: Engine) -> list[str]:
-    """Prefer hung plan names; fall back to SYN/AGI/US. Omit killed / out."""
+    """Prefer hung plan names; fall back to ETH/XPIN/SYN. Omit killed / out."""
     reacting = [
         p.name
         for p in engine.plans.values()

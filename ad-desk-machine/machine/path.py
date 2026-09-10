@@ -61,6 +61,7 @@ class PathSnapshot:
     ad_met: bool = False
     board_panic: bool = False
     tagged_hung_ad_buy: bool = False
+    tagged_ad_layer: bool = False  # synonym used by older tests
 
 
 @dataclass
@@ -88,14 +89,14 @@ def evaluate_path(habit: PathHabit, snap: PathSnapshot) -> PathDecision:
             habit_match=True,
         )
 
-    if snap.tagged_hung_ad_buy:
+    if snap.tagged_hung_ad_buy or snap.tagged_ad_layer:
         return PathDecision(
             action="buy",
-            why="print tags hung AD buy layer — Path may buy",
+            why="tagged hung AD buy layer — Path may buy",
             habit_match=True,
         )
 
     return PathDecision(
         action="wait",
-        why="no hung AD buy layer tagged by print",
+        why="no hung AD buy layer tagged by print — price has not tagged a buy layer",
     )

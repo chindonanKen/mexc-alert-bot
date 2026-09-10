@@ -77,6 +77,14 @@ body.brain-map { padding: 0 24px 48px 24px; }
 #sheet-foot { margin-top: 24px; border-top: 1px solid var(--iron); padding-top: 14px;
   color: var(--mute); font-size: 11px; letter-spacing: .1em; cursor: pointer; }
 
+#research { max-width: 1320px; margin: 28px auto 0; background: var(--panel); border: 1px solid var(--brass);
+  border-radius: 4px; padding: 14px 16px; }
+#research .kicker { color: var(--brass); font-size: 11px; letter-spacing: .14em; margin-bottom: 6px; }
+#research .help { color: var(--mute); font-size: 12px; margin-bottom: 12px; }
+.research-card { border: 1px solid var(--brass); border-radius: 3px; padding: 10px 12px; margin-bottom: 8px; }
+.research-card .title { color: var(--ink); font-family: var(--mono); font-size: 12px; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 10px; }
+.research-card .body { color: var(--mute); font-size: 12px; }
 #upgrade { max-width: 1320px; margin: 28px auto 0; background: var(--panel); border: 1px solid var(--iron);
   border-radius: 4px; padding: 14px 16px; opacity: .88; }
 #upgrade .kicker { color: var(--mute); font-size: 11px; letter-spacing: .14em; margin-bottom: 6px; }

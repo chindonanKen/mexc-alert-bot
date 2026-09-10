@@ -15,6 +15,7 @@ def engine() -> Engine:
 
 @pytest.fixture
 def habit_play() -> dict:
+    # Standing 2026-09-10: five equal 20% AD layers, no panic.
     return {
         "id": "DEMO",
         "name": "DEMO",
@@ -26,20 +27,20 @@ def habit_play() -> dict:
         "habit_ready": True,
         "ad_top": 1.0,
         "ad_bottom": 0.8,
-        "play_usd": 100,
-        # Explicit layers so fill tests are deterministic
+        "play_usd": 200,
         "layers": [
-            {"idx": 1, "price": 0.86, "usd": 5, "share_pct": 5, "role": "AD"},
-            {"idx": 2, "price": 0.84, "usd": 7.5, "share_pct": 7.5, "role": "AD"},
-            {"idx": 3, "price": 0.82, "usd": 10, "share_pct": 10, "role": "AD"},
-            {"idx": 4, "price": 0.81, "usd": 12.5, "share_pct": 12.5, "role": "AD"},
-            {"idx": 5, "price": 0.80, "usd": 15, "share_pct": 15, "role": "AD"},
-            {"idx": 6, "price": 0.78, "usd": 10, "share_pct": 10, "role": "panic"},
-            {"idx": 7, "price": 0.762, "usd": 15, "share_pct": 15, "role": "panic"},
-            {"idx": 8, "price": 0.744, "usd": 25, "share_pct": 25, "role": "panic"},
+            {"idx": 1, "price": 0.81, "usd": 40, "share_pct": 20, "role": "AD"},
+            {"idx": 2, "price": 0.8075, "usd": 40, "share_pct": 20, "role": "AD"},
+            {"idx": 3, "price": 0.805, "usd": 40, "share_pct": 20, "role": "AD"},
+            {"idx": 4, "price": 0.8025, "usd": 40, "share_pct": 20, "role": "AD"},
+            {"idx": 5, "price": 0.80, "usd": 40, "share_pct": 20, "role": "AD"},
         ],
         "sell_layers": [
-            {"idx": 1, "price": 0.88, "usd": 20, "why": "usual_bounce"},
+            {"idx": 1, "price": 0.85, "usd": 40, "share_pct": 20, "why": "research_tape"},
+            {"idx": 2, "price": 0.88, "usd": 40, "share_pct": 20, "why": "research_tape"},
+            {"idx": 3, "price": 0.91, "usd": 40, "share_pct": 20, "why": "research_tape"},
+            {"idx": 4, "price": 0.94, "usd": 40, "share_pct": 20, "why": "research_tape"},
+            {"idx": 5, "price": 0.98, "usd": 40, "share_pct": 20, "why": "research_tape"},
         ],
     }
 
@@ -54,10 +55,13 @@ def sit_play() -> dict:
         "habit_ready": False,
         "ad_top": 2.0,
         "ad_bottom": 1.6,
-        "play_usd": 100,
+        "play_usd": 200,
         "layers": [
-            {"idx": 1, "price": 1.62, "usd": 5, "share_pct": 5, "role": "AD"},
-            {"idx": 5, "price": 1.60, "usd": 15, "share_pct": 15, "role": "AD"},
+            {"idx": 1, "price": 1.62, "usd": 40, "share_pct": 20, "role": "AD"},
+            {"idx": 2, "price": 1.615, "usd": 40, "share_pct": 20, "role": "AD"},
+            {"idx": 3, "price": 1.61, "usd": 40, "share_pct": 20, "role": "AD"},
+            {"idx": 4, "price": 1.605, "usd": 40, "share_pct": 20, "role": "AD"},
+            {"idx": 5, "price": 1.60, "usd": 40, "share_pct": 20, "role": "AD"},
         ],
         "sell_layers": [],
     }

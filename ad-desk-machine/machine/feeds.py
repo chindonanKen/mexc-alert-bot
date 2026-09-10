@@ -9,7 +9,7 @@ from typing import Any, Iterator
 import httpx
 
 MEXC_API = "https://api.mexc.com"
-DEFAULT_LIVE_NAMES = ("SYNUSDT", "AGIUSDT", "USUSDT")
+DEFAULT_LIVE_NAMES = ("ETHUSDT", "XPINUSDT", "SYNUSDT")
 
 
 @dataclass
@@ -280,6 +280,8 @@ class MexcLiveFeed:
     tf_limit: int = 30
     base_url: str = MEXC_API
     client: httpx.Client | None = None
+    # per-name (chosen_tf, faster_tf) — hang refreshes this
+    name_tfs: dict[str, tuple[str, str]] = field(default_factory=dict)
     # fingerprint includes 5m vol/reds so a 5m spike still emits a print
     _last_fingerprint: dict[str, tuple[Any, ...]] = field(default_factory=dict)
 

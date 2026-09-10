@@ -1,0 +1,110 @@
+{
+  "id": "ETHUSDT_1h",
+  "name": "ETHUSDT",
+  "chosen_tf": "1h",
+  "faster_tfs": [
+    "15m"
+  ],
+  "research_tape_layers": true,
+  "layer_method": "research_tape",
+  "freeze_tag": "kenneth_locked",
+  "tape_source": "Gauge clean pack Lock PASS 2026-09-10; paid filter reds_into_met>=1; Kenneth lock clean preferred three",
+  "paid_filter": "reds_into_met>=1",
+  "research_pnl_pct_on_200": 22.68,
+  "ad_top": 2484.12,
+  "ad_bottom": 2454.945456475584,
+  "ad_length": 29.174543524416134,
+  "play_usd": 200,
+  "watch_only": false,
+  "habit_ready": false,
+  "live_orders_allowed": false,
+  "layers": [
+    {
+      "idx": 1,
+      "price": 2456.4042,
+      "usd": 40.0,
+      "share_pct": 20.0,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 2,
+      "price": 2456.0395,
+      "usd": 40.0,
+      "share_pct": 20.0,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 3,
+      "price": 2455.6748,
+      "usd": 40.0,
+      "share_pct": 20.0,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 4,
+      "price": 2455.3101,
+      "usd": 40.0,
+      "share_pct": 20.0,
+      "role": "AD",
+      "status": "empty"
+    },
+    {
+      "idx": 5,
+      "price": 2454.9455,
+      "usd": 40.0,
+      "share_pct": 20.0,
+      "role": "AD",
+      "status": "empty"
+    }
+  ],
+  "sell_layers": [
+    {
+      "idx": 1,
+      "price": 2482.3455,
+      "usd": 40.0,
+      "share_pct": 20.0,
+      "why": "research_tape",
+      "status": "remaining",
+      "bounce_frac_of_L": 0.93917643
+    },
+    {
+      "idx": 2,
+      "price": 2486.2955,
+      "usd": 40.0,
+      "share_pct": 20.0,
+      "why": "research_tape",
+      "status": "remaining",
+      "bounce_frac_of_L": 1.07456843
+    },
+    {
+      "idx": 3,
+      "price": 2492.6455,
+      "usd": 40.0,
+      "share_pct": 20.0,
+      "why": "research_tape",
+      "status": "remaining",
+      "bounce_frac_of_L": 1.29222394
+    },
+    {
+      "idx": 4,
+      "price": 2497.4455,
+      "usd": 40.0,
+      "share_pct": 20.0,
+      "why": "research_tape",
+      "status": "remaining",
+      "bounce_frac_of_L": 1.45675093
+    },
+    {
+      "idx": 5,
+      "price": 2504.3955,
+      "usd": 40.0,
+      "share_pct": 20.0,
+      "why": "research_tape",
+      "status": "remaining",
+      "bounce_frac_of_L": 1.69497231
+    }
+  ]
+}

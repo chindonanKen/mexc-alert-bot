@@ -200,6 +200,26 @@ def parse_base_zone(zone: str) -> tuple[float, float] | None:
     return (mid - pad, mid + pad)
 
 
+def clip_map_high_to_nearest_unmet_base(
+    map_high: float | None,
+    bases: list[tuple[float, float]],
+    ad_bottom: float | None,
+) -> float | None:
+    """Nearest unmet base low above B and not entirely above map_high. No invent."""
+    if map_high is None or ad_bottom is None or not bases:
+        return None
+    lows: list[float] = []
+    for lo, hi in bases:
+        if hi <= ad_bottom:
+            continue
+        if lo > map_high:
+            continue
+        lows.append(lo)
+    if not lows:
+        return None
+    return min(lows)
+
+
 def load_exit_facts(
     source: str | Path | dict[str, Any] | None,
     *,
