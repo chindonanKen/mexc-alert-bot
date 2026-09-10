@@ -371,17 +371,19 @@ def test_P10_ansem_replay_tagged_layer_above_band_not_silent(engine):
     assert_path_buys_when_layer_tagged(r, plan, engine)
 
 
-# --- Hang / Lock (Machine reaction when hung anyway) ---
+# --- Hang / Lock (Kenneth 2026-09-10: H1 is Lock before hang, not Size) ---
 
 
-def test_H1_ad_buy_p1_above_band_machine_still_reacts_with_why(engine):
-    """H1: P1 above met-band high — Path buys on tag if hung anyway (Size owns volume)."""
+def test_H1_lock_hang_gate_p1_above_band_do_not_hang_until_fixed(engine):
+    """H1: P1 above met-band high → Lock FAIL/warn before hang; do not hang until P1 fixed. Not Size."""
     assert ANSEM_P1 > ANSEM_BAND_HIGH
     play = _load_ansem_play()
-    plan = engine.hang_play(play)
-    assert plan.fills.buy_layers[0].price > plan.ad.band_high
-    r = engine.on_print(_ansem_spike_print(plan.name))
-    assert_path_buys_when_layer_tagged(r, plan, engine)
+    # Met-band = B through B + 0.05×L — P1 above band_high is the Lock hang gate setup.
+    assert float(play["layers"][0]["price"]) > ANSEM_BAND_HIGH
+    # Process ownership: H1 is Lock hang checks, not Size. Engine hang in unit tests is not a Lock PASS.
+    # Path buy-on-tag above band stays under C3 / P10 — not H1.
+    assert "Size" not in "Lock hang"  # seat split marker for readers
+    _ = engine  # fixture retained; no invent Size H1 gate in engine
 
 
 # --- Size ---

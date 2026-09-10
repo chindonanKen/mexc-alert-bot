@@ -239,6 +239,9 @@ def _split_sections(book: str) -> dict[str, str]:
         for seat in ("Chart", "Path", "Size", "Fail", "Exit"):
             if title == seat or title.startswith(seat + " "):
                 out[seat] = body
+        # Kenneth 2026-09-10: H1 hang gate lives under Lock hang checks → Lock PASS neuron
+        if title.startswith("Lock hang"):
+            out["Lock PASS"] = body
     return out
 
 

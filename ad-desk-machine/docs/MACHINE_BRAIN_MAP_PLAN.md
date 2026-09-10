@@ -33,7 +33,7 @@ One stack of seats Kenneth already uses:
 | --- | --- | --- |
 | Chart | AD T/B/L, met band, met stays met | Locked Chart sentences; which engine modules read them |
 | Path | Buy when print tags hung AD buy layer, or board panic; wait otherwise | Path RECUT lock; wait/buy why shapes |
-| Size | Which buy layers fill; volume / grind wait; AD-side scale; panic shares | Size locks; H1 band note |
+| Size | Which buy layers fill; volume / grind wait; AD-side scale; panic shares | Size locks (no H1 — Lock hang owns H1) |
 | Fail | Break of AD → add panic half (not flatten) | Fail locks vs Path sit |
 | Exit | Sell into hung sells; unmet bases; remaining-cost / bar-high fills | Exit gate checklist; unmet_bases shape |
 | Feed | Prints price / low / reds / volume / 5m into Path and Size | Feed fields only — no decisions |
@@ -80,7 +80,8 @@ Process book stays ticker-free. Two books never mix.
 | --- | --- | --- |
 | Chart | `ad-desk-rules` Chart + full-history-first + discovery-first + HISTORY_TRUNCATED guard + Measure AD on MEXC | Sentence is in the Chart / history sections with a Kenneth date lock |
 | Path | `ad-desk-rules` Path (2026-09-07 Path RECUT) | Path RECUT sentence: buy when current price tags a hung AD buy layer; Size owns volume/grind; habit_ready / red-count buy gates deleted |
-| Size | `ad-desk-rules` Size (incl. H1 hang gate: P1 above met-band high → FAIL/warn before hang) | Dump-depth / panic Qi / 50-50 / volume-grind / H1 sentences are in Size |
+| Size | `ad-desk-rules` Size | Dump-depth / panic Qi / 50-50 / volume-grind sentences are in Size. H1 hang gate is Lock hang (not Size). |
+| Lock PASS | `ad-desk-rules` Lock hang checks (Kenneth 2026-09-10 H1 hang gate) | Before hang: Lock FAIL/warn if AD-side layers (esp. P1) not acceptably in/near met-band; do not hang until P1 fixed. Not Size. |
 | Fail | `ad-desk-rules` Fail | Break → add panic half; grind/short-copy fail lines are in Fail |
 | Exit | `ad-desk-rules` Exit + `ad-exit-strategy` Exit gate workflow | unmet_bases_above_B ready gate; clip map high to nearest unmet big base; Lock checklist FAIL rules |
 | Feed | Decision-owner table only (no trade rule book of its own) | Owners table says Feed prints fields; no decisions |

@@ -175,12 +175,6 @@
       "tag": "kenneth_locked",
       "rules": [
         {
-          "text": "Kenneth 2026-09-07 H1 hang gate (locked): If AD-side P1 sits above the met-band high (B + 0.05×L), Lock FAIL or warn before hang. Do not hang silent above-band buys. Machine react if hung anyway: sit/wait why naming P1 vs band (engine already PASS). No ticker.",
-          "tag": "kenneth_locked",
-          "kenneth_date": "2026-09-07",
-          "source": "ad-desk-rules process book"
-        },
-        {
           "text": "Kenneth 2026-09-07 base_land_warn Size pointer: when Chart marks base_land_warn, stay conservative (smaller size) until the warn lifts or another clean AD is preferred — detail in Chart; not a Fail rewrite.",
           "tag": "kenneth_locked",
           "kenneth_date": "2026-09-07",
@@ -477,7 +471,14 @@
       "owns": "",
       "does_not_own": "",
       "tag": "kenneth_locked",
-      "rules": [],
+      "rules": [
+        {
+          "text": "Kenneth 2026-09-10 H1 hang gate (locked): Met-band = B through B + 0.05×L. Before hang, Lock checks AD-side buy layers vs that band. Lock FAILs a hang if AD-side layers are not acceptably in/near the met-band approach — do not hang a broken set; Gauge fixes first. If only P1 is above the met-band high and P2–P5 are correct, Lock FAIL or warn on P1 and do not hang until P1 is fixed. This is Lock before hang, not Si…",
+          "tag": "kenneth_locked",
+          "kenneth_date": "2026-09-10",
+          "source": "ad-desk-rules process book"
+        }
+      ],
       "modules": [
         {
           "path": "process book / Lock seat",
@@ -718,7 +719,7 @@
       ]
     }
   ],
-  "regenerated_at": "2026-09-09 10:32 PHT",
+  "regenerated_at": "2026-09-10 08:59 PHT",
   "overlaps": [],
   "upgrades": [],
   "upgrade_help": "suggestions stay staff-proposed until Kenneth locks",
